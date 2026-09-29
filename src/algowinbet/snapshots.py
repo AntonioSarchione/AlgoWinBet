@@ -1,0 +1,327 @@
+"""Append-only snapshot storage with real observation timestamps (spec 8.3, 27.3).
+
+Every fetch is recorded: the raw response (gzip, deduplicated by hash) and the normalised rows derived from it. Quotes, lineups
+and fixtures are stored WITH the time we observed them, so that later backtests can replay exactly what was knowable at any
+cutoff. `SnapshotProvider` exposes the store through the ProviderAdapter contract: analysis never spends API requests.
+"""
+from __future__ import annotations
+
+import gzip
+import hashlib
+import json
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from .domain import (Fixture, FixtureStatus, HistoricalLineup, InformationEvent, LineupSnapshot, MatchResult, NewsItem,
+                     OddsQuote, Player, Position)
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS blobs(hash TEXT PRIMARY KEY, body BLOB);
+CREATE TABLE IF NOT EXISTS raw_requests(id INTEGER PRIMARY KEY, source TEXT, endpoint TEXT, params TEXT, fetched_at TEXT,
+  status INTEGER, hash TEXT, cost INTEGER);
+CREATE TABLE IF NOT EXISTS fixtures(id INTEGER PRIMARY KEY, source TEXT, fixture_id TEXT, competition TEXT, home TEXT, away TEXT,
+  kickoff TEXT, status TEXT, observed_at TEXT, raw_id INTEGER);
+CREATE INDEX IF NOT EXISTS ix_fix ON fixtures(fixture_id, observed_at);
+CREATE TABLE IF NOT EXISTS results(fixture_id TEXT PRIMARY KEY, source TEXT, competition TEXT, home TEXT, away TEXT, kickoff TEXT,
+  home_goals INTEGER, away_goals INTEGER, observed_at TEXT);
+CREATE TABLE IF NOT EXISTS quotes(id INTEGER PRIMARY KEY, fixture_id TEXT, market_code TEXT, selection TEXT, line REAL, line_key TEXT,
+  bookmaker TEXT, odds REAL, observed_at TEXT, kind TEXT, source TEXT, raw_id INTEGER,
+  UNIQUE(fixture_id, market_code, selection, line_key, bookmaker, observed_at, source));
+CREATE INDEX IF NOT EXISTS ix_q ON quotes(fixture_id, observed_at);
+CREATE TABLE IF NOT EXISTS lineups(id INTEGER PRIMARY KEY, fixture_id TEXT, team TEXT, status TEXT, formation TEXT, starters TEXT,
+  bench TEXT, published_at TEXT, observed_at TEXT, source TEXT, source_level TEXT, raw_id INTEGER,
+  UNIQUE(fixture_id, team, status, observed_at, source));
+CREATE TABLE IF NOT EXISTS players(id TEXT PRIMARY KEY, name TEXT, team TEXT, position TEXT, importance REAL, start_rate REAL,
+  source TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS news_items(id TEXT PRIMARY KEY, source TEXT, level TEXT, published_at TEXT, observed_at TEXT, text TEXT,
+  team TEXT, fixture_id TEXT);
+CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRIMARY KEY(source, period));
+"""
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _dt(s: str) -> datetime:
+    return datetime.fromisoformat(s)
+
+
+class BudgetExceeded(RuntimeError):
+    pass
+
+
+class SnapshotStore:
+    def __init__(self, path: str | Path):
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(str(path))
+        self.db.executescript(SCHEMA)
+
+    # ---------------------------------------------------------------- raw
+    def put_raw(self, source: str, endpoint: str, params: dict | None, status: int, body: bytes, fetched_at: datetime,
+                cost: int = 1) -> int:
+        h = hashlib.sha256(body).hexdigest()
+        self.db.execute("INSERT OR IGNORE INTO blobs(hash, body) VALUES(?,?)", (h, gzip.compress(body)))
+        cur = self.db.execute(
+            "INSERT INTO raw_requests(source,endpoint,params,fetched_at,status,hash,cost) VALUES(?,?,?,?,?,?,?)",
+            (source, endpoint, json.dumps(params or {}, sort_keys=True), _iso(fetched_at), status, h, cost))
+        self.db.commit()
+        return int(cur.lastrowid)
+
+    def raw_body(self, raw_id: int) -> bytes:
+        row = self.db.execute("SELECT b.body FROM raw_requests r JOIN blobs b ON b.hash=r.hash WHERE r.id=?", (raw_id,)).fetchone()
+        return gzip.decompress(row[0]) if row else b""
+
+    def last_raw(self, source: str, endpoint_like: str) -> tuple[int, dict] | None:
+        row = self.db.execute("SELECT id FROM raw_requests WHERE source=? AND endpoint LIKE ? AND status=200 ORDER BY id DESC LIMIT 1",
+                              (source, endpoint_like)).fetchone()
+        return (row[0], json.loads(self.raw_body(row[0]))) if row else None
+
+    # ---------------------------------------------------------- normalised
+    def save_fixtures(self, source: str, fixtures: list[Fixture], observed_at: datetime, raw_id: int | None = None) -> int:
+        n = 0
+        for f in fixtures:
+            last = self.db.execute("SELECT kickoff, status FROM fixtures WHERE fixture_id=? ORDER BY observed_at DESC, id DESC LIMIT 1",
+                                   (f.id,)).fetchone()
+            if last and last[0] == _iso(f.kickoff) and last[1] == f.status.value:
+                continue  # unchanged: keep history of CHANGES (postponement, status), not every poll
+            self.db.execute(
+                "INSERT INTO fixtures(source,fixture_id,competition,home,away,kickoff,status,observed_at,raw_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                (source, f.id, f.competition, f.home, f.away, _iso(f.kickoff), f.status.value, _iso(observed_at), raw_id))
+            n += 1
+        self.db.commit()
+        return n
+
+    def save_results(self, source: str, results: list[MatchResult], observed_at: datetime) -> int:
+        n = 0
+        for r in results:
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO results(fixture_id,source,competition,home,away,kickoff,home_goals,away_goals,observed_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (r.fixture_id, source, r.competition, r.home, r.away, _iso(r.kickoff), r.home_goals, r.away_goals, _iso(observed_at)))
+            n += cur.rowcount
+        self.db.commit()
+        return n
+
+    def save_quotes(self, source: str, quotes: list[OddsQuote], raw_id: int | None = None) -> int:
+        n = 0
+        for q in quotes:
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO quotes(fixture_id,market_code,selection,line,line_key,bookmaker,odds,observed_at,kind,source,raw_id) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (q.fixture_id, q.market_code, q.selection, q.line, "" if q.line is None else repr(q.line), q.bookmaker, q.odds,
+                 _iso(q.observed_at), q.kind, source, raw_id))
+            n += cur.rowcount
+        self.db.commit()
+        return n
+
+    def save_lineups(self, source: str, lineups: list[LineupSnapshot], raw_id: int | None = None) -> int:
+        n = 0
+        for l in lineups:
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO lineups(fixture_id,team,status,formation,starters,bench,published_at,observed_at,source,source_level,raw_id) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (l.fixture_id, l.team, l.status, l.formation, json.dumps(l.starters), json.dumps(l.bench), _iso(l.published_at),
+                 _iso(l.observed_at), source, l.source_level, raw_id))
+            n += cur.rowcount
+        self.db.commit()
+        return n
+
+    def save_players(self, source: str, players: list[Player], at: datetime) -> int:
+        for p in players:
+            old = self.db.execute("SELECT importance, start_rate FROM players WHERE id=?", (p.id,)).fetchone()
+            imp = old[0] if old and p.importance == 1.0 and old[0] is not None else p.importance  # keep hand-tuned values
+            sr = p.start_rate if p.start_rate is not None else (old[1] if old else None)
+            self.db.execute("INSERT OR REPLACE INTO players(id,name,team,position,importance,start_rate,source,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                            (p.id, p.name, p.team, p.position.value, imp, sr, source, _iso(at)))
+        self.db.commit()
+        return len(players)
+
+    def save_news(self, items: list[NewsItem]) -> int:
+        n = 0
+        for it in items:
+            h = hashlib.sha1(f"{it.source}|{it.published_at.isoformat()}|{it.text}".encode()).hexdigest()[:16]
+            cur = self.db.execute("INSERT OR IGNORE INTO news_items VALUES(?,?,?,?,?,?,?,?)",
+                                  (h, it.source, it.source_level, _iso(it.published_at), _iso(it.observed_at), it.text, it.team, it.fixture_id))
+            n += cur.rowcount
+        self.db.commit()
+        return n
+
+    # ------------------------------------------------------------- budget
+    def usage(self, source: str, period: str) -> int:
+        row = self.db.execute("SELECT used FROM api_usage WHERE source=? AND period=?", (source, period)).fetchone()
+        return int(row[0]) if row else 0
+
+    def add_usage(self, source: str, period: str, n: int) -> None:
+        self.db.execute("INSERT INTO api_usage(source,period,used) VALUES(?,?,?) ON CONFLICT(source,period) DO UPDATE SET used=used+?",
+                        (source, period, n, n))
+        self.db.commit()
+
+    def set_usage_at_least(self, source: str, period: str, used: int) -> None:
+        self.db.execute("INSERT INTO api_usage(source,period,used) VALUES(?,?,?) ON CONFLICT(source,period) DO UPDATE SET used=MAX(used,?)",
+                        (source, period, used, used))
+        self.db.commit()
+
+    def stats(self) -> dict[str, int]:
+        out = {}
+        for t in ("raw_requests", "fixtures", "results", "quotes", "lineups", "players", "news_items"):
+            out[t] = self.db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        return out
+
+
+class BudgetGuard:
+    """Persistent request counter. `charge()` raises BEFORE a request would exceed the limit (minus reserve)."""
+
+    def __init__(self, store: SnapshotStore, source: str, daily: int | None = None, monthly: int | None = None, reserve: int = 0,
+                 now=lambda: datetime.now(timezone.utc)):
+        self.store, self.source, self.daily, self.monthly, self.reserve, self.now = store, source, daily, monthly, reserve, now
+
+    def _periods(self) -> tuple[str, str]:
+        t = self.now()
+        return f"D{t:%Y-%m-%d}", f"M{t:%Y-%m}"
+
+    def used(self) -> tuple[int, int]:
+        d, m = self._periods()
+        return self.store.usage(self.source, d), self.store.usage(self.source, m)
+
+    def remaining(self) -> dict[str, int | None]:
+        ud, um = self.used()
+        return {"daily": None if self.daily is None else self.daily - self.reserve - ud,
+                "monthly": None if self.monthly is None else self.monthly - self.reserve - um}
+
+    def charge(self, n: int = 1) -> None:
+        rem = self.remaining()
+        for k, v in rem.items():
+            if v is not None and v < n:
+                raise BudgetExceeded(f"{self.source}: budget {k} esaurito (rimaste {max(v, 0)}, servono {n}, riserva {self.reserve})")
+        d, m = self._periods()
+        self.store.add_usage(self.source, d, n)
+        self.store.add_usage(self.source, m, n)
+
+    def sync_from_headers(self, limit: int | None, remaining: int | None, kind: str | None) -> None:
+        """Trust the provider's own counter when it says we used more than we counted."""
+        if limit is None or remaining is None:
+            return
+        d, m = self._periods()
+        used = limit - remaining
+        if kind and kind.upper().startswith("MONTH"):
+            self.store.set_usage_at_least(self.source, m, used)
+        else:
+            self.store.set_usage_at_least(self.source, d, used)
+
+
+class SnapshotProvider:
+    """ProviderAdapter over the store. Reads only: no API requests are ever made from here."""
+
+    name = "snapshots"
+
+    def __init__(self, store: SnapshotStore):
+        self.store = store
+
+    def _fx(self, row) -> Fixture:
+        return Fixture(id=row[0], competition=row[1], home=row[2], away=row[3], kickoff=_dt(row[4]),
+                       status=FixtureStatus(row[5]), provider=row[6])
+
+    def _latest_fixtures(self) -> list[Fixture]:
+        rows = self.store.db.execute(
+            "SELECT f.fixture_id,f.competition,f.home,f.away,f.kickoff,f.status,f.source FROM fixtures f "
+            "JOIN (SELECT fixture_id, MAX(id) mid FROM fixtures GROUP BY fixture_id) m ON f.id=m.mid").fetchall()
+        return [self._fx(r) for r in rows]
+
+    def list_competitions(self) -> list[str]:
+        rows = self.store.db.execute("SELECT competition FROM fixtures UNION SELECT competition FROM results").fetchall()
+        return sorted(r[0] for r in rows)
+
+    def list_fixtures(self, competitions, start, end) -> list[Fixture]:
+        return sorted((f for f in self._latest_fixtures()
+                       if (not competitions or f.competition in competitions) and start <= f.kickoff <= end), key=lambda f: f.kickoff)
+
+    def _results(self) -> list[MatchResult]:
+        rows = self.store.db.execute("SELECT fixture_id,competition,home,away,kickoff,home_goals,away_goals FROM results").fetchall()
+        return [MatchResult(fixture_id=r[0], competition=r[1], home=r[2], away=r[3], kickoff=_dt(r[4]), home_goals=r[5], away_goals=r[6])
+                for r in rows]
+
+    def list_history(self, competitions, until) -> list[MatchResult]:
+        return sorted((r for r in self._results() if (not competitions or r.competition in competitions) and r.available_at <= until),
+                      key=lambda r: r.kickoff)
+
+    def result_of(self, fixture_id: str) -> MatchResult | None:
+        return next((r for r in self._results() if r.fixture_id == fixture_id), None)
+
+    def get_quotes(self, fixture_id: str) -> list[OddsQuote]:
+        rows = self.store.db.execute(
+            "SELECT market_code,selection,line,bookmaker,odds,observed_at,kind FROM quotes WHERE fixture_id=? ORDER BY observed_at",
+            (fixture_id,)).fetchall()
+        return [OddsQuote(fixture_id=fixture_id, market_code=r[0], selection=r[1], line=r[2], bookmaker=r[3], odds=r[4],
+                          observed_at=_dt(r[5]), kind=r[6]) for r in rows]
+
+    def list_markets(self, fixture_id: str) -> set[str]:
+        return {q.market_code for q in self.get_quotes(fixture_id)}
+
+    def get_events(self, fixture_id: str) -> list[InformationEvent]:
+        return []
+
+    def _lineup(self, r) -> LineupSnapshot:
+        return LineupSnapshot(fixture_id=r[0], team=r[1], status=r[2], formation=r[3], starters=json.loads(r[4]), bench=json.loads(r[5]),
+                              published_at=_dt(r[6]), observed_at=_dt(r[7]), source_level=r[8])
+
+    def get_lineups(self, fixture_id: str) -> list[LineupSnapshot]:
+        rows = self.store.db.execute(
+            "SELECT fixture_id,team,status,formation,starters,bench,published_at,observed_at,source_level FROM lineups "
+            "WHERE fixture_id=? ORDER BY observed_at", (fixture_id,)).fetchall()
+        return [self._lineup(r) for r in rows]
+
+    def list_lineup_history(self, competition: str, until: datetime) -> list[HistoricalLineup]:
+        fids = {r.fixture_id for r in self.list_history([competition], until)}
+        out = []
+        for fid in fids:
+            best: dict[str, LineupSnapshot] = {}
+            for l in self.get_lineups(fid):
+                if l.status == "confirmed":
+                    best[l.team] = l  # latest confirmed per team
+            out += [HistoricalLineup(fixture_id=fid, team=t, starters=l.starters) for t, l in best.items()]
+        return out
+
+    def list_players(self, competition: str) -> list[Player]:
+        teams = {t for f in self._latest_fixtures() if f.competition == competition for t in (f.home, f.away)}
+        teams |= {t for r in self._results() if r.competition == competition for t in (r.home, r.away)}
+        rows = self.store.db.execute("SELECT id,name,team,position,importance,start_rate FROM players").fetchall()
+        return [Player(id=r[0], name=r[1], team=r[2], position=Position(r[3]), importance=r[4] or 1.0, start_rate=r[5])
+                for r in rows if r[2] in teams]
+
+    def get_news_items(self, fixture_id: str) -> list[NewsItem]:
+        fx = next((f for f in self._latest_fixtures() if f.id == fixture_id), None)
+        if not fx:
+            return []
+        rows = self.store.db.execute(
+            "SELECT source,level,published_at,observed_at,text,team,fixture_id FROM news_items WHERE fixture_id=? OR team IN (?,?)",
+            (fixture_id, fx.home, fx.away)).fetchall()
+        return [NewsItem(source=r[0], source_level=r[1], published_at=_dt(r[2]), observed_at=_dt(r[3]), text=r[4], team=r[5],
+                         fixture_id=r[6]) for r in rows]
+
+
+class MergedProvider:
+    """Live/collected data from `primary` + extra history (e.g. multi-season CSV) for the goal model."""
+
+    def __init__(self, primary, history_extra):
+        self.primary, self.extra = primary, history_extra
+        self.name = f"{primary.name}+{history_extra.name}"
+
+    def __getattr__(self, item):
+        if item in ("primary", "extra", "name"):
+            raise AttributeError(item)
+        return getattr(self.primary, item)
+
+    def list_competitions(self) -> list[str]:
+        return sorted(set(self.primary.list_competitions()) | set(self.extra.list_competitions()))
+
+    def list_history(self, competitions, until):
+        seen, out = set(), []
+        for r in list(self.primary.list_history(competitions, until)) + list(self.extra.list_history(competitions, until)):
+            k = (r.home, r.away, r.kickoff.date())
+            if k not in seen:
+                seen.add(k)
+                out.append(r)
+        return sorted(out, key=lambda r: r.kickoff)

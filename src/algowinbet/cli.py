@@ -11,7 +11,11 @@ from .config import Config
 from .domain import NewsItem, Opportunity
 from .engine import AnalysisResult, Engine
 from .information import RuleBasedParser
+from .collector import GoalCollector
+from .names import TeamNames
 from .providers import FootballDataCSV, ManualInfoOverlay, ManualOverlay, MockProvider
+from .providers.goalapi import GoalApiClient, GoalApiError, shape_summary
+from .snapshots import BudgetExceeded, BudgetGuard, MergedProvider, SnapshotProvider, SnapshotStore
 from .store import Store
 
 
@@ -22,7 +26,11 @@ def _provider(a):
     elif a.provider == "csv":
         if not a.csv:
             sys.exit("--csv richiesto (uno o più file football-data.co.uk, scaricati a mano)")
-        p = FootballDataCSV(a.csv)
+        p = FootballDataCSV(a.csv, TeamNames.load(a.aliases))
+    elif a.provider == "snapshots":
+        p = SnapshotProvider(SnapshotStore(a.db))
+        if a.csv:  # multi-season history from CSV + fixtures/quotes/lineups collected forward
+            p = MergedProvider(p, FootballDataCSV(a.csv, TeamNames.load(a.aliases)))
     else:
         sys.exit(f"provider sconosciuto {a.provider}")
     if a.manual:
@@ -231,6 +239,84 @@ def cmd_stale_edge(a) -> None:
     print("  CLV > 0 = il prezzo preso era migliore della chiusura. Serve un campione grande: un ROI positivo con poche scommesse è rumore.")
 
 
+def _goal_client(a, store: SnapshotStore) -> GoalApiClient:
+    budget = BudgetGuard(store, "goal-api", daily=a.daily_limit, monthly=None, reserve=a.reserve)
+    try:
+        return GoalApiClient(store=store, budget=budget)
+    except GoalApiError as e:
+        sys.exit(str(e))
+
+
+def cmd_goal_probe(a) -> None:
+    store = SnapshotStore(a.db)
+    client = _goal_client(a, store)
+    params = dict(kv.split("=", 1) for kv in a.param or [])
+    try:
+        env = client.get(a.path, params)
+    except (GoalApiError, BudgetExceeded) as e:
+        sys.exit(f"errore: {e}")
+    print(f"OK {a.path} {params} — 1 richiesta. Rate limit: {client.last_rate}. Risposta salvata in {a.db} (raw_requests).")
+    for line in shape_summary(env.get("data"))[: a.max_lines]:
+        print("  " + line)
+    if env.get("pagination"):
+        print(f"  pagination: {env['pagination']}")
+
+
+def cmd_goal_leagues(a) -> None:
+    store = SnapshotStore(a.db)
+    client = _goal_client(a, store)
+    try:
+        env = client.get("/leagues", {"search": a.search, "limit": 20})
+    except (GoalApiError, BudgetExceeded) as e:
+        sys.exit(f"errore: {e}")
+    for r in env.get("data") or []:
+        print(f"  id={r.get('id') or r.get('leagueId')}  {r.get('name')}  ({r.get('country') or r.get('countryName') or '-'})")
+
+
+def cmd_goal_collect(a) -> None:
+    store = SnapshotStore(a.db)
+    client = _goal_client(a, store)
+    col = GoalCollector(client, store, a.leagues, TeamNames.load(a.aliases))
+    if a.dry_run:
+        print(f"[dry-run] modo {a.mode}: circa {col.plan(a.mode)} richieste; budget residuo {client.budget.remaining()}")
+        return
+    if a.mode == "fixtures":
+        st = col.sync_fixtures(a.days)
+    elif a.mode == "results":
+        st = col.sync_results(a.days)
+    elif a.mode == "lineups":
+        st = col.sync_lineups(a.window, a.max_fixtures)
+    elif a.mode == "odds":
+        st = col.sync_odds(a.hours, a.max_fixtures or 20)
+    else:
+        st = col.sync_players()
+    print(f"collect {st.mode}: {st.requests} richieste, salvati {st.saved or '{}'}; budget residuo {client.budget.remaining()}")
+    for x in st.skipped[:10]:
+        print(f"  = saltato: {x}")
+    for e in st.errors:
+        print(f"  ! {e}")
+    r = st.report
+    if r.gaps or r.unmapped_markets:
+        print("  Lacune di mapping (i payload grezzi sono salvati: correggi il mapper e rilancia senza altre richieste):")
+        for k, v in sorted(r.gaps.items(), key=lambda kv: -kv[1])[:10]:
+            print(f"    {v}x {k}")
+        if r.unmapped_markets:
+            print("    mercati non mappati: " + ", ".join(f"{k} ({v})" for k, v in sorted(r.unmapped_markets.items(), key=lambda kv: -kv[1])[:15]))
+    if a.csv:
+        miss = col.name_check(FootballDataCSV(a.csv, TeamNames.load(a.aliases)))
+        if miss:
+            print(f"  ! nomi squadra senza storico (aggiungi alias in {a.aliases}): {sorted(miss)}")
+
+
+def cmd_snapshots_stats(a) -> None:
+    store = SnapshotStore(a.db)
+    print(f"Snapshot store {a.db}:")
+    for k, v in store.stats().items():
+        print(f"  {k:<14}{v}")
+    for r in store.db.execute("SELECT source, period, used FROM api_usage ORDER BY period DESC LIMIT 6").fetchall():
+        print(f"  uso API {r[0]} {r[1]}: {r[2]}")
+
+
 def cmd_backtest(a) -> None:
     cfg = _cfg(a)
     prov = _provider(a)
@@ -260,7 +346,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
-        sp.add_argument("--provider", default="mock", choices=["mock", "csv"])
+        sp.add_argument("--provider", default="mock", choices=["mock", "csv", "snapshots"])
+        sp.add_argument("--db", default="data/snapshots.db", help="database snapshot (provider snapshots / comando goal)")
+        sp.add_argument("--aliases", default="configs/team_aliases.json", help="alias nomi squadre/competizioni tra fonti diverse")
         sp.add_argument("--csv", nargs="*", help="file CSV football-data.co.uk (risultati e/o fixtures)")
         sp.add_argument("--manual", help="JSON con quote inserite a mano (es. Sisal)")
         sp.add_argument("--info", help="JSON con rose, formazioni e notizie copiate da fonti ufficiali")
@@ -323,6 +411,38 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--minutes-after-lineup", type=int, default=5)
     se.add_argument("--max-rounds", type=int)
     se.set_defaults(fn=cmd_stale_edge)
+    g = sub.add_parser("goal", help="GOAL API: probe | leagues | collect (chiave in GOALAPI_KEY)")
+    gs = g.add_subparsers(dest="goal_cmd", required=True)
+
+    def gcommon(sp):
+        sp.add_argument("--db", default="data/snapshots.db")
+        sp.add_argument("--aliases", default="configs/team_aliases.json")
+        sp.add_argument("--daily-limit", type=int, default=1000, help="richieste/giorno del piano (free: 1000)")
+        sp.add_argument("--reserve", type=int, default=50, help="richieste tenute di scorta")
+    pr = gs.add_parser("probe", help="1 richiesta a un endpoint: salva il grezzo e mostra la struttura dei campi")
+    gcommon(pr)
+    pr.add_argument("path", help="es. /fixtures/date/2026-09-30")
+    pr.add_argument("--param", action="append", help="k=v (ripetibile)")
+    pr.add_argument("--max-lines", type=int, default=80)
+    pr.set_defaults(fn=cmd_goal_probe)
+    lg = gs.add_parser("leagues", help="cerca gli id delle leghe")
+    gcommon(lg)
+    lg.add_argument("search")
+    lg.set_defaults(fn=cmd_goal_leagues)
+    co = gs.add_parser("collect", help="raccoglie dati in avanti nello snapshot store (idempotente, budget-aware)")
+    gcommon(co)
+    co.add_argument("--mode", required=True, choices=["fixtures", "results", "lineups", "odds", "players"])
+    co.add_argument("--leagues", nargs="+", required=True, help="id lega GOAL (vedi: goal leagues Serie A)")
+    co.add_argument("--days", type=int, default=7)
+    co.add_argument("--window", type=int, default=95, help="lineups: minuti prima del calcio d'inizio")
+    co.add_argument("--hours", type=int, default=48, help="odds: ore in avanti")
+    co.add_argument("--max-fixtures", type=int)
+    co.add_argument("--csv", nargs="*", help="storico CSV per il controllo dei nomi squadra")
+    co.add_argument("--dry-run", action="store_true")
+    co.set_defaults(fn=cmd_goal_collect)
+    sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
+    sn.add_argument("--db", default="data/snapshots.db")
+    sn.set_defaults(fn=cmd_snapshots_stats)
     iv = sub.add_parser("info-value", help="quanto migliorano le stime notizie e formazioni (walk-forward)")
     common(iv)
     iv.add_argument("--max-rounds", type=int)

@@ -49,6 +49,27 @@ algowinbet info-value --provider mock --mock-effect-scale 3    # le info miglior
 algowinbet stale-edge --provider mock                          # scommesse quando la quota non si è ancora mossa dopo l'XI
 ```
 
+### Snapshot storage e GOAL API (M3)
+Lo storico delle quote/formazioni non è ottenibile a posteriori gratis: si raccoglie **in avanti**, con timestamp reali di osservazione
+(`observed_at` = momento della richiesta), in `data/snapshots.db` (payload grezzi gzip deduplicati + righe normalizzate).
+
+```bash
+export GOALAPI_KEY=...            # la chiave non va mai nel repo né come argomento
+python -m algowinbet.cli goal leagues "Serie A"                      # trova l'id lega
+python -m algowinbet.cli goal probe /leagues/ID/fixtures --param limit=2   # 1 richiesta: salva il grezzo e mostra i campi reali
+python -m algowinbet.cli goal collect --mode fixtures --leagues ID --dry-run
+python -m algowinbet.cli goal collect --mode lineups --leagues ID --window 95   # da schedulare ogni 10-15 min (Task Scheduler)
+python -m algowinbet.cli snapshots                                   # statistiche e uso API
+python -m algowinbet.cli analyze --provider snapshots --csv storico.csv ...
+```
+Modi: `fixtures`, `results`, `lineups` (solo partite entro la finestra, salta le XI già confermate), `odds`, `players`.
+Budget: contatore locale giornaliero con riserva, sincronizzato con gli header `X-RateLimit-*`; `429` gestiti con `Retry-After`.
+
+**Verificato dalla documentazione GOAL**: auth Bearer, envelope, paginazione, header rate-limit, codici d'errore, enum stati, endpoint.
+**Assunto (non documentato)**: gli schemi delle righe lineups/odds/players. I mapper sono tolleranti e contano ciò che non riescono a
+mappare (`Lacune di mapping`); i payload grezzi restano salvati, quindi dopo il primo `goal probe` reale si corregge il mapper e si rielabora senza altre richieste.
+Alias nomi squadra tra fonti: `configs/team_aliases.json` (il collector segnala i nomi senza storico).
+
 ### Quote Sisal
 Sisal non ha API pubbliche e lo scraping viola i suoi termini: inserisci le quote a mano in un JSON
 (formato in `src/algowinbet/providers/manual.py`) e passalo con `--manual quote.json`; viene unito alle altre fonti.

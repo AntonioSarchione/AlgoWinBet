@@ -45,7 +45,8 @@ def _f(row: dict, key: str) -> float | None:
 class FootballDataCSV:
     name = "football-data.co.uk"
 
-    def __init__(self, paths: list[str | Path]):
+    def __init__(self, paths: list[str | Path], names=None):
+        self._canon = names.canon if names is not None else (lambda n: n)
         self._fixtures: dict[str, Fixture] = {}
         self._results: dict[str, MatchResult] = {}
         self._quotes: dict[str, list[OddsQuote]] = {}
@@ -61,15 +62,16 @@ class FootballDataCSV:
                 ko = _parse_dt(row["Date"], row.get("Time"))
                 div = row.get("Div", path.stem)
                 comp = DIV_NAMES.get(div, div)
-                fid = f"fd-{div}-{ko:%Y%m%d}-{row['HomeTeam']}-{row['AwayTeam']}".replace(" ", "_")
+                home, away = self._canon(row["HomeTeam"]), self._canon(row["AwayTeam"])
+                fid = f"fd-{div}-{ko:%Y%m%d}-{home}-{away}".replace(" ", "_")
                 finished = row.get("FTHG") not in (None, "")
                 self._fixtures[fid] = Fixture(
-                    id=fid, competition=comp, home=row["HomeTeam"], away=row["AwayTeam"], kickoff=ko,
+                    id=fid, competition=comp, home=home, away=away, kickoff=ko,
                     status=FixtureStatus.FINISHED if finished else FixtureStatus.SCHEDULED, provider=self.name,
                 )
                 if finished:
                     self._results[fid] = MatchResult(
-                        fixture_id=fid, competition=comp, home=row["HomeTeam"], away=row["AwayTeam"], kickoff=ko,
+                        fixture_id=fid, competition=comp, home=home, away=away, kickoff=ko,
                         home_goals=int(float(row["FTHG"])), away_goals=int(float(row["FTAG"])),
                     )
                 qs: list[OddsQuote] = []
