@@ -6,3 +6,4 @@ __pycache__/
 .venv/
 configs/calibration.json
 data/
+*.zip

@@ -401,3 +401,29 @@ def test_lineups_with_goal_field_names_ASSUMED_row_shape():
     lus = GoalMapper(NAMES).lineups(data, _fx(), NOW)
     assert [(l.team, l.status, l.formation, len(l.starters), len(l.bench)) for l in lus] == [("Inter", "confirmed", "3-5-2", 11, 5), ("Empoli", "confirmed", "4-3-3", 11, 0)]
     assert lus[0].starters[0] == "goal:h0"
+
+
+# Real /fixtures/{id}/statistics payload (finished match, captured 2026-09-29).
+def _real_stats():
+    import pathlib
+    return json.loads((pathlib.Path(__file__).parent / "data" / "goal_statistics.json").read_text())
+
+
+def test_real_statistics_payload_maps_and_resolves_duplicates():
+    m = GoalMapper(NAMES)
+    st = {(s.period, s.stat): (s.home, s.away) for s in m.stats(_real_stats(), _fx(), NOW)}
+    assert st[("FT", "ball_possession")] == (69.0, 31.0)  # the 0%/0% duplicate is dropped
+    assert st[("FT", "corners")] == (2.0, 3.0) and st[("FT", "yellow_cards")] == (0.0, 1.0) and st[("FT", "shots_total")] == (10.0, 6.0)
+    assert ("FT", "red_cards") not in st and not any(p == "2H" for p, _ in st) and not m.report.gaps
+
+
+def test_stats_collection_only_for_finished_matches_without_stats():
+    store = SnapshotStore(":memory:")
+    from algowinbet.domain import MatchResult
+    r = MatchResult(fixture_id="goal:77", competition="Serie A", home="Inter", away="Empoli", kickoff=NOW - timedelta(hours=20),
+                    home_goals=1, away_goals=0)
+    store.save_results("goal-api", [r], NOW - timedelta(hours=17))
+    col, t = _collector({"/fixtures/77/statistics": [ok({**_real_stats(), "hasStatistics": True})]}, store)
+    st = col.sync_stats(days_back=2)
+    assert st.requests == 1 and st.saved["stats"] > 20 and store.stats_of("goal:77")["corners"] == (2.0, 3.0)
+    assert col.sync_stats(days_back=2).requests == 0  # already stored

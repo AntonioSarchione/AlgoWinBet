@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
 
-from ..domain import Fixture, FixtureStatus, LineupSnapshot, MatchResult, OddsQuote, Player, Position
+from ..domain import Fixture, FixtureStatus, LineupSnapshot, MatchResult, MatchStat, OddsQuote, Player, Position
 from ..names import TeamNames
 from ..snapshots import BudgetExceeded, BudgetGuard, SnapshotStore
 
@@ -385,6 +385,42 @@ class GoalMapper:
                         self.report.good("quote")
                         out.append(OddsQuote(fixture_id=fixture.id, market_code=code, selection=sel[0], line=sel[1], bookmaker=book,
                                              odds=price_f, observed_at=observed_at, kind="current", source_level="B"))
+        return out
+
+    # -------------------------------------------------------------- stats
+    _PERIODS = {"fullTime": "FT", "firstHalf": "1H", "secondHalf": "2H"}
+
+    @staticmethod
+    def _num(v: Any) -> float | None:
+        try:
+            return float(str(v).strip().rstrip("%"))
+        except (TypeError, ValueError):
+            return None
+
+    def stats(self, data: Any, fixture: Fixture, observed_at: datetime) -> list[MatchStat]:
+        """Real shape (verified 2026-09-29): {match: {fullTime|firstHalf|secondHalf: [{type, home, away}]}, hasStatistics}.
+        Some types appear twice (e.g. 'Ball Possession' 0%/0% then 69%/31%): keep the entry with the larger total.
+        A stat that is absent is unknown, never zero (e.g. Red Cards is only listed when there is one)."""
+        match = pick(data, "match") if isinstance(data, dict) else None
+        if not isinstance(match, dict):
+            self.report.gap("stats: oggetto match assente")
+            return []
+        out: list[MatchStat] = []
+        for key, period in self._PERIODS.items():
+            best: dict[str, tuple[float | None, float | None]] = {}
+            for it in match.get(key) or []:
+                name = re.sub(r"[^a-z0-9]+", "_", str(it.get("type") or "").strip().lower()).strip("_")
+                h, a = self._num(it.get("home")), self._num(it.get("away"))
+                if not name or (h is None and a is None):
+                    self.report.gap(f"stats: riga non leggibile {it}")
+                    continue
+                old = best.get(name)
+                if old is None or (h or 0) + (a or 0) > (old[0] or 0) + (old[1] or 0):
+                    best[name] = (h, a)
+            for name, (h, a) in best.items():
+                out.append(MatchStat(fixture_id=fixture.id, period=period, stat=name, home=h, away=a, observed_at=observed_at))
+        if out:
+            self.report.good("stats")
         return out
 
     # ------------------------------------------------------------ players

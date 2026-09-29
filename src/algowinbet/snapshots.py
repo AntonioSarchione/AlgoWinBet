@@ -13,7 +13,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .domain import (Fixture, FixtureStatus, HistoricalLineup, InformationEvent, LineupSnapshot, MatchResult, NewsItem,
+from .domain import (Fixture, FixtureStatus, HistoricalLineup, InformationEvent, LineupSnapshot, MatchResult, MatchStat, NewsItem,
                      OddsQuote, Player, Position)
 
 SCHEMA = """
@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS players(id TEXT PRIMARY KEY, name TEXT, team TEXT, po
   source TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS news_items(id TEXT PRIMARY KEY, source TEXT, level TEXT, published_at TEXT, observed_at TEXT, text TEXT,
   team TEXT, fixture_id TEXT);
+CREATE TABLE IF NOT EXISTS match_stats(fixture_id TEXT, period TEXT, stat TEXT, home REAL, away REAL, observed_at TEXT, source TEXT,
+  raw_id INTEGER, PRIMARY KEY(fixture_id, period, stat, source));
 CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRIMARY KEY(source, period));
 """
 
@@ -149,6 +151,18 @@ class SnapshotStore:
         self.db.commit()
         return n
 
+    def save_stats(self, source: str, stats: list[MatchStat], raw_id: int | None = None) -> int:
+        """Post-match figures: the latest fetch replaces the previous one (providers correct stats after the final whistle)."""
+        for s in stats:
+            self.db.execute("INSERT OR REPLACE INTO match_stats(fixture_id,period,stat,home,away,observed_at,source,raw_id) VALUES(?,?,?,?,?,?,?,?)",
+                            (s.fixture_id, s.period, s.stat, s.home, s.away, _iso(s.observed_at), source, raw_id))
+        self.db.commit()
+        return len(stats)
+
+    def stats_of(self, fixture_id: str, period: str = "FT") -> dict[str, tuple[float | None, float | None]]:
+        rows = self.db.execute("SELECT stat, home, away FROM match_stats WHERE fixture_id=? AND period=?", (fixture_id, period)).fetchall()
+        return {r[0]: (r[1], r[2]) for r in rows}
+
     # ------------------------------------------------------------- budget
     def usage(self, source: str, period: str) -> int:
         row = self.db.execute("SELECT used FROM api_usage WHERE source=? AND period=?", (source, period)).fetchone()
@@ -166,7 +180,7 @@ class SnapshotStore:
 
     def stats(self) -> dict[str, int]:
         out = {}
-        for t in ("raw_requests", "fixtures", "results", "quotes", "lineups", "players", "news_items"):
+        for t in ("raw_requests", "fixtures", "results", "quotes", "lineups", "players", "news_items", "match_stats"):
             out[t] = self.db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
         return out
 

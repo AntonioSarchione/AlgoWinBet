@@ -52,7 +52,7 @@ class GoalCollector:
     def plan(self, mode: str, n_fixtures: int = 10) -> int:
         """Rough request estimate for --dry-run."""
         lg = len(self.league_ids)
-        return {"fixtures": lg, "results": lg, "lineups": n_fixtures, "odds": n_fixtures, "players": lg * 21}.get(mode, lg)
+        return {"fixtures": lg, "results": lg, "lineups": n_fixtures, "odds": n_fixtures, "stats": n_fixtures, "players": lg * 21}.get(mode, lg)
 
     # --------------------------------------------------------------- modes
     def sync_fixtures(self, days_ahead: int = 7) -> CollectStats:
@@ -143,6 +143,30 @@ class GoalCollector:
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
                 qs = self.mapper.odds(env.get("data"), f, env["_fetched_at"])
                 st.add("quotes", self.store.save_quotes(SOURCE, qs, raw_id))
+        self._run(st, work)
+        st.report = self.mapper.report
+        return st
+
+    def sync_stats(self, days_back: int = 3, max_fixtures: int = 30) -> CollectStats:
+        """Team statistics of finished matches not yet stored (1 request per match, run after results)."""
+        st = CollectStats("stats")
+        t = self.now()
+
+        def work():
+            rows = self.store.db.execute(
+                "SELECT r.fixture_id FROM results r WHERE r.kickoff >= ? AND r.kickoff <= ? AND r.fixture_id LIKE 'goal:%' "
+                "AND NOT EXISTS (SELECT 1 FROM match_stats s WHERE s.fixture_id = r.fixture_id) ORDER BY r.kickoff DESC",
+                ((t - timedelta(days=days_back)).isoformat(), t.isoformat())).fetchall()
+            for (fid,) in rows[:max_fixtures]:
+                res = self.provider.result_of(fid)
+                fx = Fixture(id=fid, competition=res.competition, home=res.home, away=res.away, kickoff=res.kickoff, provider=SOURCE,
+                             provider_event_id=fid.split(":", 1)[1])
+                env = self.client.get(f"/fixtures/{fx.provider_event_id}/statistics")
+                raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
+                if isinstance(env.get("data"), dict) and env["data"].get("hasStatistics") is False:
+                    st.skipped.append(f"{fx.home}-{fx.away}: statistiche non ancora disponibili")
+                    continue
+                st.add("stats", self.store.save_stats(SOURCE, self.mapper.stats(env.get("data"), fx, env["_fetched_at"]), raw_id))
         self._run(st, work)
         st.report = self.mapper.report
         return st

@@ -287,6 +287,8 @@ def cmd_goal_collect(a) -> None:
         st = col.sync_results(a.days)
     elif a.mode == "lineups":
         st = col.sync_lineups(a.window, a.max_fixtures)
+    elif a.mode == "stats":
+        st = col.sync_stats(a.days, a.max_fixtures or 30)
     elif a.mode == "odds":
         st = col.sync_odds(a.hours, a.max_fixtures or 20)
     else:
@@ -445,7 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
     lg.set_defaults(fn=cmd_goal_leagues)
     co = gs.add_parser("collect", help="raccoglie dati in avanti nello snapshot store (idempotente, budget-aware)")
     gcommon(co)
-    co.add_argument("--mode", required=True, choices=["fixtures", "results", "lineups", "odds", "players"])
+    co.add_argument("--mode", required=True, choices=["fixtures", "results", "lineups", "odds", "stats", "players"])
     co.add_argument("--leagues", nargs="+", required=True, help="id lega GOAL (vedi: goal leagues Serie A)")
     co.add_argument("--days", type=int, default=7)
     co.add_argument("--window", type=int, default=95, help="lineups: minuti prima del calcio d'inizio")

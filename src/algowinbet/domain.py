@@ -73,6 +73,16 @@ class SelectionRef(BaseModel, frozen=True):
         return describe(self)
 
 
+class MatchStat(BaseModel):
+    """One team-level statistic of a match (corners, shots, cards...), per period: FT, 1H, 2H."""
+    fixture_id: str
+    period: str
+    stat: str
+    home: float | None = None
+    away: float | None = None
+    observed_at: datetime
+
+
 class OddsQuote(BaseModel):
     fixture_id: str
     market_code: str
