@@ -181,6 +181,9 @@ class MappingReport:
     def good(self, kind: str) -> None:
         self.ok[kind] = self.ok.get(kind, 0) + 1
 
+    def note(self, what: str) -> None:  # expected non-data state, not a mapping gap
+        self.good(what)
+
     def gap(self, reason: str) -> None:
         self.gaps[reason] = self.gaps.get(reason, 0) + 1
 
@@ -281,7 +284,7 @@ class GoalMapper:
     def _player_id(self, p: dict | str, team: str) -> str | None:
         if isinstance(p, str):
             return f"{team}::{p}"
-        name = pick(p, "name", "player.name", "playerName", "fullName")
+        name = pick(p, "lineupPlayer", "name", "player.name", "playerName", "fullName")
         pid = pick(p, "playerId", "player.id", "id")
         if name is None and pid is None:
             return None
@@ -290,6 +293,7 @@ class GoalMapper:
     def lineups(self, data: Any, fixture: Fixture, observed_at: datetime) -> list[LineupSnapshot]:
         """Expects data with a home-side and away-side object (keys home/homeTeam/...), each holding a starters list."""
         out: list[LineupSnapshot] = []
+        data_has_lineups = data.get("hasLineups") if isinstance(data, dict) else None
         if isinstance(data, list) and len(data) == 2:  # [home, away]
             sides = {"home": data[0], "away": data[1]}
         elif isinstance(data, dict):
@@ -302,17 +306,20 @@ class GoalMapper:
             if not isinstance(s, dict):
                 self.report.gap(f"lineup: lato {side} non trovato")
                 continue
-            starters = self._players_of(s, "startXI", "startingXI", "starters", "startingLineup", "lineup", "players")
+            if data_has_lineups is False and not self._players_of(s, "startingLineups"):
+                self.report.note("lineup: non ancora pubblicate (hasLineups=false)")
+                continue
+            starters = self._players_of(s, "startingLineups", "startXI", "startingXI", "starters", "startingLineup", "lineup", "players")
             ids = [i for i in (self._player_id(p, team) for p in starters) if i]
             if len(ids) != 11:
                 self.report.gap(f"lineup: {len(ids)} titolari trovati (attesi 11)")
                 continue
             bench = [i for i in (self._player_id(p, team) for p in self._players_of(s, "substitutes", "bench", "subs")) if i]
             status_raw = str(pick(s, "status", "lineupStatus", "confirmed") or "").lower()
-            status = "confirmed" if status_raw in ("confirmed", "official", "true", "1") or pick(s, "isConfirmed") is True else "probable"
+            status = "confirmed" if data_has_lineups is True or status_raw in ("confirmed", "official", "true", "1") or pick(s, "isConfirmed") is True else "probable"
             self.report.good("lineup")
             out.append(LineupSnapshot(fixture_id=fixture.id, team=team, status=status, starters=ids, bench=bench,
-                                      formation=pick(s, "formation"), published_at=parse_dt(pick(s, "publishedAt", "updatedAt")) or observed_at,
+                                      formation=pick(s, "formation") or (pick(data, f"{side}Formation") if isinstance(data, dict) else None), published_at=parse_dt(pick(s, "publishedAt", "updatedAt")) or observed_at,
                                       observed_at=observed_at, source_level="B"))
         return out
 

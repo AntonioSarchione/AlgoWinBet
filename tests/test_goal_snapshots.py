@@ -378,3 +378,26 @@ def test_real_goal_fixture_row_maps_with_utc_kickoff():
     done = {**REAL_FIXTURE_ROW, "matchStatus": "FINISHED", "homeTeamScore": "2", "awayTeamScore": "1"}
     r = m.result(done)
     assert (r.home_goals, r.away_goals) == (2, 1)
+
+
+# Real /fixtures/{id}/lineups response 11 days before kickoff (captured 2026-09-29): lists empty, hasLineups false.
+REAL_LINEUPS_EMPTY = {"home": {"startingLineups": [], "substitutes": [], "missingPlayers": [],
+                               "coach": [{"playerId": "c1", "lineupPlayer": "Cristian Chivu", "type": "coach", "team": "home"}]},
+                      "away": {"startingLineups": [], "substitutes": [], "missingPlayers": [], "coach": []},
+                      "homeFormation": None, "awayFormation": None, "hasLineups": False}
+
+
+def test_real_empty_lineups_is_not_a_gap_and_stores_nothing():
+    m = GoalMapper(NAMES)
+    assert m.lineups(REAL_LINEUPS_EMPTY, _fx(), NOW) == [] and not m.report.gaps and m.report.ok["lineup: non ancora pubblicate (hasLineups=false)"] == 2
+
+
+def test_lineups_with_goal_field_names_ASSUMED_row_shape():
+    # Row keys (playerId, lineupPlayer, lineupPosition) are copied from the real coach rows; starters rows not yet seen on a match day.
+    row = lambda side, k: {"playerId": f"{side}{k}", "lineupPlayer": f"{side} P{k}", "lineupPosition": "M", "team": side, "type": "starter"}
+    data = {"home": {"startingLineups": [row("h", k) for k in range(11)], "substitutes": [row("h", 20 + k) for k in range(5)], "missingPlayers": []},
+            "away": {"startingLineups": [row("a", k) for k in range(11)], "substitutes": [], "missingPlayers": []},
+            "homeFormation": "3-5-2", "awayFormation": "4-3-3", "hasLineups": True}
+    lus = GoalMapper(NAMES).lineups(data, _fx(), NOW)
+    assert [(l.team, l.status, l.formation, len(l.starters), len(l.bench)) for l in lus] == [("Inter", "confirmed", "3-5-2", 11, 5), ("Empoli", "confirmed", "4-3-3", 11, 0)]
+    assert lus[0].starters[0] == "goal:h0"

@@ -7,7 +7,7 @@ name = "algowinbet"
 version = "0.1.0"
 description = "AlgoWinBet: probabilistic market analysis engine (personal use, paper-only)"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26", "scipy>=1.11", "pydantic>=2.5"]
+dependencies = ["numpy>=1.26", "scipy>=1.11", "pydantic>=2.5", "tzdata; platform_system == 'Windows'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

@@ -66,6 +66,10 @@ Modi: `fixtures`, `results`, `lineups` (solo partite entro la finestra, salta le
 Budget: contatore locale giornaliero con riserva, sincronizzato con gli header `X-RateLimit-*`; `429` gestiti con `Retry-After`.
 
 **Verificato dalla documentazione GOAL**: auth Bearer, envelope, paginazione, header rate-limit, codici d'errore, enum stati, endpoint.
+**Verificato sul piano free con richieste reali (29/09/2026)**: fixtures e results (schema piatto, `kickoffUtc`, ordine decrescente per data, `from/to/status`
+filtrano; ~2000 risultati storici Serie A dal 2024/25); lineups (forma `{home,away:{startingLineups,substitutes,coach,missingPlayers},homeFormation,awayFormation,hasLineups}`,
+vuote finché non pubblicate). **`/odds` NON è incluso nel piano free** (402 "Feature not available in your plan"): le quote arrivano da OddsPapi o a mano.
+**Non ancora visto**: righe dei titolari a partita pubblicata (assunte come le righe `coach`: `playerId`, `lineupPlayer`, `lineupPosition`) e `missingPlayers` (possibili infortuni/squalifiche).
 **Assunto (non documentato)**: gli schemi delle righe lineups/odds/players. I mapper sono tolleranti e contano ciò che non riescono a
 mappare (`Lacune di mapping`); i payload grezzi restano salvati, quindi dopo il primo `goal probe` reale si corregge il mapper e si rielabora senza altre richieste.
 Alias nomi squadra tra fonti: `configs/team_aliases.json` (il collector segnala i nomi senza storico).

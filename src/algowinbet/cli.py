@@ -309,6 +309,15 @@ def cmd_goal_collect(a) -> None:
             print(f"  ! nomi squadra senza storico (aggiungi alias in {a.aliases}): {sorted(miss)}")
 
 
+def _local(dt: datetime) -> str:
+    """Display only: storage and cutoffs stay in UTC. Italian time when tzdata is available."""
+    try:
+        from zoneinfo import ZoneInfo
+        return f"{dt.astimezone(ZoneInfo('Europe/Rome')):%Y-%m-%d %H:%M} ora IT"
+    except Exception:
+        return f"{dt:%Y-%m-%d %H:%M} UTC"
+
+
 def cmd_snapshots_stats(a) -> None:
     store = SnapshotStore(a.db)
     print(f"Snapshot store {a.db}:")
@@ -319,7 +328,7 @@ def cmd_snapshots_stats(a) -> None:
     if a.upcoming:
         now = datetime.now(timezone.utc)
         for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=a.upcoming))[:40]:
-            print(f"  {f.kickoff:%Y-%m-%d %H:%M} UTC  {f.home} - {f.away}  [{f.competition}] {f.status.value}")
+            print(f"  {_local(f.kickoff)}  {f.home} - {f.away}  [{f.competition}] {f.status.value}")
 
 
 def cmd_backtest(a) -> None:
