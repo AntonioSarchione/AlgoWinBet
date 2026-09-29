@@ -1,0 +1,104 @@
+"""All tunables in one serialisable object (spec 45). Load overrides from JSON."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+
+
+class ModelCfg(BaseModel):
+    xi_half_life_days: float = 365.0
+    l2: float = 1.0
+    n_bootstrap: int = 0  # >0 = parametric uncertainty by bootstrap (slow); 0 = analytic proxy
+    min_history: int = 40
+    version: str = "dc-poisson-v1"
+
+
+class EnsembleCfg(BaseModel):
+    """mode=adaptive: the devigged market price is the prior; the structural model is noisy evidence.
+    w_struct = tau^2/(tau^2+sigma^2), tau = how far the true prob may sit from the market price (market_prior_sd),
+    sigma = model error (bootstrap or sqrt(p(1-p)/n) proxy, measured on synthetic data: rmse ~ sqrt(pq/n_matches)).
+    mode=fixed: constant w_struct (learn it with `backtest`, column w_struct*)."""
+
+    mode: str = "adaptive"
+    market_prior_sd: float = 0.025
+    w_struct: float = 0.5  # used only in fixed mode
+    devig_method: str = "power"
+
+
+class Thresholds(BaseModel):
+    min_ev: float = 0.03
+    min_edge: float = 0.01
+    max_uncertainty: float = 0.10
+    min_dq_candidate: float = 0.60
+    min_dq_strong: float = 0.80
+    min_dq_valid: float = 0.40
+    avoid_ev: float = -0.03
+    z: float = 1.645  # one-sided 95% for lower bounds
+    min_odds: float = 1.05
+
+
+class OptimizerCfg(BaseModel):
+    odds_min: float = 2.0
+    odds_max: float = 15.0
+    min_probability: float = 0.0  # min joint probability of slip
+    max_legs: int = 8
+    max_legs_per_fixture: int = 1  # SGP needs a bookmaker combo quote; see joint pricing
+    max_legs_per_competition: int = 99
+    min_leg_probability: float = 0.0
+    beam_width: int = 200
+    output_count: int = 3
+    max_overlap: float = 0.5  # Jaccard overlap allowed between output slips
+    correlation_limit: float = 0.25
+    min_slip_ev: float = 0.0
+    risk_profile: str = "balanced"  # conservative | balanced | dynamic
+    cross_match_rho: float = 0.005
+    same_competition_rho: float = 0.02
+    include_watch: bool = False
+    w_ev: float = 1.0
+    w_prob: float = 0.5
+    w_div: float = 0.1
+    w_unc: float = 1.5
+    w_corr: float = 1.0
+    w_disagree: float = 0.5
+
+
+class RiskCfg(BaseModel):
+    bankroll: float = 1000.0
+    mode: str = "paper"  # paper only: the tool never places bets
+    stake_method: str = "kelly"  # flat | pct | kelly
+    flat_stake: float = 10.0
+    pct: float = 0.01
+    kelly_fraction: float = 0.25
+    max_stake_pct_per_slip: float = 0.02
+    max_exposure_total_pct: float = 0.10
+    max_exposure_per_fixture_pct: float = 0.03
+    max_exposure_per_team_pct: float = 0.04
+
+
+class Config(BaseModel):
+    model: ModelCfg = Field(default_factory=ModelCfg)
+    ensemble: EnsembleCfg = Field(default_factory=EnsembleCfg)
+    thresholds: Thresholds = Field(default_factory=Thresholds)
+    optimizer: OptimizerCfg = Field(default_factory=OptimizerCfg)
+    risk: RiskCfg = Field(default_factory=RiskCfg)
+    calibration_path: str = "configs/calibration.json"
+    db_path: str = "algowinbet.db"
+
+    @classmethod
+    def load(cls, path: str | Path | None) -> "Config":
+        if path and Path(path).exists():
+            return cls.model_validate(json.loads(Path(path).read_text()))
+        return cls()
+
+    def apply_profile(self) -> "Config":
+        """Risk profile presets: conservative | balanced | dynamic (spec 17.1)."""
+        o, t = self.optimizer, self.thresholds
+        if o.risk_profile == "conservative":
+            t.min_ev, t.max_uncertainty, o.max_legs = max(t.min_ev, 0.05), min(t.max_uncertainty, 0.07), min(o.max_legs, 4)
+            o.w_unc, o.w_corr = 2.5, 1.5
+        elif o.risk_profile == "dynamic":
+            t.min_ev, t.max_uncertainty = min(t.min_ev, 0.02), max(t.max_uncertainty, 0.13)
+            o.w_unc, o.w_ev = 1.0, 1.5
+        return self
