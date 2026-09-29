@@ -75,7 +75,7 @@ class GoalCollector:
 
         def work():
             for lid in self.league_ids:
-                rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days_back):%Y-%m-%d}", "to": f"{t0:%Y-%m-%d}"}))
+                rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days_back):%Y-%m-%d}", "to": f"{t0:%Y-%m-%d}"}, max_pages=60))
                 res = [r for r in (self.mapper.result(x) for x in rows) if r]
                 st.add("results", self.store.save_results(SOURCE, res, t0))
                 self.store.save_fixtures(SOURCE, [f for f in (self.mapper.fixture(x) for x in rows) if f], t0)  # final status

@@ -316,6 +316,10 @@ def cmd_snapshots_stats(a) -> None:
         print(f"  {k:<14}{v}")
     for r in store.db.execute("SELECT source, period, used FROM api_usage ORDER BY period DESC LIMIT 6").fetchall():
         print(f"  uso API {r[0]} {r[1]}: {r[2]}")
+    if a.upcoming:
+        now = datetime.now(timezone.utc)
+        for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=a.upcoming))[:40]:
+            print(f"  {f.kickoff:%Y-%m-%d %H:%M} UTC  {f.home} - {f.away}  [{f.competition}] {f.status.value}")
 
 
 def cmd_backtest(a) -> None:
@@ -443,6 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
     co.set_defaults(fn=cmd_goal_collect)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")
+    sn.add_argument("--upcoming", type=int, metavar="GIORNI", help="elenca le partite salvate nei prossimi GIORNI")
     sn.set_defaults(fn=cmd_snapshots_stats)
     iv = sub.add_parser("info-value", help="quanto migliorano le stime notizie e formazioni (walk-forward)")
     common(iv)
