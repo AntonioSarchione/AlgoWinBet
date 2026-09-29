@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS candidate_slips(id INTEGER PRIMARY KEY, run_id INTEGE
   joint_probability REAL, ev REAL, payload TEXT);
 CREATE TABLE IF NOT EXISTS paper_bets(id INTEGER PRIMARY KEY, slip_id INTEGER, created_at TEXT, stake REAL, odds REAL,
   settled_at TEXT, result TEXT, payout REAL);
+CREATE TABLE IF NOT EXISTS information_events(event_id TEXT PRIMARY KEY, fixture_id TEXT, team TEXT, player TEXT, event_type TEXT,
+  source_level TEXT, published_at TEXT, observed_at TEXT, confidence REAL, payload TEXT);
+CREATE TABLE IF NOT EXISTS lineup_snapshots(id INTEGER PRIMARY KEY, fixture_id TEXT, team TEXT, status TEXT, observed_at TEXT,
+  published_at TEXT, source_level TEXT, payload TEXT, UNIQUE(fixture_id, team, status, observed_at));
 CREATE TABLE IF NOT EXISTS audit_events(id INTEGER PRIMARY KEY, ts TEXT, type TEXT, actor TEXT, payload_hash TEXT, payload TEXT);
 """
 
@@ -54,6 +58,23 @@ class Store:
         self.db.commit()
         self.audit("RUN_SAVED", {"run_id": run_id, "n_opps": len(opps), "n_slips": len(slips)})
         return run_id
+
+    def save_information(self, events, lineups) -> tuple[int, int]:
+        """Idempotent (spec 26.3): the same event/snapshot received twice is stored once."""
+        n_e = n_l = 0
+        for e in events:
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO information_events VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (e.id, e.fixture_id, e.team, e.player, e.event_type, e.source_level, e.published_at.isoformat(),
+                 e.observed_at.isoformat(), e.confidence, json.dumps(e.payload, default=str)))
+            n_e += cur.rowcount
+        for l in lineups:
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO lineup_snapshots(fixture_id,team,status,observed_at,published_at,source_level,payload) VALUES(?,?,?,?,?,?,?)",
+                (l.fixture_id, l.team, l.status, l.observed_at.isoformat(), l.published_at.isoformat(), l.source_level, l.model_dump_json()))
+            n_l += cur.rowcount
+        self.db.commit()
+        return n_e, n_l
 
     def paper_bet(self, slip_id: int, stake: float, odds: float) -> int:
         cur = self.db.execute("INSERT INTO paper_bets(slip_id,created_at,stake,odds) VALUES(?,?,?,?)",

@@ -30,8 +30,14 @@ def explain_leg(o: Opportunity) -> dict[str, Any]:
         neg.append(f"incertezza elevata (±{o.uncertainty:.1%}, intervallo {o.p_low:.1%}–{o.p_high:.1%})")
     if o.model_disagreement > 0.05:
         neg.append(f"modello e mercato divergono di {o.model_disagreement:.1%}")
-    if o.data_quality_parts.get("lineup", 0) <= 0.5:
-        neg.append("formazioni non disponibili/non confermate: impatto non modellato")
+    if o.lineup_state == "confirmed":
+        pos.append("formazioni ufficiali confermate e incluse nel modello")
+    elif o.data_quality_parts.get("lineup", 0) <= 0.5:
+        neg.append("formazioni non ancora note: stima basata sulle rotazioni abituali")
+    if abs(o.lineup_delta_p) >= 0.01:
+        pos.append(f"formazioni/notizie spostano la stima strutturale di {o.lineup_delta_p:+.1%} (da {o.p_struct_blind:.1%} a {o.p_struct:.1%})")
+    if o.odds_stale:
+        neg.append("quota più vecchia dell'ultima informazione (formazione/notizie): verifica il prezzo attuale prima di valutarla")
     if o.data_quality_parts.get("completeness", 1) < 0.6:
         neg.append("storico squadre limitato")
     return {
@@ -43,6 +49,8 @@ def explain_leg(o: Opportunity) -> dict[str, Any]:
             "breakeven_odds": o.fair_odds,
         },
         "data_quality": o.data_quality_parts,
+        "lineup_effect": {"state": o.lineup_state, "delta_p_struct": o.lineup_delta_p, "p_struct_blind": o.p_struct_blind,
+                          "odds_stale": o.odds_stale, "notes": o.lineup_notes},
     }
 
 
@@ -76,7 +84,7 @@ def explain_slip(s: Slip, cfg: Config) -> dict[str, Any]:
         "negative_factors": neg,
         "what_would_change_it": [
             f"quota totale di pareggio (EV=0): {s.fair_odds:.2f} (quota attuale {s.total_odds:.2f})",
-            "nuova formazione ufficiale / infortuni su leg con giocatori chiave (impatto non ancora modellato nel M1)",
+            "formazione ufficiale diversa dall'attesa / nuovi infortuni su giocatori chiave (ricalcolo automatico)",
             "movimento di quota > 3% su una qualsiasi leg",
         ],
         "counterfactual": {

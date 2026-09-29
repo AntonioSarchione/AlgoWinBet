@@ -105,6 +105,55 @@ class InformationEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class Position(str, Enum):
+    GK = "GK"
+    DEF = "DEF"
+    MID = "MID"
+    FWD = "FWD"
+
+
+class Player(BaseModel):
+    id: str
+    name: str
+    team: str
+    position: Position
+    importance: float = 1.0  # scales prior impact (1 = regular starter)
+    start_rate: float | None = None  # usual probability of starting; learned from lineup history when absent
+
+
+class LineupSnapshot(BaseModel):
+    """Expected/probable/confirmed XI of one team for one fixture, as observed at `observed_at`."""
+
+    fixture_id: str
+    team: str
+    status: str  # probable | confirmed
+    starters: list[str]  # player ids
+    bench: list[str] = Field(default_factory=list)
+    formation: str | None = None
+    published_at: datetime
+    observed_at: datetime
+    source_level: str = "A"
+
+
+class HistoricalLineup(BaseModel):
+    fixture_id: str
+    team: str
+    starters: list[str]
+
+
+class NewsItem(BaseModel):
+    """Raw text from a source, before parsing into structured InformationEvents."""
+
+    source: str
+    source_level: str = "C"
+    published_at: datetime
+    observed_at: datetime
+    text: str
+    team: str | None = None
+    fixture_id: str | None = None
+    url: str | None = None
+
+
 class Opportunity(BaseModel):
     fixture_id: str
     competition: str
@@ -136,6 +185,12 @@ class Opportunity(BaseModel):
     model_version: str
     calibration_version: str
     cutoff: datetime
+    # lineup / information layer (spec 5, 8)
+    p_struct_blind: float | None = None  # structural p ignoring lineups/availability
+    lineup_delta_p: float = 0.0  # p_struct - p_struct_blind = information shock
+    lineup_state: str = "none"  # none | probable | confirmed
+    odds_stale: bool = False  # quote older than relevant information: verify current price
+    lineup_notes: list[str] = Field(default_factory=list)
 
 
 class Slip(BaseModel):

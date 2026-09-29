@@ -1,0 +1,14 @@
+{
+  "players": [
+    {"name": "Lautaro Martinez", "team": "Inter", "position": "FWD", "importance": 2.0, "start_rate": 0.85},
+    {"name": "Yann Sommer", "team": "Inter", "position": "GK", "importance": 1.0, "start_rate": 0.95}
+  ],
+  "lineups": [
+    {"team": "Inter", "date": "2025-04-20", "status": "confirmed", "formation": "3-5-2",
+     "starters": ["Yann Sommer", "Lautaro Martinez"], "published_at": "2025-04-20T17:30:00+00:00"}
+  ],
+  "news": [
+    {"source": "inter.it", "level": "A", "published_at": "2025-04-19T10:00:00+00:00", "team": "Inter",
+     "text": "Lautaro Martinez indisponibile per infortunio."}
+  ]
+}

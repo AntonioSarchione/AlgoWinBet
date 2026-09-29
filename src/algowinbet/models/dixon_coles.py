@@ -106,8 +106,10 @@ class DixonColes:
         da = self.defence[self.teams[away]] if away in self.teams else 0.0
         return float(math.exp(self.mu + self.home_adv + ah - da)), float(math.exp(self.mu + aa - dh))
 
-    def score_matrix(self, home: str, away: str) -> np.ndarray:
+    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0)) -> np.ndarray:
+        """log_adj shifts log-lambda of (home, away), e.g. from lineup/availability effects."""
         lh, la = self.expected_goals(home, away)
+        lh, la = lh * math.exp(log_adj[0]), la * math.exp(log_adj[1])
         g = np.arange(GRID)
         m = np.outer(poisson.pmf(g, lh), poisson.pmf(g, la))
         i, j = np.meshgrid(g, g, indexing="ij")

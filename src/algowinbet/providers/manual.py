@@ -73,3 +73,8 @@ class ManualOverlay:
 
     def result_of(self, fixture_id):
         return getattr(self.base, "result_of", lambda _: None)(fixture_id)
+
+    def __getattr__(self, item):  # players / lineups / news come from the wrapped provider
+        if item in ("base", "_fx", "_q", "name"):
+            raise AttributeError(item)
+        return getattr(self.base, item)

@@ -25,7 +25,7 @@ def test_history_and_quotes_respect_cutoff():
     assert all(r.fixture_id != victim.fixture_id for r in history_at(prov, comp, cutoff))
     fx = next(f for f in prov.list_fixtures([comp], victim.kickoff, victim.kickoff) if f.id == victim.fixture_id)
     st = build_state(prov, fx, victim.kickoff - timedelta(hours=24))
-    assert st.quotes and all(q.kind == "open" for q in st.quotes)  # closing quotes are not visible yet
+    assert st.quotes and all(q.kind != "close" for q in st.quotes)  # closing quotes are not visible yet
     assert all(q.observed_at <= st.cutoff for q in st.quotes)
 
 

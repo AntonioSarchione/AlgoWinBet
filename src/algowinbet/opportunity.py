@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 import numpy as np
 
 from .calibration import CalibrationSet
 from .config import Config
-from .domain import Opportunity, OpportunityStatus, SelectionRef
+from .domain import Opportunity, OpportunityStatus, Player, SelectionRef
 from .markets import UnsupportedMarket, family_of, probability
+from .information import Adjustment, PlayerImpactModel, TeamAvailability, build_availability
 from .models import DixonColes
 from .pricing import MarketView, SOURCE_LEVEL_SCORE, build_market_views
 from .state import MatchState
@@ -25,15 +27,18 @@ class FixtureAnalysis:
     skipped: dict[str, int] = field(default_factory=dict)
     expected_goals: tuple[float, float] = (0.0, 0.0)
     model_known: bool = True
+    adjustment: Adjustment = field(default_factory=Adjustment)
+    availability: dict[str, TeamAvailability] = field(default_factory=dict)
+    matrix_blind: np.ndarray | None = None
 
 
-def data_quality(state: MatchState, model: DixonColes, view: MarketView) -> dict[str, float]:
+def data_quality(state: MatchState, model: DixonColes, view: MarketView, stale: bool = False) -> dict[str, float]:
     f = state.fixture
     sample = min(1.0, model.sample_size(f.home, f.away) / 15.0)
     market_present = 1.0 if view.p_market is not None else 0.4
     completeness = 0.6 * sample + 0.4 * market_present
     age_h = max(0.0, (state.cutoff - view.best_observed_at).total_seconds() / 3600.0)
-    freshness = float(np.clip(1.0 - age_h / 168.0, 0.3, 1.0))
+    freshness = float(np.clip(1.0 - age_h / 168.0, 0.3, 1.0)) * (0.5 if stale else 1.0)
     lvl = SOURCE_LEVEL_SCORE.get(view.source_level, 0.5)
     reliability = 0.4 * lvl + 0.6 * min(1.0, view.n_books / 3.0)
     consistency = 0.7 if len(view.per_book) < 2 else float(1.0 - min(1.0, view.dispersion / 0.05))
@@ -67,21 +72,48 @@ def opportunity_score(ev: float, edge: float | None, dq: float, disagreement: fl
     return 0.35 * n_ev + 0.15 * n_edge + 0.05 * (1.0 if calibrated else 0.5) + 0.15 * dq + 0.10 * agree - 0.20 * min(1.0, unc / 0.1)
 
 
+def _lineup_notes(adj: Adjustment, avail: dict[str, TeamAvailability]) -> list[str]:
+    notes = [n for a in avail.values() for n in a.notes]
+    for a in avail.values():
+        if a.key_absences:
+            notes.append(f"{a.team}: titolari abituali fuori dall'XI: " + ", ".join(p.name for p in a.key_absences[:4]))
+    for _, text, eff in adj.contributions[:4]:
+        notes.append(f"{text} -> {math.exp(eff) - 1:+.1%} gol attesi")
+    return notes
+
+
 def analyze_fixture(
     state: MatchState,
     model: DixonColes,
     boots: list[DixonColes],
     cfg: Config,
     calib: CalibrationSet | None = None,
+    impact: PlayerImpactModel | None = None,
+    roster: list[Player] | None = None,
 ) -> FixtureAnalysis:
     calib = calib or CalibrationSet()
     f = state.fixture
-    matrix = model.score_matrix(f.home, f.away)
-    boot_matrices = [b.score_matrix(f.home, f.away) for b in boots]
+    adj, avail = Adjustment(), {}
+    if impact is not None and roster:
+        rh, ra = [p for p in roster if p.team == f.home], [p for p in roster if p.team == f.away]
+        if rh and ra:
+            avail = {
+                f.home: build_availability(f.home, rh, impact.base, state.events, state.lineups, state.cutoff, f.id),
+                f.away: build_availability(f.away, ra, impact.base, state.events, state.lineups, state.cutoff, f.id),
+            }
+            adj = impact.adjustment(avail[f.home], avail[f.away])
+    la_ = (adj.d_home, adj.d_away)
+    matrix_blind = model.score_matrix(f.home, f.away)
+    matrix = model.score_matrix(f.home, f.away, la_) if not adj.is_zero else matrix_blind
+    m_hi = model.score_matrix(f.home, f.away, (adj.d_home + adj.sd_home, adj.d_away - adj.sd_away))
+    m_lo = model.score_matrix(f.home, f.away, (adj.d_home - adj.sd_home, adj.d_away + adj.sd_away))
+    boot_matrices = [b.score_matrix(f.home, f.away, la_) for b in boots]
     known = model.knows(f.home) and model.knows(f.away)
     views = build_market_views(state.quotes, cfg.ensemble.devig_method)
     n_eff = max(model.sample_size(f.home, f.away), 3)
     ens = cfg.ensemble
+    info_t = state.latest_info_time()
+    notes = _lineup_notes(adj, avail)
     out: list[Opportunity] = []
     skipped: dict[str, int] = {}
     for v in views:
@@ -92,20 +124,31 @@ def analyze_fixture(
         except UnsupportedMarket:
             skipped[v.ref.market_code] = skipped.get(v.ref.market_code, 0) + 1
             continue
+        p_blind = probability(matrix_blind, v.ref)
+        effect_sd = abs(probability(m_hi, v.ref) - probability(m_lo, v.ref)) / 2
         if boot_matrices:
-            std_s = float(np.std([probability(m, v.ref) for m in boot_matrices]))
+            std_base = float(np.std([probability(m, v.ref) for m in boot_matrices]))
         else:
-            std_s = math.sqrt(max(p_s * (1 - p_s), 1e-4) / n_eff)  # empirical proxy: rmse ~ sqrt(pq/n_matches)
+            std_base = math.sqrt(max(p_s * (1 - p_s), 1e-4) / n_eff)  # empirical proxy: rmse ~ sqrt(pq/n_matches)
+        std_s = math.sqrt(std_base**2 + effect_sd**2)  # + uncertainty of the lineup/availability adjustment
+        stale = bool(info_t is not None and v.best_observed_at < info_t - timedelta(minutes=10) and abs(p_s - p_blind) >= 0.01)
         has_mkt = v.p_market is not None
         if has_mkt:
+            p_prior, tau2 = v.p_market, ens.market_prior_sd**2
+            sigma = std_s
+            if stale:
+                # the quote predates information the model can price: move the market prior by the model's information
+                # increment (p_struct - p_struct_blind) and widen it by the increment's own uncertainty
+                p_prior = float(np.clip(v.p_market + (p_s - p_blind), 1e-4, 1 - 1e-4))
+                tau2 = ens.market_prior_sd**2 + effect_sd**2
+                sigma = std_base
             if ens.mode == "adaptive":
-                tau2 = ens.market_prior_sd**2
-                w_eff = tau2 / (tau2 + std_s**2)
-                post_sd = math.sqrt(w_eff) * std_s  # posterior sd of the true probability
+                w_eff = tau2 / (tau2 + sigma**2)
+                post_sd = math.sqrt(w_eff) * sigma  # posterior sd of the true probability
             else:
                 w_eff = ens.w_struct
-                post_sd = w_eff * std_s
-            p_raw = w_eff * p_s + (1 - w_eff) * v.p_market
+                post_sd = w_eff * sigma
+            p_raw = w_eff * p_s + (1 - w_eff) * p_prior
             disagreement = abs(p_s - v.p_market)
         else:
             p_raw, w_eff, post_sd, disagreement = p_s, 1.0, std_s, 0.05
@@ -116,11 +159,13 @@ def analyze_fixture(
             unc = max(unc, 0.15)  # unseen team: model is guessing
         z = cfg.thresholds.z
         p_lo, p_hi = max(1e-4, p_fin - z * unc), min(1 - 1e-4, p_fin + z * unc)
-        dq = data_quality(state, model, v)
+        dq = data_quality(state, model, v, stale)
         edge_v = (p_fin - v.p_market) if has_mkt else None
         ev_v = p_fin * v.best_odds - 1
         ev_lo = p_lo * v.best_odds - 1
         status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg)
+        if stale and status in (S.STRONG, S.CANDIDATE):
+            status = S.WATCH  # the edge may only be a not-yet-updated price: verify the current quote first
         out.append(Opportunity(
             fixture_id=f.id, competition=f.competition, home=f.home, away=f.away, kickoff=f.kickoff,
             ref=v.ref, description=v.ref.label(), odds=v.best_odds, bookmaker=v.best_book,
@@ -130,6 +175,9 @@ def analyze_fixture(
             data_quality=dq["total"], data_quality_parts=dq, status=status,
             score=opportunity_score(ev_v, edge_v, dq["total"], disagreement, unc, calib.version(fam) != "identity-v1"),
             model_version=cfg.model.version, calibration_version=calib.version(fam), cutoff=state.cutoff,
+            p_struct_blind=p_blind, lineup_delta_p=p_s - p_blind, lineup_state=state.lineup_state, odds_stale=stale,
+            lineup_notes=notes,
         ))
     lh, la = model.expected_goals(f.home, f.away)
-    return FixtureAnalysis(state=state, matrix=matrix, opportunities=out, skipped=skipped, expected_goals=(lh, la), model_known=known)
+    return FixtureAnalysis(state=state, matrix=matrix, opportunities=out, skipped=skipped, expected_goals=(lh, la),
+                           model_known=known, adjustment=adj, availability=avail, matrix_blind=matrix_blind)
