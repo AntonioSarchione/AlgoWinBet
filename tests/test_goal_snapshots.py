@@ -360,3 +360,21 @@ def test_team_names_canonicalise_and_flag_unknowns():
     assert n.canon("FC Internazionale Milano") == n.canon("Inter") == "Inter"
     assert n.canon("Atlético Madrid") == n.canon("Atletico Madrid")  # accents never matter
     assert n.unmatched({"Inter", "Sconosciuta United"}, {"Inter", "Milan"}) == {"Sconosciuta United"}
+
+
+# Real GOAL row captured with `goal probe` (2026-09-29): flat fields + nested homeTeam/awayTeam/league; kickoffUtc is the UTC datetime.
+REAL_FIXTURE_ROW = {"id": "cmu75rli66xhikm08d7xr86al", "apiId": "808223", "leagueName": "Serie A", "leagueYear": "2026/2027",
+                    "matchDate": "2027-05-30", "matchTime": "16:30", "kickoffUtc": "2027-05-30T16:30:00.000Z", "matchStatus": "SCHEDULED",
+                    "homeTeamName": "AC Milan", "homeTeamScore": None, "awayTeamName": "Udinese", "awayTeamScore": None,
+                    "league": {"id": "cmr77dvpd006yrx06zig7907g", "name": "Serie A"},
+                    "homeTeam": {"id": "cmr7fp1wj2n8trx061joikfn8", "name": "Milan"}, "awayTeam": {"id": "cmr7m6br95t2qrx068uc0kscj", "name": "Udinese"}}
+
+
+def test_real_goal_fixture_row_maps_with_utc_kickoff():
+    m = GoalMapper(TeamNames.load("configs/team_aliases.json"))
+    f = m.fixture(REAL_FIXTURE_ROW)
+    assert (f.id, f.home, f.away, f.competition) == ("goal:cmu75rli66xhikm08d7xr86al", "Milan", "Udinese", "Serie A")
+    assert f.kickoff == utc(2027, 5, 30, 16, 30) and f.status == FixtureStatus.SCHEDULED and not m.report.gaps
+    done = {**REAL_FIXTURE_ROW, "matchStatus": "FINISHED", "homeTeamScore": "2", "awayTeamScore": "1"}
+    r = m.result(done)
+    assert (r.home_goals, r.away_goals) == (2, 1)

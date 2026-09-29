@@ -67,7 +67,7 @@ class GoalApiClient:
     def __init__(self, api_key: str | None = None, store: SnapshotStore | None = None, budget: BudgetGuard | None = None,
                  transport: Transport | None = None, sleep: Callable[[float], None] = time.sleep, max_retries: int = 3,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), base_url: str = BASE_URL):
-        self._key = api_key or os.environ.get("GOALAPI_KEY", "")
+        self._key = (api_key or os.environ.get("GOALAPI_KEY") or os.environ.get("GOAL_API_KEY") or "").strip().strip("\"'")
         if not self._key:
             raise AuthError("chiave mancante: imposta la variabile d'ambiente GOALAPI_KEY (mai nel repo, mai come argomento)")
         self.store, self.budget, self.transport = store, budget, transport or urllib_transport()
@@ -225,7 +225,7 @@ _STATUS = {
     "AWARDED": FixtureStatus.FINISHED, "POSTPONED": FixtureStatus.POSTPONED, "CANCELLED": FixtureStatus.CANCELLED,
     "ABANDONED": FixtureStatus.CANCELLED, "SUSPENDED": FixtureStatus.POSTPONED,
 }
-_DT_KEYS = ("kickoff", "kickOff", "startTime", "startsAt", "matchDate", "matchDateTime", "utcDate", "scheduledAt", "dateTime", "date")
+_DT_KEYS = ("kickoffUtc", "kickoff", "kickOff", "startTime", "startsAt", "matchDate", "matchDateTime", "utcDate", "scheduledAt", "dateTime", "date")
 
 
 class GoalMapper:

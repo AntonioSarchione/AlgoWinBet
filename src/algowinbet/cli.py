@@ -270,7 +270,8 @@ def cmd_goal_leagues(a) -> None:
     except (GoalApiError, BudgetExceeded) as e:
         sys.exit(f"errore: {e}")
     for r in env.get("data") or []:
-        print(f"  id={r.get('id') or r.get('leagueId')}  {r.get('name')}  ({r.get('country') or r.get('countryName') or '-'})")
+        c = r.get("country") or r.get("countryName") or "-"
+        print(f"  id={r.get('id') or r.get('leagueId')}  {r.get('name')}  ({c.get('name', '-') if isinstance(c, dict) else c})")
 
 
 def cmd_goal_collect(a) -> None:
