@@ -74,6 +74,28 @@ vuote finché non pubblicate). **`/odds` NON è incluso nel piano free** (402 "F
 mappare (`Lacune di mapping`); i payload grezzi restano salvati, quindi dopo il primo `goal probe` reale si corregge il mapper e si rielabora senza altre richieste.
 Alias nomi squadra tra fonti: `configs/team_aliases.json` (il collector segnala i nomi senza storico).
 
+### Raccolta online (M3): GitHub Actions + Turso + OddsPapi
+Niente gira sul PC: `.github/workflows/collect.yml` esegue `algowinbet collect-auto` a orari fissi e il database vive su Turso.
+Ogni esecuzione è un "tick" che fa solo ciò che serve in quel momento (`src/algowinbet/autorun.py`):
+- GOAL: calendario, risultati e statistiche una volta al giorno; formazioni solo nella finestra prima del calcio d'inizio.
+- OddsPapi: 1 istantanea al giorno e 1 per ogni fascia di calcio d'inizio 30–75 minuti prima (dopo le formazioni ufficiali),
+  con 1 sola richiesta per tutto il campionato; linee di chiusura dallo storico (gratuito secondo la documentazione OddsPapi).
+- Budget: GOAL 1.000/giorno con riserva, OddsPapi 250/mese con riserva; contatore sincronizzato con `/account` (gratuito).
+
+Configurazione: `configs/collect.json` (id lega GOAL, id torneo OddsPapi, bookmaker). Segreti del repository (mai nel codice):
+`GOALAPI_KEY`, `ODDSPAPI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`.
+
+```bash
+python -m algowinbet.cli odds account                    # gratis: quota e bookmaker inclusi nel piano
+python -m algowinbet.cli odds tournaments "serie a"      # id del torneo per configs/collect.json
+python -m algowinbet.cli odds probe /odds --param fixtureId=ID   # 1 richiesta: struttura reale
+python -m algowinbet.cli collect-auto --db data/snapshots.db     # un tick in locale, per prova
+```
+**Verificato con richieste reali**: GOAL fixtures/results/lineups (vuote)/statistics; `/odds` di GOAL non incluso nel free.
+**Non ancora verificato**: tutte le risposte OddsPapi (schemi presi dalla documentazione), gratuità di `/historical-odds`,
+connessione Turso dal runner, minuti Actions effettivi. I minuti gratuiti dei repo privati sono limitati: il cron copre solo
+le ore utili (circa 1.000 esecuzioni al mese).
+
 ### Quote Sisal
 Sisal non ha API pubbliche e lo scraping viola i suoi termini: inserisci le quote a mano in un JSON
 (formato in `src/algowinbet/providers/manual.py`) e passalo con `--manual quote.json`; viene unito alle altre fonti.

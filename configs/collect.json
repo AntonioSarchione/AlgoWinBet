@@ -1,0 +1,13 @@
+{
+  "_comment": "Scheduler online (GitHub Actions). Id GOAL: goal leagues \"Serie A\". Id OddsPapi: odds tournaments \"serie a\".",
+  "goal_leagues": ["cmr77dvpd006yrx06zig7907g"],
+  "oddspapi_tournaments": [],
+  "bookmakers": ["sisal", "pinnacle", "snai"],
+  "goal_daily_limit": 1000,
+  "goal_reserve": 50,
+  "oddspapi_monthly_limit": 250,
+  "oddspapi_reserve": 20,
+  "lineup_window_min": 95,
+  "fixtures_days": 14,
+  "prekick_min": [30, 75]
+}

@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,16 +51,51 @@ def _dt(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
+REMOTE_PREFIXES = ("libsql://", "https://", "wss://")
+
+
+def connect(path: str | Path):
+    """Local SQLite file, or Turso when `path` is a libsql:// URL or the word "turso" (URL from TURSO_DATABASE_URL, token from
+    TURSO_AUTH_TOKEN). TURSO_MODE=remote (default) talks to the cloud database directly; TURSO_MODE=replica keeps a local
+    libSQL embedded replica (local reads, writes to the cloud primary). Either way a job on a fresh machine (GitHub Actions)
+    sees everything previous runs stored. Returns (connection, needs_sync)."""
+    p = str(path)
+    if p == "turso":
+        p = os.environ.get("TURSO_DATABASE_URL", "")
+        if not p:
+            raise RuntimeError("TURSO_DATABASE_URL mancante (e TURSO_AUTH_TOKEN): impostali come segreti, mai nel repo")
+    if p.startswith(REMOTE_PREFIXES):
+        import libsql  # optional dependency: pip install libsql
+        if os.environ.get("TURSO_MODE", "remote") == "remote":
+            # Default on ephemeral CI runners: no local copy to download on every run (the DB only grows).
+            return libsql.connect(database=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", "")), False
+        replica = Path(os.environ.get("TURSO_REPLICA_PATH", "data/turso-replica.db"))
+        replica.parent.mkdir(parents=True, exist_ok=True)
+        conn = libsql.connect(str(replica), sync_url=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))
+        conn.sync()
+        return conn, True
+    if p != ":memory:":
+        Path(p).parent.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("ALGOWINBET_DB_DRIVER") == "libsql":  # run the local test-suite on the same engine used in production
+        import libsql
+        return libsql.connect(p), False
+    return sqlite3.connect(p), False
+
+
 class BudgetExceeded(RuntimeError):
     pass
 
 
 class SnapshotStore:
     def __init__(self, path: str | Path):
-        if str(path) != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path))
+        self.db, self.remote = connect(path)
         self.db.executescript(SCHEMA)
+        self.db.commit()
+
+    def close(self) -> None:
+        if self.remote:
+            self.db.sync()
+        self.db.close()
 
     # ---------------------------------------------------------------- raw
     def put_raw(self, source: str, endpoint: str, params: dict | None, status: int, body: bytes, fetched_at: datetime,
@@ -205,14 +241,20 @@ class BudgetGuard:
         return {"daily": None if self.daily is None else self.daily - self.reserve - ud,
                 "monthly": None if self.monthly is None else self.monthly - self.reserve - um}
 
-    def charge(self, n: int = 1) -> None:
-        rem = self.remaining()
-        for k, v in rem.items():
+    def check(self, n: int = 1) -> None:
+        for k, v in self.remaining().items():
             if v is not None and v < n:
                 raise BudgetExceeded(f"{self.source}: budget {k} esaurito (rimaste {max(v, 0)}, servono {n}, riserva {self.reserve})")
+
+    def add(self, n: int = 1) -> None:
         d, m = self._periods()
         self.store.add_usage(self.source, d, n)
         self.store.add_usage(self.source, m, n)
+
+    def charge(self, n: int = 1) -> None:
+        """check + add: for providers that bill every attempt (GOAL)."""
+        self.check(n)
+        self.add(n)
 
     def sync_from_headers(self, limit: int | None, remaining: int | None, kind: str | None) -> None:
         """Trust the provider's own counter when it says we used more than we counted."""

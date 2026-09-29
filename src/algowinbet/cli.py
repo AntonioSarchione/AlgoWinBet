@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -11,7 +12,10 @@ from .config import Config
 from .domain import NewsItem, Opportunity
 from .engine import AnalysisResult, Engine
 from .information import RuleBasedParser
+from .autorun import AutoConfig, run_tick
 from .collector import GoalCollector
+from .oddscollector import OddsCollector
+from .providers.oddspapi import MONTHLY_LIMIT, OddsPapiClient, OddsPapiError
 from .names import TeamNames
 from .providers import FootballDataCSV, ManualInfoOverlay, ManualOverlay, MockProvider
 from .providers.goalapi import GoalApiClient, GoalApiError, shape_summary
@@ -239,6 +243,100 @@ def cmd_stale_edge(a) -> None:
     print("  CLV > 0 = il prezzo preso era migliore della chiusura. Serve un campione grande: un ROI positivo con poche scommesse è rumore.")
 
 
+def _odds_client(store: SnapshotStore, monthly: int = MONTHLY_LIMIT, reserve: int = 20) -> OddsPapiClient:
+    try:
+        return OddsPapiClient(store=store, budget=BudgetGuard(store, "oddspapi", monthly=monthly, reserve=reserve))
+    except OddsPapiError as e:
+        sys.exit(str(e))
+
+
+def cmd_odds_account(a) -> None:
+    store = SnapshotStore(a.db)
+    c = _odds_client(store)
+    try:
+        acc = c.account()
+    except OddsPapiError as e:
+        sys.exit(f"errore: {e}")
+    for k, v in acc.items():
+        print(f"  {k}: {v}")
+    print(f"  budget locale: {c.budget.remaining()}")
+    store.close()
+
+
+def cmd_odds_probe(a) -> None:
+    store = SnapshotStore(a.db)
+    c = _odds_client(store)
+    params = dict(kv.split("=", 1) for kv in a.param or [])
+    try:
+        env = c.get(a.path, params, use_store_cache=False)
+    except (OddsPapiError, BudgetExceeded) as e:
+        sys.exit(f"errore: {e}")
+    print(f"OK {a.path} {params} — richieste fatturabili in questo run: {c.billable_sent}; budget {c.budget.remaining()}")
+    for line in shape_summary(env.get("data"))[: a.max_lines]:
+        print("  " + line)
+    store.close()
+
+
+def cmd_odds_tournaments(a) -> None:
+    store = SnapshotStore(a.db)
+    c = _odds_client(store)
+    try:
+        rows = c.get("/tournaments", {"sportId": 10})["data"]
+    except (OddsPapiError, BudgetExceeded) as e:
+        sys.exit(f"errore: {e}")
+    s = a.search.lower()
+    for t in rows:
+        if s in str(t.get("tournamentName", "")).lower() or s in str(t.get("categoryName", "")).lower():
+            print(f"  id={t.get('tournamentId')}  {t.get('tournamentName')}  ({t.get('categoryName')})  future={t.get('futureFixtures')}")
+    store.close()
+
+
+def _print_stats(st, budget=None) -> None:
+    print(f"{st.mode}: {st.requests} richieste, salvati {st.saved or '{}'}" + (f"; budget {budget.remaining()}" if budget else ""))
+    for x in st.skipped[:10]:
+        print(f"  = {x}")
+    for e in st.errors:
+        print(f"  ! {e}")
+    r = st.report
+    for k, v in sorted(r.gaps.items(), key=lambda kv: -kv[1])[:10]:
+        print(f"  lacuna {v}x {k}")
+    if r.unmapped_markets:
+        print("  mercati non mappati: " + ", ".join(f"{k} ({v})" for k, v in sorted(r.unmapped_markets.items(), key=lambda kv: -kv[1])[:15]))
+
+
+def cmd_odds_collect(a) -> None:
+    store = SnapshotStore(a.db)
+    c = _odds_client(store, reserve=a.reserve)
+    col = OddsCollector(c, store, a.tournaments, a.bookmakers, TeamNames.load(a.aliases))
+    _print_stats(col.sync_odds() if a.mode == "odds" else col.sync_closing(), c.budget)
+    store.close()
+
+
+def cmd_collect_auto(a) -> None:
+    """One scheduler tick (GitHub Actions): runs only what is due; keys and DB credentials come from the environment."""
+    cfg = AutoConfig.load(a.config)
+    try:
+        store = SnapshotStore(a.db)
+    except RuntimeError as e:
+        sys.exit(str(e))
+    names = TeamNames.load(a.aliases)
+    goal = odds = None
+    if cfg.goal_leagues and (os.environ.get("GOALAPI_KEY") or os.environ.get("GOAL_API_KEY")):
+        gc = GoalApiClient(store=store, budget=BudgetGuard(store, "goal-api", daily=cfg.goal_daily_limit, reserve=cfg.goal_reserve))
+        goal = GoalCollector(gc, store, cfg.goal_leagues, names)
+    if cfg.oddspapi_tournaments and (os.environ.get("ODDSPAPI_API_KEY") or os.environ.get("ODDSPAPI_KEY")):
+        oc = OddsPapiClient(store=store, budget=BudgetGuard(store, "oddspapi", monthly=cfg.oddspapi_monthly_limit, reserve=cfg.oddspapi_reserve))
+        odds = OddsCollector(oc, store, cfg.oddspapi_tournaments, cfg.bookmakers, names)
+    try:
+        results = run_tick(store, cfg, goal, odds)
+        if not results:
+            print("tick: niente da fare")
+        for st in results:
+            _print_stats(st)
+    finally:
+        store.close()
+
+
 def _goal_client(a, store: SnapshotStore) -> GoalApiClient:
     budget = BudgetGuard(store, "goal-api", daily=a.daily_limit, monthly=None, reserve=a.reserve)
     try:
@@ -456,6 +554,37 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--csv", nargs="*", help="storico CSV per il controllo dei nomi squadra")
     co.add_argument("--dry-run", action="store_true")
     co.set_defaults(fn=cmd_goal_collect)
+    od = sub.add_parser("odds", help="OddsPapi: account | probe | tournaments | collect (chiave in ODDSPAPI_API_KEY)")
+    os_ = od.add_subparsers(dest="odds_cmd", required=True)
+
+    def ocommon(sp):
+        sp.add_argument("--db", default="data/snapshots.db", help="file SQLite oppure 'turso' (TURSO_DATABASE_URL/TURSO_AUTH_TOKEN)")
+        sp.add_argument("--aliases", default="configs/team_aliases.json")
+        sp.add_argument("--reserve", type=int, default=20, help="richieste mensili tenute di scorta")
+    oa = os_.add_parser("account", help="quota e bookmaker del piano (gratis)")
+    ocommon(oa)
+    oa.set_defaults(fn=cmd_odds_account)
+    op = os_.add_parser("probe", help="1 richiesta: salva il grezzo e mostra la struttura")
+    ocommon(op)
+    op.add_argument("path", help="es. /fixtures")
+    op.add_argument("--param", action="append", help="k=v (ripetibile)")
+    op.add_argument("--max-lines", type=int, default=80)
+    op.set_defaults(fn=cmd_odds_probe)
+    ot = os_.add_parser("tournaments", help="cerca gli id dei campionati (1 richiesta, poi cache 24 h)")
+    ocommon(ot)
+    ot.add_argument("search")
+    ot.set_defaults(fn=cmd_odds_tournaments)
+    oc = os_.add_parser("collect", help="quote correnti (1 richiesta per tutti i campionati) o chiusure gratuite")
+    ocommon(oc)
+    oc.add_argument("--mode", required=True, choices=["odds", "closing"])
+    oc.add_argument("--tournaments", nargs="+", required=True)
+    oc.add_argument("--bookmakers", nargs="+", default=["sisal", "pinnacle", "snai"], help="massimo 3")
+    oc.set_defaults(fn=cmd_odds_collect)
+    ca = sub.add_parser("collect-auto", help="un giro dello scheduler online: esegue solo ciò che serve adesso")
+    ca.add_argument("--config", default="configs/collect.json")
+    ca.add_argument("--db", default="turso")
+    ca.add_argument("--aliases", default="configs/team_aliases.json")
+    ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")
     sn.add_argument("--upcoming", type=int, metavar="GIORNI", help="elenca le partite salvate nei prossimi GIORNI")

@@ -11,6 +11,7 @@ dependencies = ["numpy>=1.26", "scipy>=1.11", "pydantic>=2.5", "tzdata; platform
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+turso = ["libsql>=0.1.11"]
 
 [project.scripts]
 algowinbet = "algowinbet.cli:main"

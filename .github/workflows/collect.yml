@@ -1,0 +1,40 @@
+# Online data collection: one scheduler tick per run (see src/algowinbet/autorun.py). Nothing runs on the user's PC.
+# Secrets (Settings > Secrets and variables > Actions): GOALAPI_KEY, ODDSPAPI_API_KEY, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN.
+#
+# Budget of Actions minutes (private repo): every run is billed at least 1 minute, so the cron only covers the hours when
+# Serie A lineups and pre-kickoff prices matter. About 1,000 runs/month with the schedule below.
+# GitHub may start scheduled runs several minutes late under load: the tick logic tolerates it.
+name: collect
+
+on:
+  schedule:
+    - cron: "5 6 * * *"            # daily: fixtures, results, stats, closing lines, daily odds snapshot
+    - cron: "*/15 9-20 * * 5,6,0,1" # Fri-Mon: lineups window and pre-kickoff odds
+    - cron: "*/30 15-20 * * 2,3,4"  # Tue-Thu evenings: midweek rounds
+  workflow_dispatch: {}
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[turso]"
+      - name: collect-auto
+        env:
+          GOALAPI_KEY: ${{ secrets.GOALAPI_KEY }}
+          ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: algowinbet collect-auto --config configs/collect.json --db turso
