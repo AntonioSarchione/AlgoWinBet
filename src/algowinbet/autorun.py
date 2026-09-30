@@ -147,3 +147,9 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if on_step and len(out) > before:
             on_step(out[-1])
     return out
+
+
+def should_publish(results: list[CollectStats], last_pub: datetime | None, now: datetime, max_age: timedelta = timedelta(hours=6)) -> bool:
+    """Re-analyse when this tick brought prices or lineups, or when the published analysis is older than max_age."""
+    fresh = any(r.saved.get("quotes") or r.saved.get("lineups") for r in results)
+    return fresh or last_pub is None or now - last_pub >= max_age

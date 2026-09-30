@@ -375,6 +375,16 @@ def cmd_collect_auto(a) -> None:
         results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds)
         if not results:
             print("tick: niente da fare")
+        from .autorun import should_publish
+        from .publish import analyze_and_publish, last_publication
+        if a.publish and should_publish(results, last_publication(store), datetime.now(timezone.utc)):
+            if time.monotonic() - t0 > a.max_seconds + 60:
+                print("analisi: rimandata (tempo del giro esaurito)")
+            else:
+                rid, res = analyze_and_publish(store)
+                print(f"analisi pubblicata (run {rid}): {len(res.fixtures)} partite, {len(res.opportunities)} mercati, "
+                      f"{len(res.optimizer.slips)} schedine" + (" — NO BET" if res.optimizer.no_bet else "") +
+                      f" ({time.monotonic() - t0:.0f}s dall'inizio)")
         now = datetime.now(timezone.utc)
         print("Riepilogo database: " + ", ".join(f"{k}={v}" for k, v in store.stats().items()))
         by_comp: dict[str, int] = {}
@@ -638,6 +648,7 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--db", default="turso")
     ca.add_argument("--aliases", default="configs/team_aliases.json")
     ca.add_argument("--max-seconds", type=float, default=360, help="nessun nuovo passo dopo N secondi (il job CI ha un timeout)")
+    ca.add_argument("--no-publish", dest="publish", action="store_false", help="non rifare l'analisi per la dashboard")
     ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")

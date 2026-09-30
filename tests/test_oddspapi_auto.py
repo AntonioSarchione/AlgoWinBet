@@ -285,3 +285,34 @@ def test_interrupted_tick_leaves_no_league_behind():
     assert "fixtures" in plan_tick(store, cfg, NOW, None)
     gc = GoalApiClient(api_key="k", store=store, transport=lambda u, h: (200, {}, b"{}"), now=lambda: NOW)
     assert GoalCollector(gc, store, ["A", "B"], NAMES, now=lambda: NOW).stale_leagues("fixtures") == ["B"]
+
+
+def test_publish_writes_dashboard_tables_and_prunes():
+    from algowinbet.publish import analyze_and_publish, last_publication
+    from algowinbet.providers import MockProvider
+    from algowinbet.config import Config
+    mock = MockProvider(seed=7)
+    s = SnapshotStore(":memory:")
+    s.save_results("mock", mock.list_history(None, mock.as_of), mock.as_of)
+    fxs = mock.list_fixtures(None, mock.as_of, mock.as_of + timedelta(days=3))
+    s.save_fixtures("mock", fxs, mock.as_of - timedelta(days=1))
+    for f in fxs:
+        s.save_quotes("mock", mock.get_quotes(f.id))
+    cfg = Config()
+    cfg.ensemble.quote_window_hours = 72  # mock prices are timed relative to kickoff, not to "now"
+    rid, res = analyze_and_publish(s, cfg, now=mock.as_of)
+    n_fx = s.db.execute("SELECT COUNT(*), SUM(p_home IS NOT NULL) FROM pub_fixtures WHERE run_id=?", (rid,)).fetchone()
+    assert n_fx[0] == len(res.fixtures) > 0 and n_fx[1] == n_fx[0]
+    run = s.db.execute("SELECT no_bet, n_fixtures FROM pub_runs WHERE id=?", (rid,)).fetchone()
+    assert run[1] == len(res.fixtures) and last_publication(s) is not None
+    assert s.db.execute("SELECT COUNT(*) FROM pub_slips WHERE run_id=?", (rid,)).fetchone()[0] == len(res.optimizer.slips)
+
+
+def test_should_publish_on_fresh_data_or_stale_publication():
+    from algowinbet.autorun import should_publish
+    from algowinbet.collector import CollectStats
+    q = CollectStats("odds")
+    q.add("quotes", 5)
+    assert should_publish([q], NOW, NOW) and should_publish([], None, NOW)
+    assert not should_publish([CollectStats("lineups")], NOW - timedelta(hours=1), NOW)
+    assert should_publish([], NOW - timedelta(hours=7), NOW)
