@@ -7,10 +7,11 @@
 name: collect
 
 on:
-  schedule:
-    - cron: "5 6 * * *"            # daily: fixtures, results, stats, closing lines, daily odds snapshot
-    - cron: "*/15 9-20 * * 5,6,0,1" # Fri-Mon: lineups window and pre-kickoff odds
-    - cron: "*/30 15-20 * * 2,3,4"  # Tue-Thu evenings: midweek rounds
+  # Schedule DISABLED until secrets and live payloads are verified (manual runs only). To enable, uncomment:
+  # schedule:
+  #   - cron: "5 6 * * *"            # daily: fixtures, results, stats, closing lines, daily odds snapshot
+  #   - cron: "*/15 9-20 * * 5,6,0,1" # Fri-Mon: lineups window and pre-kickoff odds
+  #   - cron: "*/30 15-20 * * 2,3,4"  # Tue-Thu evenings: midweek rounds
   workflow_dispatch: {}
 
 concurrency:

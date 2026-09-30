@@ -1,0 +1,58 @@
+# Manual probes run on GitHub instead of the user's PC (whose network blocks OddsPapi).
+# Actions > probe > Run workflow. Keys come from repository secrets; the log never shows them.
+name: probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "odds (OddsPapi) oppure goal (GOAL API)"
+        type: choice
+        options: [odds, goal]
+        default: odds
+      command:
+        description: "odds: account | tournaments | probe   -   goal: leagues | probe"
+        type: choice
+        options: [account, tournaments, leagues, probe]
+        default: account
+      arg:
+        description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
+        required: false
+        default: ""
+      params:
+        description: "solo probe: parametri k=v separati da spazio, es. fixtureId=123 bookmakers=sisal.it"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[turso]"
+      - name: run
+        env:
+          GOALAPI_KEY: ${{ secrets.GOALAPI_KEY }}
+          ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SOURCE: ${{ inputs.source }}
+          COMMAND: ${{ inputs.command }}
+          ARG: ${{ inputs.arg }}
+          PARAMS: ${{ inputs.params }}
+        run: |
+          # inputs arrive as environment variables, never interpolated into the script (no shell injection)
+          DB=data/probe.db
+          if [ -n "$TURSO_DATABASE_URL" ]; then DB=turso; fi   # raw payloads and budget counters persist on Turso
+          args=("$SOURCE" "$COMMAND")
+          if [ "$COMMAND" != "account" ]; then args+=("$ARG"); fi
+          if [ "$COMMAND" = "probe" ]; then for kv in $PARAMS; do args+=(--param "$kv"); done; fi
+          algowinbet "${args[@]}" --db "$DB"
