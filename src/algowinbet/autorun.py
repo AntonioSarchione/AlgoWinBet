@@ -72,7 +72,8 @@ def odds_allowed_today(store: SnapshotStore, cfg: AutoConfig, now: datetime, cos
 
 
 def _last_ok(store: SnapshotStore, source: str, endpoint_like: str) -> datetime | None:
-    row = store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint LIKE ? AND status=200",
+    row = store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint LIKE ? AND status=200 "
+                           "AND (source != 'goal-api' OR params LIKE '%\"from\"%')",  # manual probes are not syncs
                            (source, endpoint_like)).fetchone()
     return datetime.fromisoformat(row[0]) if row and row[0] else None
 

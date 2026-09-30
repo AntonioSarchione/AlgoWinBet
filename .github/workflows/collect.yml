@@ -1,17 +1,16 @@
 # Online data collection: one scheduler tick per run (see src/algowinbet/autorun.py). Nothing runs on the user's PC.
 # Secrets (Settings > Secrets and variables > Actions): GOAL_API_KEY (or GOALAPI_KEY), ODDSPAPI_API_KEY, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN.
 #
-# Budget of Actions minutes (private repo): every run is billed at least 1 minute, so the cron only covers the hours when
-# Serie A lineups and pre-kickoff prices matter. About 1,000 runs/month with the schedule below.
-# GitHub may start scheduled runs several minutes late under load: the tick logic tolerates it.
+# Budget of Actions minutes (private repo, 2,000 min/month): every job is billed in whole minutes (a tick takes about
+# 1 minute including setup), so the cron only covers the hours when lineups and pre-kickoff prices matter:
+# ~200 runs/week, ~850/month. GitHub may start scheduled runs several minutes late: the tick logic tolerates it.
 name: collect
 
 on:
-  # Schedule DISABLED until secrets and live payloads are verified (manual runs only). To enable, uncomment:
-  # schedule:
-  #   - cron: "5 6 * * *"            # daily: fixtures, results, stats, closing lines, daily odds snapshot
-  #   - cron: "*/15 9-20 * * 5,6,0,1" # Fri-Mon: lineups window and pre-kickoff odds
-  #   - cron: "*/30 15-20 * * 2,3,4"  # Tue-Thu evenings: midweek rounds
+  schedule:
+    - cron: "5 6 * * *"               # daily: fixtures, results, stats, history backfill, closing lines, daily odds snapshot
+    - cron: "*/20 9-20 * * 5,6,0,1"    # Fri-Mon: domestic leagues (lineups window, pre-kickoff odds)
+    - cron: "*/20 15-19 * * 2,3,4"     # Tue-Thu: Champions/Europa League and midweek rounds
   workflow_dispatch: {}
 
 concurrency:

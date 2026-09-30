@@ -56,7 +56,8 @@ class GoalCollector:
 
     # --------------------------------------------------------------- modes
     def last_sync(self, lid: str, kind: str) -> datetime | None:
-        row = self.store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint=? AND status=200",
+        row = self.store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint=? AND status=200 "
+                                    "AND params LIKE '%\"from\"%'",  # real syncs only: a manual probe must not count as one
                                     (SOURCE, f"/leagues/{lid}/{kind}")).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 

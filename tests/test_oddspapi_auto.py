@@ -191,8 +191,8 @@ def test_plan_tick_schedules_by_staleness_and_kickoff_slots():
     cfg = AutoConfig(goal_leagues=["L"], oddspapi_tournaments=["17"])
     assert plan_tick(store, cfg, NOW, None) == ["fixtures", "results", "stats", "lineups", "backfill", "odds", "closing"]
     store.mark_job("backfill:goal:L", NOW)
-    store.put_raw("goal-api", "/leagues/L/fixtures", {}, 200, b"{}", NOW - timedelta(hours=2))
-    store.put_raw("goal-api", "/leagues/L/results", {}, 200, b"{}", NOW - timedelta(hours=2))
+    store.put_raw("goal-api", "/leagues/L/fixtures", {"from": "x"}, 200, b"{}", NOW - timedelta(hours=2))
+    store.put_raw("goal-api", "/leagues/L/results", {"from": "x"}, 200, b"{}", NOW - timedelta(hours=2))
     t = utc(2026, 10, 10, 12, 10)  # 50 min before Genoa-Fiorentina: pre-kickoff slot
     assert plan_tick(store, cfg, t, t - timedelta(hours=3)) == ["lineups", "odds", "closing"]
     assert plan_tick(store, cfg, t, t - timedelta(minutes=20)) == ["lineups", "closing"]  # slot already covered
@@ -216,7 +216,7 @@ def test_tick_with_nothing_due_sends_nothing():
     store = SnapshotStore(":memory:")
     cfg = AutoConfig(goal_leagues=["L"])
     for ep in ("/leagues/L/fixtures", "/leagues/L/results"):
-        store.put_raw("goal-api", ep, {}, 200, b"{}", NOW - timedelta(hours=1))
+        store.put_raw("goal-api", ep, {"from": "x"}, 200, b"{}", NOW - timedelta(hours=1))
     store.mark_job("backfill:goal:L", NOW - timedelta(days=3))
     sent = []
     gc = GoalApiClient(api_key="k", store=store, transport=lambda u, h: sent.append(u) or (200, {}, b'{"success":true,"data":[]}'),
@@ -279,7 +279,8 @@ def test_bulk_writes_use_few_statements():
 
 def test_interrupted_tick_leaves_no_league_behind():
     store = SnapshotStore(":memory:")
-    store.put_raw("goal-api", "/leagues/A/fixtures", {}, 200, b"{}", NOW - timedelta(hours=1))  # A done, B never fetched
+    store.put_raw("goal-api", "/leagues/A/fixtures", {"from": "x"}, 200, b"{}", NOW - timedelta(hours=1))  # A done, B never fetched
+    store.put_raw("goal-api", "/leagues/B/fixtures", {"limit": "3"}, 200, b"{}", NOW)  # a manual probe on B is not a sync
     cfg = AutoConfig(goal_leagues=["A", "B"])
     assert "fixtures" in plan_tick(store, cfg, NOW, None)
     gc = GoalApiClient(api_key="k", store=store, transport=lambda u, h: (200, {}, b"{}"), now=lambda: NOW)
