@@ -1,30 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE, verifySessionToken } from "./lib/session";
 
-// Private dashboard: HTTP Basic auth against DASHBOARD_PASSWORD (Vercel project env var, set by the owner).
-// Without the variable the site stays closed rather than open.
-export function proxy(request: NextRequest) {
-  const expected = process.env.DASHBOARD_PASSWORD;
-  if (!expected) {
-    return new NextResponse("Dashboard chiusa: imposta DASHBOARD_PASSWORD nelle variabili del progetto Vercel.", { status: 503 });
-  }
-  const header = request.headers.get("authorization") ?? "";
-  if (header.startsWith("Basic ")) {
-    const decoded = atob(header.slice(6));
-    const password = decoded.slice(decoded.indexOf(":") + 1);
-    if (password.length === expected.length && timingSafeEqual(password, expected)) {
-      return NextResponse.next();
-    }
-  }
-  return new NextResponse("Accesso riservato", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="AlgoWinBet", charset="UTF-8"' },
-  });
-}
+// Private dashboard: every page needs a valid session cookie, obtained on /login with DASHBOARD_PASSWORD
+// (Vercel project env var, set by the owner). Without the variable nobody can log in: the site stays closed.
+export async function proxy(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
+  const secret = process.env.DASHBOARD_PASSWORD;
+  const loggedIn = Boolean(secret) && (await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value, secret!));
 
-function timingSafeEqual(a: string, b: string): boolean {
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+  if (pathname === "/login") {
+    return loggedIn ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
+  }
+  if (loggedIn) return NextResponse.next();
+
+  const url = new URL("/login", request.url);
+  if (pathname !== "/") url.searchParams.set("next", pathname + search);
+  return NextResponse.redirect(url);
 }
 
 export const config = {

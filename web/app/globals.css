@@ -111,7 +111,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .promo b { display: block; color: var(--text); margin: 8px 0 4px; font-size: 14px; }
 .theme-btn {
-  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 10px; cursor: pointer;
+  width: 100%; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 10px; cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--text-2); transition: border-color 160ms ease;
 }
 .theme-btn:hover { border-color: var(--line-strong); color: var(--text); }
@@ -316,7 +316,7 @@ td.wrap { white-space: normal; min-width: 210px; }
   .nav { flex-direction: row; }
   .nav a span { display: none; }
   .nav a { min-width: 44px; justify-content: center; }
-  .sidebar-foot { margin: 0 0 0 auto; }
+  .sidebar-foot { margin: 0 0 0 auto; flex-direction: row; gap: 8px; }
   .theme-btn span { display: none; }
   .main { padding: 16px 16px 40px; }
   .filters { grid-template-columns: minmax(0, 1fr); }
@@ -329,3 +329,27 @@ td.wrap { white-space: normal; min-width: 210px; }
 @media (max-width: 480px) {
   .brand > span:last-child { display: none; }
 }
+
+/* ---------- login ---------- */
+.login {
+  min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px;
+  background:
+    radial-gradient(60% 50% at 50% 0%, var(--accent-soft), transparent 70%),
+    repeating-linear-gradient(90deg, transparent 0 58px, rgba(255, 255, 255, 0.015) 58px 59px),
+    var(--bg);
+}
+.login-card { width: 100%; max-width: 380px; padding: 32px 28px 28px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.login-mark { width: 52px; height: 52px; border-radius: 14px; }
+.login-card h1 { margin: 16px 0 2px; font-size: 24px; letter-spacing: -0.02em; }
+.login-card > p { margin: 0 0 24px; font-size: 13px; }
+.login-form { width: 100%; display: flex; flex-direction: column; gap: 16px; text-align: left; }
+.control[data-invalid], .control[data-invalid]:focus-within { border-color: var(--bad); }
+.field-error { margin: 2px 0 0; font-size: 13px; color: var(--bad); }
+.icon-btn {
+  flex: none; width: 36px; height: 36px; margin-right: -6px; display: grid; place-items: center; border-radius: 8px;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer; transition: background 140ms ease, color 140ms ease;
+}
+.icon-btn:hover { background: var(--card-2); color: var(--text); }
+.btn:disabled { opacity: 0.7; cursor: progress; }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

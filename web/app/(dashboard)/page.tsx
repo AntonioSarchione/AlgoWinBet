@@ -4,9 +4,9 @@ import {
   Layers, Percent, Search, ShieldCheck, Target, Trophy, TrendingUp,
 } from "lucide-react";
 import { lastTick, latestRun, parseJSON, runFixtures, runOpps, runSlips, usage, type FixtureRow, type Leg, type ModelMarket } from "@/lib/db";
-import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "./_components/format";
-import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "./_components/ui";
-import { OppTable } from "./_components/OppTable";
+import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
+import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
+import { OppTable } from "@/app/_components/OppTable";
 
 export const dynamic = "force-dynamic";
 

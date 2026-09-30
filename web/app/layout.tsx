@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Fira_Code, Fira_Sans } from "next/font/google";
-import { Sidebar } from "./_components/Sidebar";
 import "./globals.css";
 
 const sans = Fira_Sans({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-fira-sans", display: "swap" });
@@ -23,14 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body>
-        <div className="shell">
-          <Sidebar />
-          <main className="main" id="contenuto">
-            {children}
-          </main>
-        </div>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { CalendarDays, Search } from "lucide-react";
 import { latestRun, runFixtures, type FixtureRow } from "@/lib/db";
-import { compShort, dayKey, dayLong, fairOdds, hour, pct } from "../_components/format";
-import { Empty, MatchCell, Split1X2 } from "../_components/ui";
+import { compShort, dayKey, dayLong, fairOdds, hour, pct } from "@/app/_components/format";
+import { Empty, MatchCell, Split1X2 } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Palinsesto" };

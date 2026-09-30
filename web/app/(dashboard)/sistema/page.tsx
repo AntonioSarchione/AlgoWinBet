@@ -1,7 +1,7 @@
 import { Activity, Database } from "lucide-react";
 import { lastTick, parseJSON, systemStatus, usage } from "@/lib/db";
-import { ago, dayTime, shortDate } from "../_components/format";
-import { Empty, Meter } from "../_components/ui";
+import { ago, dayTime, shortDate } from "@/app/_components/format";
+import { Empty, Meter } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Stato del sistema" };

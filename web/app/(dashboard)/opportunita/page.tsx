@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Percent } from "lucide-react";
 import { latestRun, runOpps } from "@/lib/db";
-import { dayTime } from "../_components/format";
-import { OppTable } from "../_components/OppTable";
-import { Empty } from "../_components/ui";
+import { dayTime } from "@/app/_components/format";
+import { OppTable } from "@/app/_components/OppTable";
+import { Empty } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Opportunità" };

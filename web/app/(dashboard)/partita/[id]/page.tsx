@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, History, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
 import { fixtureDetail, parseJSON, type ModelMarket, type OppRow, type QuotePoint, type ResultRow } from "@/lib/db";
-import { OddsChart, type Series } from "../../_components/OddsChart";
-import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "../../_components/format";
-import { Empty, HBar, Ring, TeamBadge } from "../../_components/ui";
+import { OddsChart, type Series } from "@/app/_components/OddsChart";
+import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
+import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, CalendarDays, LayoutDashboard, Moon, Sparkles, Sun, Target, TrendingUp } from "lucide-react";
+import { Activity, CalendarDays, LayoutDashboard, LogOut, Moon, Sparkles, Sun, Target, TrendingUp } from "lucide-react";
+import { logout } from "@/app/login/actions";
 
 const NAV = [
   { href: "/", label: "Home", icon: LayoutDashboard },
@@ -62,6 +63,12 @@ export function Sidebar() {
           {theme === "dark" ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
           <span>{theme === "dark" ? "Tema chiaro" : "Tema scuro"}</span>
         </button>
+        <form action={logout}>
+          <button type="submit" className="theme-btn" style={{ width: "100%" }} aria-label="Esci">
+            <LogOut size={17} aria-hidden="true" />
+            <span>Esci</span>
+          </button>
+        </form>
       </div>
     </aside>
   );
