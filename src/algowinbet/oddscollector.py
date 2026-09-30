@@ -2,10 +2,12 @@
 closing-line history after kickoff. Quotes are stored under the GOAL fixture id so the engine sees one calendar."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from .collector import CollectStats
+from .domain import OddsQuote
 from .names import TeamNames
 from .providers.oddspapi import SOURCE, OddsPapiClient, OddsPapiError, OddsPapiMapper
 from .snapshots import BudgetExceeded, SnapshotProvider, SnapshotStore
@@ -15,6 +17,30 @@ MAX_TOURNAMENTS = 5  # /odds-by-tournaments rejects more (400 "Please provide a 
 
 LINKS_SCHEMA = """CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TEXT, linked_at TEXT,
   PRIMARY KEY(source, ext_id));"""
+
+
+CHECKPOINTS_H = (72, 48, 24, 12, 6, 3, 1)  # hours before kickoff kept from a price path (plus the opening and the latest price)
+
+
+def thin_history(quotes: list[OddsQuote], kickoff: datetime, now: datetime) -> list[OddsQuote]:
+    """A full price path is thousands of points per fixture. Per selection keep the opening price, the price in force at each
+    checkpoint already passed, and the latest price; the kept points are real observations with their own timestamps."""
+    series: dict[tuple, list[OddsQuote]] = {}
+    for q in quotes:
+        series.setdefault((q.market_code, q.selection, q.line, q.bookmaker), []).append(q)
+    out: list[OddsQuote] = []
+    for pts in series.values():
+        pts.sort(key=lambda q: q.observed_at)
+        keep = {0, len(pts) - 1}
+        for h in CHECKPOINTS_H:
+            at = kickoff - timedelta(hours=h)
+            if at > now:
+                continue
+            before = [i for i, q in enumerate(pts) if q.observed_at <= at]
+            if before:
+                keep.add(before[-1])
+        out += [pts[i] for i in sorted(keep)]
+    return out
 
 
 class OddsCollector:
@@ -88,14 +114,15 @@ class OddsCollector:
         self._run(st, work)
         return st
 
-    def sync_prematch_history(self, days_ahead: int = 10, max_fixtures: int = 60) -> CollectStats:
-        """/historical-odds for linked fixtures NOT played yet: the whole price path up to now, one call per fixture.
-        The OddsPapi docs say this endpoint is free, but that is unverified, so the first call is bracketed by /account reads
-        (the provider's own request counter): if it was billed, the step stops after that single call."""
+    def sync_prematch_history(self, days_ahead: int = 10, max_fixtures: int = 80, max_seconds: float = 600,
+                              clock: Callable[[], float] = time.monotonic) -> CollectStats:
+        """Free /historical-odds (verified live on 2026-09-30: the provider's request counter did not move) for linked fixtures
+        NOT played yet, nearest kickoff first: the price path up to now, thinned to CHECKPOINTS. Afterwards one free /account
+        read syncs the local budget with the provider's counter, so a future change in billing cannot drain the reserve."""
         st = CollectStats("history")
 
         def work():
-            t = self.now()
+            t, t0 = self.now(), clock()
             upcoming = {f.id: f for f in self.provider.list_fixtures(None, t, t + timedelta(days=days_ahead))}
             links = self.store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall()
             rows = sorted(((e, fid) for e, fid in links if fid in upcoming), key=lambda r: upcoming[r[1]].kickoff)
@@ -104,34 +131,23 @@ class OddsCollector:
                 return
             books = self.client.resolve_bookmakers(self.wanted_books)[:3]
             m = self.mapper()
-            c0 = self.client.account()["request_count"]
-            c1 = self.client.account()["request_count"]
-            for i, (ext_id, fid) in enumerate(rows[:max_fixtures]):
+            for i, (ext_id, fid) in enumerate(rows):
+                if i >= max_fixtures or clock() - t0 > max_seconds:
+                    st.skipped.append(f"{len(rows) - i} partite rimandate al prossimo giro (limite per run)")
+                    break
                 fx = upcoming[fid]
                 env = self.client.get("/historical-odds", {"fixtureId": ext_id, "bookmakers": ",".join(books)})
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
-                quotes = m.history(env["data"], fx, closing=False)
+                quotes = thin_history(m.history(env["data"], fx, closing=False), fx.kickoff, t)
                 st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
                 if quotes:
-                    first = min(q.observed_at for q in quotes)
-                    print(f"  storico {fx.home}-{fx.away} (calcio d'inizio {fx.kickoff:%d/%m %H:%M} UTC): {len(quotes)} prezzi, "
-                          f"il primo del {first:%d/%m %H:%M} UTC ({(fx.kickoff - first).total_seconds() / 3600:.0f}h prima)", flush=True)
-                else:
-                    print(f"  storico {fx.home}-{fx.away}: nessun prezzo pre-partita", flush=True)
-                if i == 0:
-                    c2 = self.client.account()["request_count"]
-                    if all(isinstance(c, int) for c in (c0, c1, c2)):
-                        cost = (c2 - c1) - (c1 - c0)  # minus what one /account read costs, if anything
-                        print(f"  VERIFICA COSTO: contatore OddsPapi {c0} -> {c1} (/account) -> {c2} (/historical-odds): "
-                              f"/historical-odds {'GRATUITO' if cost <= 0 else f'COSTA {cost}'}", flush=True)
-                        if cost > 0:
-                            st.skipped.append(f"/historical-odds non è gratuito ({cost} richiesta): fermato dopo la prima partita")
-                            return
-                    else:
-                        st.skipped.append("contatore /account non leggibile: costo non verificato, fermato dopo la prima partita")
-                        return
-            if len(rows) > max_fixtures:
-                st.skipped.append(f"{len(rows) - max_fixtures} partite oltre il limite per run")
+                    first, last = min(q.observed_at for q in quotes), max(q.observed_at for q in quotes)
+                    print(f"  storico {fx.home}-{fx.away} ({fx.kickoff:%d/%m %H:%M} UTC): {len(quotes)} prezzi, dal {first:%d/%m %H:%M} "
+                          f"({(fx.kickoff - first).total_seconds() / 3600:.0f}h prima) all'ultimo cambio {last:%d/%m %H:%M}", flush=True)
+            try:
+                self.client.account()
+            except OddsPapiError as e:
+                st.skipped.append(f"/account non letto ({e}): budget non sincronizzato")
         self._run(st, work)
         return st
 

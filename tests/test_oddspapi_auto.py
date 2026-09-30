@@ -189,31 +189,33 @@ def _counter_account(counter):
                                                                             "request_count": counter[0]}]})
 
 
-def test_prematch_history_saves_price_paths_when_free_and_stops_when_billed():
+def test_prematch_history_saves_thinned_price_paths_and_syncs_the_budget():
     store = SnapshotStore(":memory:")
     seed_calendar(store)
     early = utc(2026, 10, 10, 9)  # both matches still to play
     series = {"101": {"players": {"0": [{"createdAt": "2026-10-08T09:00:00Z", "price": 2.6}, {"createdAt": "2026-10-10T08:00:00Z", "price": 2.4}]}}}
     hist = {"bookmakers": {"sisal.it": {"markets": {"101": {"outcomes": series}}}}}
-    counter = [40]
-
-    def billed_hist(q):
-        counter[0] += 1
-        return 200, hist
     by_book = lambda q: (200, [fixture_odds(only=q["bookmaker"]), fixture_odds("op-2", 3, 4, "2026-10-10T16:00:00Z", only=q["bookmaker"])])
     routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/participants": (200, PARTICIPANTS),
-              "/odds-by-tournaments": by_book, "/account": _counter_account(counter), "/historical-odds": (200, hist)}
+              "/odds-by-tournaments": by_book, "/account": _counter_account([7]), "/historical-odds": (200, hist)}
     c, t = mk_client(routes, store, now=early)
     col = OddsCollector(c, store, ["17"], ["sisal", "pinnacle"], NAMES, now=lambda: early)
     col.sync_odds()
     st = col.sync_prematch_history()
     assert sum("historical-odds" in u for u in t.calls) == 2 and st.saved["quotes"] == 4 and not st.skipped
     assert {r[0] for r in store.db.execute("SELECT kind FROM quotes WHERE observed_at < '2026-10-10T09'").fetchall()} == {"current"}
+    assert "/account" in t.calls[-1] and c.budget.used()[1] == 7  # provider counter synced after the free calls
 
-    routes["/historical-odds"] = billed_hist
-    c2, t2 = mk_client(routes, store, now=early)
-    st2 = OddsCollector(c2, store, ["17"], ["sisal", "pinnacle"], NAMES, now=lambda: early).sync_prematch_history()
-    assert sum("historical-odds" in u for u in t2.calls) == 1 and "non è gratuito" in st2.skipped[0]
+
+def test_thin_history_keeps_opening_checkpoints_and_latest():
+    from algowinbet.domain import OddsQuote
+    from algowinbet.oddscollector import thin_history
+    ko = utc(2026, 10, 10, 20)
+    qs = [OddsQuote(fixture_id="f", market_code="MATCH_1X2", selection="HOME", bookmaker="pinnacle", odds=2.0 + i / 100,
+                    observed_at=ko - timedelta(hours=100 - i), kind="current") for i in range(95)]  # hourly from 100h to 6h before
+    kept = thin_history(qs, ko, ko - timedelta(hours=5))
+    hours = [round((ko - q.observed_at).total_seconds() / 3600) for q in kept]
+    assert hours == [100, 72, 48, 24, 12, 6]  # 3h and 1h not reached yet; the 6h checkpoint is also the latest price
 
 
 # ------------------------------------------------------------------ tick
