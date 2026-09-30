@@ -11,6 +11,7 @@ live responses: mappers are tolerant and count what they cannot map, and raw pay
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -21,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..domain import Fixture, OddsQuote
-from ..names import TeamNames
+from ..names import TeamNames, normalize
 from ..snapshots import BudgetGuard, SnapshotStore
 from .goalapi import MappingReport, Transport, parse_dt, urllib_transport
 
@@ -31,7 +32,8 @@ MONTHLY_LIMIT = 250
 FREE_ENDPOINTS = {"/account", "/historical-odds"}
 COOLDOWN = {"/account": 1.0, "/sports": 1.0, "/bookmakers": 1.0, "/markets": 1.0, "/tournaments": 1.0, "/fixtures": 2.0,
             "/odds": 0.5, "/odds-by-tournaments": 1.0, "/historical-odds": 5.0}
-METADATA_TTL = {"/markets": timedelta(days=7), "/bookmakers": timedelta(days=7), "/tournaments": timedelta(days=1)}
+METADATA_TTL = {"/markets": timedelta(days=7), "/bookmakers": timedelta(days=7), "/tournaments": timedelta(days=1),
+                "/participants": timedelta(days=7)}
 
 
 class OddsPapiError(RuntimeError):
@@ -141,9 +143,17 @@ class OddsPapiClient:
 class OddsPapiMapper:
     """Converts OddsPapi fixtures/odds into our fixtures (matched to the GOAL calendar) and OddsQuote rows."""
 
-    def __init__(self, names: TeamNames | None = None, markets: list[dict] | None = None):
+    def __init__(self, names: TeamNames | None = None, markets: list[dict] | None = None, participants: Any = None):
         self.names = names or TeamNames()
         self.report = MappingReport()
+        # Fixtures carry only participant ids (v4 docs): names come from /participants, cached for a week.
+        self.participants: dict[str, str] = {}
+        rows = participants.items() if isinstance(participants, dict) else (participants or [])
+        for r in rows:
+            if isinstance(r, tuple):
+                self.participants[str(r[0])] = str(r[1].get("participantName") if isinstance(r[1], dict) else r[1])
+            elif isinstance(r, dict) and r.get("participantId") is not None:
+                self.participants[str(r["participantId"])] = str(r.get("participantName") or r.get("name") or "")
         self.markets: dict[int, dict] = {}
         for m in markets or []:
             try:
@@ -152,19 +162,39 @@ class OddsPapiMapper:
                 self.report.gap("markets: riga senza marketId/outcomeId")
 
     # -- fixtures
+    def _name(self, row: dict, side: int) -> str:
+        return self.names.canon(str(row.get(f"participant{side}Name") or self.participants.get(str(row.get(f"participant{side}Id")), "")))
+
+    @staticmethod
+    def _sim(a: str, b: str) -> float:
+        na, nb = normalize(a), normalize(b)
+        if not na or not nb:
+            return 0.0
+        if na == nb:
+            return 1.0
+        if na in nb or nb in na:
+            return 0.9
+        return difflib.SequenceMatcher(None, na, nb).ratio()
+
     def match_fixture(self, row: dict, calendar: list[Fixture], tolerance: timedelta = timedelta(hours=3)) -> Fixture | None:
-        home = self.names.canon(str(row.get("participant1Name") or ""))
-        away = self.names.canon(str(row.get("participant2Name") or ""))
+        """Same kickoff (+-3h) and both team names similar. Exact alias match first, then fuzzy: across 9 leagues the two
+        sources spell clubs differently ("Bayern Munich" / "Bayern Munchen") and aliases alone would never be complete."""
+        home, away = self._name(row, 1), self._name(row, 2)
         ko = parse_dt(row.get("startTime"))
         if not home or not away or ko is None:
-            self.report.gap("fixture oddspapi: squadre o startTime mancanti")
+            self.report.gap("fixture oddspapi: nomi squadra (participants) o startTime mancanti")
             return None
-        hits = [f for f in calendar if f.home == home and f.away == away and abs(f.kickoff - ko) <= tolerance]
-        if len(hits) != 1:
-            self.report.gap(f"fixture oddspapi senza corrispondenza nel calendario: {home}-{away} {ko:%Y-%m-%d %H:%M}")
-            return None
-        self.report.good("fixture link")
-        return hits[0]
+        near = [f for f in calendar if abs(f.kickoff - ko) <= tolerance]
+        exact = [f for f in near if f.home == home and f.away == away]
+        if len(exact) == 1:
+            self.report.good("fixture link")
+            return exact[0]
+        scored = sorted(((min(self._sim(home, f.home), self._sim(away, f.away)), f) for f in near), key=lambda x: -x[0])
+        if scored and scored[0][0] >= 0.75 and (len(scored) == 1 or scored[1][0] < scored[0][0] - 0.15):
+            self.report.good("fixture link (nomi simili)")
+            return scored[0][1]
+        self.report.gap(f"fixture oddspapi senza corrispondenza: {home}-{away} {ko:%Y-%m-%d %H:%M}")
+        return None
 
     # -- markets
     def _market(self, mid: int) -> tuple[str, float | None] | None:

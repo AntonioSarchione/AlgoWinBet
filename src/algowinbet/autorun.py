@@ -12,6 +12,7 @@ Plan per tick (UTC):
 """
 from __future__ import annotations
 
+import calendar
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -24,10 +25,18 @@ from .snapshots import SnapshotProvider, SnapshotStore
 
 
 @dataclass
+class League:
+    name: str
+    goal: str | None = None       # GOAL league id (goal leagues "...")
+    oddspapi: int | None = None   # OddsPapi tournamentId (odds tournaments "...")
+
+
+@dataclass
 class AutoConfig:
     goal_leagues: list[str] = field(default_factory=list)
     oddspapi_tournaments: list[str] = field(default_factory=list)
-    bookmakers: list[str] = field(default_factory=lambda: ["sisal", "pinnacle", "snai"])
+    bookmakers: list[str] = field(default_factory=lambda: ["sisal", "pinnacle"])
+    leagues: list[League] = field(default_factory=list)
     goal_daily_limit: int = 1000
     goal_reserve: int = 50
     oddspapi_monthly_limit: int = 250
@@ -41,7 +50,22 @@ class AutoConfig:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if "prekick_min" in raw:
             raw["prekick_min"] = tuple(raw["prekick_min"])
-        return cls(**{k: v for k, v in raw.items() if not k.startswith("_")})
+        cfg = cls(**{k: v for k, v in raw.items() if not k.startswith("_") and k != "leagues"})
+        cfg.leagues = [League(**{k: v for k, v in l.items() if not k.startswith("_")}) for l in raw.get("leagues", [])]
+        # ids saved once in the config: no lookup request is ever needed at run time
+        cfg.goal_leagues = cfg.goal_leagues or [l.goal for l in cfg.leagues if l.goal]
+        cfg.oddspapi_tournaments = cfg.oddspapi_tournaments or [str(l.oddspapi) for l in cfg.leagues if l.oddspapi]
+        return cfg
+
+
+def odds_allowed_today(store: SnapshotStore, cfg: AutoConfig, now: datetime, cost: int) -> bool:
+    """Pace the monthly OddsPapi budget: today may spend at most twice the fair share of what is left (match days need more
+    than empty days, and empty days spend nothing because no snapshot is planned without upcoming fixtures)."""
+    used_today = store.usage("oddspapi", f"D{now:%Y-%m-%d}")
+    left = cfg.oddspapi_monthly_limit - cfg.oddspapi_reserve - store.usage("oddspapi", f"M{now:%Y-%m}")
+    days_left = calendar.monthrange(now.year, now.month)[1] - now.day + 1
+    allowance = 2 * (left + used_today) / days_left
+    return left >= cost and used_today + cost <= max(allowance, cost)
 
 
 def _last_ok(store: SnapshotStore, source: str, endpoint_like: str) -> datetime | None:
@@ -54,7 +78,7 @@ def _stale(last: datetime | None, now: datetime, age: timedelta) -> bool:
     return last is None or now - last >= age
 
 
-def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: datetime | None) -> list[str]:
+def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: datetime | None, odds_cost: int | None = None) -> list[str]:
     """Pure decision (no network): which steps this tick should run."""
     steps: list[str] = []
     if cfg.goal_leagues:
@@ -67,9 +91,9 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         upcoming = SnapshotProvider(store).list_fixtures(None, now, now + timedelta(hours=72))
         lo, hi = cfg.prekick_min
         prekick = [f for f in upcoming if timedelta(minutes=lo) <= f.kickoff - now <= timedelta(minutes=hi)]
-        if upcoming and _stale(last_odds, now, timedelta(hours=20)):
-            steps.append("odds")
-        elif prekick and _stale(last_odds, now, timedelta(minutes=hi - lo + 5)):
+        cost = odds_cost or len(cfg.bookmakers)
+        due = (upcoming and _stale(last_odds, now, timedelta(hours=20))) or (prekick and _stale(last_odds, now, timedelta(minutes=hi - lo + 5)))
+        if due and odds_allowed_today(store, cfg, now, cost):
             steps.append("odds")
         steps.append("closing")
     return steps
@@ -78,7 +102,7 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> list[CollectStats]:
     t = now()
-    steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None)
+    steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None, odds.snapshot_cost() if odds else None)
     out: list[CollectStats] = []
     for s in steps:
         if s in ("fixtures", "results", "stats", "lineups") and goal is None:

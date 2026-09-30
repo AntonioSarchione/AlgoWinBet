@@ -34,8 +34,20 @@ def p(price, **kw):
     return {"0": {"price": price, "active": True, **kw}}
 
 
-def fixture_odds(fid="op-1", home="Genoa CFC", away="ACF Fiorentina", start="2026-10-10T13:00:00Z"):
-    return {"fixtureId": fid, "participant1Name": home, "participant2Name": away, "startTime": start, "bookmakerOdds": {
+# v4 fixtures carry only participant ids; names come from /participants
+PARTICIPANTS = [{"participantId": 1, "participantName": "Genoa CFC"}, {"participantId": 2, "participantName": "ACF Fiorentina"},
+                {"participantId": 3, "participantName": "Inter Milan"}, {"participantId": 4, "participantName": "Parma Calcio 1913"}]
+
+
+def fixture_odds(fid="op-1", home=1, away=2, start="2026-10-10T13:00:00Z", only=None):
+    fx = _fixture_odds(fid, home, away, start)
+    if only:
+        fx["bookmakerOdds"] = {k: v for k, v in fx["bookmakerOdds"].items() if k == only}
+    return fx
+
+
+def _fixture_odds(fid, home, away, start):
+    return {"fixtureId": fid, "participant1Id": home, "participant2Id": away, "startTime": start, "bookmakerOdds": {
         "sisal.it": {"markets": {"101": {"outcomes": {"101": {"players": p(2.4)}, "102": {"players": p(3.2)}, "103": {"players": p(3.0)}}},
                                  "1010": {"outcomes": {"1010": {"players": p(1.95)}, "1011": {"players": p(1.85)}}},
                                  "1200": {"outcomes": {"1200": {"players": p(1.8)}}}}},
@@ -50,8 +62,9 @@ class Fake:
 
     def __call__(self, url, headers):
         self.calls.append(url)
-        path = url.split("/v4", 1)[1].split("?")[0]
-        status, body = self.routes.get(path, (404, {"error": "nope"}))
+        path, _, query = url.split("/v4", 1)[1].partition("?")
+        route = self.routes.get(path, (404, {"error": "nope"}))
+        status, body = route(dict(kv.split("=", 1) for kv in query.split("&"))) if callable(route) else route
         return status, {}, json.dumps(body).encode()
 
 
@@ -123,7 +136,7 @@ def test_bookmaker_resolution_prefers_italian_slug():
 
 # ------------------------------------------------------------------ mapper
 def test_mapper_links_fixture_and_maps_goal_markets_only():
-    m = OddsPapiMapper(NAMES, MARKETS)
+    m = OddsPapiMapper(NAMES, MARKETS, PARTICIPANTS)
     cal = [Fixture(id="goal:g1", competition="Serie A", home="Genoa", away="Fiorentina", kickoff=utc(2026, 10, 10, 13))]
     fx = m.match_fixture(fixture_odds(), cal)
     assert fx.id == "goal:g1"
@@ -152,19 +165,21 @@ def test_snapshot_then_free_closing_under_the_goal_fixture_id():
     seed_calendar(store)
     hist = {"fixtureId": "op-1", "bookmakers": {"sisal.it": {"markets": {"101": {"outcomes": {
         "101": {"players": {"0": [{"createdAt": "2026-10-10T12:50:00Z", "price": 2.2}]}}}}}}}}
-    routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/odds-by-tournaments": (200, [fixture_odds()]),
-              "/historical-odds": (200, hist)}
+    by_book = lambda q: (200, [fixture_odds(only=q["bookmaker"]), fixture_odds("op-2", 3, 4, "2026-10-10T16:00:00Z", only=q["bookmaker"])])
+    routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/participants": (200, PARTICIPANTS),
+              "/odds-by-tournaments": by_book, "/historical-odds": (200, hist)}
     c, t = mk_client(routes, store)
     col = OddsCollector(c, store, ["17"], ["sisal", "pinnacle", "snai"], NAMES, now=lambda: NOW)
     st = col.sync_odds()
-    assert st.saved["quotes"] == 9 and not st.errors and c.budget.used()[1] == 3  # markets + bookmakers + 1 snapshot
-    assert "bookmakers=pinnacle%2Csisal.it%2Csnai.it" in t.calls[-1] or "bookmakers=sisal.it%2Cpinnacle%2Csnai.it" in t.calls[-1]
+    # both fixtures linked (Inter Milan / Parma Calcio 1913 by fuzzy names); sisal 5+5, pinnacle 4+4, snai suspended
+    assert st.saved["quotes"] == 18 and not st.errors and c.budget.used()[1] == 6  # markets + bookmakers + participants + 3 books
+    assert sorted(u.split("bookmaker=")[1].split("&")[0] for u in t.calls if "odds-by-tournaments" in u) == ["pinnacle", "sisal.it", "snai.it"]
     assert {q.bookmaker for q in SnapshotProvider(store).get_quotes("goal:g1")} == {"sisal.it", "pinnacle"}
     assert col.sync_closing().requests == 0  # match not played yet
     later, _ = mk_client(routes, store, now=NOW + timedelta(hours=4))
     col2 = OddsCollector(later, store, ["17"], ["sisal", "pinnacle", "snai"], NAMES, now=lambda: NOW + timedelta(hours=4))
     st2 = col2.sync_closing()
-    assert st2.saved == {"quotes": 1} and later.budget.used()[1] == 3  # historical odds are free
+    assert st2.saved == {"quotes": 1} and later.budget.used()[1] == 6  # historical odds are free
     assert store.db.execute("SELECT kind, source FROM quotes WHERE source=?", (HIST_SOURCE,)).fetchall() == [("close", HIST_SOURCE)]
     assert col2.sync_closing().requests == 0
 
@@ -183,6 +198,19 @@ def test_plan_tick_schedules_by_staleness_and_kickoff_slots():
     assert plan_tick(store, cfg, utc(2026, 10, 10, 9), utc(2026, 10, 10, 1)) == ["lineups", "closing"]  # daily done, no slot
 
 
+def test_odds_budget_is_paced_over_the_month():
+    from algowinbet.autorun import odds_allowed_today
+    store = SnapshotStore(":memory:")
+    cfg = AutoConfig(oddspapi_tournaments=["17"], oddspapi_monthly_limit=250, oddspapi_reserve=20)
+    day = utc(2026, 10, 1, 9)  # 31 days left, 230 usable: today may spend up to ~14
+    assert odds_allowed_today(store, cfg, day, 2)
+    store.add_usage("oddspapi", "D2026-10-01", 14)
+    store.add_usage("oddspapi", "M2026-10", 14)
+    assert not odds_allowed_today(store, cfg, day, 2)
+    store.add_usage("oddspapi", "M2026-10", 215)  # month almost gone: the reserve is never touched
+    assert not odds_allowed_today(store, cfg, utc(2026, 10, 2, 9), 2)
+
+
 def test_tick_with_nothing_due_sends_nothing():
     store = SnapshotStore(":memory:")
     cfg = AutoConfig(goal_leagues=["L"])
@@ -195,6 +223,7 @@ def test_tick_with_nothing_due_sends_nothing():
     assert [r.mode for r in res] == ["lineups"] and sent == []
 
 
-def test_auto_config_file_loads():
+def test_auto_config_file_loads_saved_ids():
     cfg = AutoConfig.load("configs/collect.json")
     assert cfg.goal_leagues and cfg.oddspapi_monthly_limit == 250 and cfg.prekick_min == (30, 75)
+    assert cfg.oddspapi_tournaments == ["23", "17", "35", "34", "8", "238", "37", "7", "679"] and len(cfg.leagues) == 9

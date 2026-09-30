@@ -42,7 +42,8 @@ class OddsCollector:
     def mapper(self) -> OddsPapiMapper:
         if self._mapper is None:
             markets = self.client.get("/markets")["data"]  # cached 7 days in the store
-            self._mapper = OddsPapiMapper(self.names, markets if isinstance(markets, list) else [])
+            parts = self.client.get("/participants", {"sportId": 10})["data"]  # cached 7 days: fixtures carry only ids
+            self._mapper = OddsPapiMapper(self.names, markets if isinstance(markets, list) else [], parts)
         return self._mapper
 
     def _link(self, ext_id: str, fixture_id: str) -> None:
@@ -55,8 +56,12 @@ class OddsCollector:
                                     (SOURCE,)).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
+    def snapshot_cost(self) -> int:
+        return len(self.wanted_books)
+
     def sync_odds(self) -> CollectStats:
-        """1 billable request per call (all tournaments at once, max 3 bookmakers per the API rules)."""
+        """One billable request PER BOOKMAKER, each covering every tracked tournament (the endpoint takes exactly one
+        `bookmaker`: verified live, a list is rejected with 400 INVALID_PARAMETER)."""
         st = CollectStats("odds")
 
         def work():
@@ -64,15 +69,16 @@ class OddsCollector:
             m = self.mapper()
             t = self.now()
             calendar = self.provider.list_fixtures(None, t - timedelta(hours=3), t + timedelta(days=10))
-            env = self.client.get("/odds-by-tournaments", {"tournamentIds": ",".join(self.tournaments), "bookmakers": ",".join(books)})
-            raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
-            rows = env["data"] if isinstance(env["data"], list) else [env["data"]]
-            for row in rows:
-                fx = m.match_fixture(row, calendar)
-                if fx is None:
-                    continue
-                self._link(str(row.get("fixtureId")), fx.id)
-                st.add("quotes", self.store.save_quotes(SOURCE, m.odds(row, fx, env["_fetched_at"]), raw_id))
+            for book in books:
+                env = self.client.get("/odds-by-tournaments", {"tournamentIds": ",".join(map(str, self.tournaments)), "bookmaker": book})
+                raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
+                rows = env["data"] if isinstance(env["data"], list) else [env["data"]]
+                for row in rows:
+                    fx = m.match_fixture(row, calendar)
+                    if fx is None:
+                        continue
+                    self._link(str(row.get("fixtureId")), fx.id)
+                    st.add("quotes", self.store.save_quotes(SOURCE, m.odds(row, fx, env["_fetched_at"]), raw_id))
         self._run(st, work)
         return st
 

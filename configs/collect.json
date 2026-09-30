@@ -1,8 +1,17 @@
 {
-  "_comment": "Scheduler online (GitHub Actions). Id GOAL: goal leagues \"Serie A\". Id OddsPapi: odds tournaments \"serie a\".",
-  "goal_leagues": ["cmr77dvpd006yrx06zig7907g"],
-  "oddspapi_tournaments": [],
-  "bookmakers": ["sisal", "pinnacle", "snai"],
+  "_comment": "Scheduler online (GitHub Actions). Id salvati una volta: nessuna richiesta di ricerca a runtime. goal = id lega GOAL (goal leagues ...), oddspapi = tournamentId OddsPapi (verificati 2026-09-30).",
+  "leagues": [
+    {"name": "Serie A", "goal": "cmr77dvpd006yrx06zig7907g", "oddspapi": 23},
+    {"name": "Premier League", "goal": null, "oddspapi": 17},
+    {"name": "Bundesliga", "goal": null, "oddspapi": 35},
+    {"name": "Ligue 1", "goal": null, "oddspapi": 34},
+    {"name": "LaLiga", "goal": null, "oddspapi": 8},
+    {"name": "Liga Portugal", "goal": null, "oddspapi": 238},
+    {"name": "Eredivisie", "goal": null, "oddspapi": 37},
+    {"name": "UEFA Champions League", "goal": null, "oddspapi": 7},
+    {"name": "UEFA Europa League", "goal": null, "oddspapi": 679}
+  ],
+  "bookmakers": ["sisal", "pinnacle"],
   "goal_daily_limit": 1000,
   "goal_reserve": 50,
   "oddspapi_monthly_limit": 250,

@@ -363,13 +363,15 @@ def cmd_goal_probe(a) -> None:
 def cmd_goal_leagues(a) -> None:
     store = SnapshotStore(a.db)
     client = _goal_client(a, store)
-    try:
-        env = client.get("/leagues", {"search": a.search, "limit": 20})
-    except (GoalApiError, BudgetExceeded) as e:
-        sys.exit(f"errore: {e}")
-    for r in env.get("data") or []:
-        c = r.get("country") or r.get("countryName") or "-"
-        print(f"  id={r.get('id') or r.get('leagueId')}  {r.get('name')}  ({c.get('name', '-') if isinstance(c, dict) else c})")
+    for q in a.search:  # several names in one run: 1 GOAL request each
+        try:
+            env = client.get("/leagues", {"search": q, "limit": 20})
+        except (GoalApiError, BudgetExceeded) as e:
+            sys.exit(f"errore: {e}")
+        print(f"== {q}")
+        for r in env.get("data") or []:
+            c = r.get("country") or r.get("countryName") or "-"
+            print(f"  id={r.get('id') or r.get('leagueId')}  {r.get('name')}  ({c.get('name', '-') if isinstance(c, dict) else c})")
 
 
 def cmd_goal_collect(a) -> None:
@@ -541,7 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.set_defaults(fn=cmd_goal_probe)
     lg = gs.add_parser("leagues", help="cerca gli id delle leghe")
     gcommon(lg)
-    lg.add_argument("search")
+    lg.add_argument("search", nargs="+", help="uno o più nomi, es. \"Premier League\" Bundesliga")
     lg.set_defaults(fn=cmd_goal_leagues)
     co = gs.add_parser("collect", help="raccoglie dati in avanti nello snapshot store (idempotente, budget-aware)")
     gcommon(co)
