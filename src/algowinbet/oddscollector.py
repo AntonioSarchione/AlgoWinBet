@@ -87,13 +87,15 @@ class OddsCollector:
         st = CollectStats("closing")
 
         def work():
-            books = self.client.resolve_bookmakers(self.wanted_books)[:3]
-            m = self.mapper()
             t = self.now()
             rows = self.store.db.execute(
                 "SELECT l.ext_id, l.fixture_id FROM fixture_links l WHERE l.source=? AND NOT EXISTS "
                 "(SELECT 1 FROM quotes q WHERE q.fixture_id=l.fixture_id AND q.source=? AND q.kind='close')", (SOURCE, HIST_SOURCE)).fetchall()
             eligible = {f.id: f for f in self.provider.list_fixtures(None, t - timedelta(days=days_back), t - timedelta(hours=2))}
+            if not any(fid in eligible for _, fid in rows):
+                return  # nothing to close: no metadata lookups either
+            books = self.client.resolve_bookmakers(self.wanted_books)[:3]
+            m = self.mapper()
             done = 0
             for ext_id, fid in rows:
                 fx = eligible.get(fid)

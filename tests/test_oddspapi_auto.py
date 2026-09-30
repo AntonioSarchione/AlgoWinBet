@@ -275,3 +275,12 @@ def test_bulk_writes_use_few_statements():
             return real.execute(*a)
     store.db = Spy()
     assert store.save_results("x", rs, NOW) == 1000 and len(calls) <= 10
+
+
+def test_interrupted_tick_leaves_no_league_behind():
+    store = SnapshotStore(":memory:")
+    store.put_raw("goal-api", "/leagues/A/fixtures", {}, 200, b"{}", NOW - timedelta(hours=1))  # A done, B never fetched
+    cfg = AutoConfig(goal_leagues=["A", "B"])
+    assert "fixtures" in plan_tick(store, cfg, NOW, None)
+    gc = GoalApiClient(api_key="k", store=store, transport=lambda u, h: (200, {}, b"{}"), now=lambda: NOW)
+    assert GoalCollector(gc, store, ["A", "B"], NAMES, now=lambda: NOW).stale_leagues("fixtures") == ["B"]

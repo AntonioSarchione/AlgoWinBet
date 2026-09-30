@@ -55,12 +55,22 @@ class GoalCollector:
         return {"fixtures": lg, "results": lg, "lineups": n_fixtures, "odds": n_fixtures, "stats": n_fixtures, "players": lg * 21}.get(mode, lg)
 
     # --------------------------------------------------------------- modes
-    def sync_fixtures(self, days_ahead: int = 7) -> CollectStats:
+    def last_sync(self, lid: str, kind: str) -> datetime | None:
+        row = self.store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint=? AND status=200",
+                                    (SOURCE, f"/leagues/{lid}/{kind}")).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
+
+    def stale_leagues(self, kind: str, age: timedelta = timedelta(hours=20)) -> list[str]:
+        """Per league: a tick interrupted halfway must not leave the other leagues waiting until tomorrow."""
+        t = self.now()
+        return [lid for lid in self.league_ids if (last := self.last_sync(lid, kind)) is None or t - last >= age]
+
+    def sync_fixtures(self, days_ahead: int = 7, leagues: list[str] | None = None) -> CollectStats:
         st = CollectStats("fixtures")
         t0 = self.now()
 
         def work():
-            for lid in self.league_ids:
+            for lid in leagues or self.league_ids:
                 rows = list(self.client.pages(f"/leagues/{lid}/fixtures", {"from": f"{t0:%Y-%m-%d}", "to": f"{t0 + timedelta(days=days_ahead):%Y-%m-%d}",
                                                                         "status": "SCHEDULED"}))
                 fx = [f for f in (self.mapper.fixture(r) for r in rows) if f]
@@ -69,22 +79,22 @@ class GoalCollector:
         st.report = self.mapper.report
         return st
 
-    def days_since_last_results(self, default: int = 3) -> int:
-        """Incremental daily update: only the days since the last successful results sync (+1 day overlap for late
-        corrections), never the whole history again."""
-        row = self.store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint LIKE '/leagues/%/results' "
-                                    "AND status=200", (SOURCE,)).fetchone()
-        if not row or not row[0]:
+    def days_since_last_results(self, lid: str, default: int = 3) -> int:
+        """Incremental update per league: only the days since that league's last successful results sync (+1 day overlap
+        for late corrections), never the whole history again."""
+        last = self.last_sync(lid, "results")
+        if last is None:
             return default
-        return max(1, min(default * 10, (self.now() - datetime.fromisoformat(row[0])).days + 1))
+        return max(1, min(default * 10, (self.now() - last).days + 1))
 
-    def sync_results(self, days_back: int = 3, leagues: list[str] | None = None) -> CollectStats:
+    def sync_results(self, days_back: int | None = None, leagues: list[str] | None = None) -> CollectStats:
         st = CollectStats("results")
         t0 = self.now()
 
         def work():
             for lid in leagues or self.league_ids:
-                rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days_back):%Y-%m-%d}", "to": f"{t0:%Y-%m-%d}"}, max_pages=60))
+                days = days_back if days_back is not None else self.days_since_last_results(lid)
+                rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days):%Y-%m-%d}", "to": f"{t0:%Y-%m-%d}"}, max_pages=60))
                 res = [r for r in (self.mapper.result(x) for x in rows) if r]
                 st.add("results", self.store.save_results(SOURCE, res, t0))
                 self.store.save_fixtures(SOURCE, [f for f in (self.mapper.fixture(x) for x in rows) if f], t0)  # final status

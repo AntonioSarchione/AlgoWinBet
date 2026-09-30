@@ -339,6 +339,14 @@ def cmd_collect_auto(a) -> None:
         results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds)
         if not results:
             print("tick: niente da fare")
+        now = datetime.now(timezone.utc)
+        print("Riepilogo database: " + ", ".join(f"{k}={v}" for k, v in store.stats().items()))
+        by_comp: dict[str, int] = {}
+        for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=cfg.fixtures_days)):
+            by_comp[f.competition] = by_comp.get(f.competition, 0) + 1
+        print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
+        print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
+                                     for s in ("goal-api", "oddspapi")))
     finally:
         store.close()
 

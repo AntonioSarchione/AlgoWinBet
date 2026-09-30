@@ -85,9 +85,10 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
     """Pure decision (no network): which steps this tick should run."""
     steps: list[str] = []
     if cfg.goal_leagues:
-        if _stale(_last_ok(store, "goal-api", "/leagues/%/fixtures"), now, timedelta(hours=20)):
+        stale = lambda kind: any(_stale(_last_ok(store, "goal-api", f"/leagues/{lid}/{kind}"), now, timedelta(hours=20)) for lid in cfg.goal_leagues)
+        if stale("fixtures"):
             steps.append("fixtures")
-        if _stale(_last_ok(store, "goal-api", "/leagues/%/results"), now, timedelta(hours=20)):
+        if stale("results"):
             steps += ["results", "stats"]
         steps.append("lineups")  # costs nothing when no fixture is inside the window
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
@@ -127,9 +128,9 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if s in ("odds", "closing") and odds is None:
             continue
         if s == "fixtures":
-            out.append(goal.sync_fixtures(cfg.fixtures_days))
+            out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
         elif s == "results":
-            out.append(goal.sync_results(goal.days_since_last_results()))
+            out.append(goal.sync_results(leagues=goal.stale_leagues("results")))
         elif s == "stats":
             out.append(goal.sync_stats(3))
         elif s == "lineups":
