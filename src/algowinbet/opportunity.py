@@ -109,7 +109,7 @@ def analyze_fixture(
     m_lo = model.score_matrix(f.home, f.away, (adj.d_home - adj.sd_home, adj.d_away + adj.sd_away))
     boot_matrices = [b.score_matrix(f.home, f.away, la_) for b in boots]
     known = model.knows(f.home) and model.knows(f.away)
-    views = build_market_views(state.quotes, cfg.ensemble.devig_method)
+    views = build_market_views(state.quotes, cfg.ensemble.devig_method, cfg.bet_bookmakers)
     n_eff = max(model.sample_size(f.home, f.away), 3)
     ens = cfg.ensemble
     info_t = state.latest_info_time()

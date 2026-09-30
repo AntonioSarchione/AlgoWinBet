@@ -234,6 +234,13 @@ class OddsPapiMapper:
             return mapped, None
         name = str(m.get("marketName") or "").lower()
         mtype = str(m.get("marketType") or "").lower()
+        # The catalogue types every market: a type we do not map (totals-bookings, totals-corners, player props...) is NOT a goal
+        # market, whatever its name says ("Bookings - Over Under Full Time" once passed for total goals). The name-based guess
+        # below is only for rows without a type.
+        if mtype:
+            return None
+        if re.search(r"booking|card|corner|player|shot|foul|offside|throw|goal ?kick|half", name):
+            return None
         period = str(m.get("period") or "").lower()
         if period and period not in ("fulltime", "full time", "ft", "result", "match", "regular"):
             return None

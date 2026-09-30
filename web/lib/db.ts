@@ -148,7 +148,7 @@ export async function fixtureDetail(id: string) {
       run.id,
       id,
     ]).then(withMatch),
-    all<{ n: number }>("SELECT COUNT(*) AS n FROM quotes WHERE fixture_id = ?", [id]),
+    all<{ n: number }>("SELECT COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND bookmaker LIKE 'sisal%'", [id]),
     all<LineupRow>(
       "SELECT team, status, formation, starters, bench, observed_at FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC",
       [id],
@@ -177,11 +177,14 @@ export async function fixtureDetail(id: string) {
   return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, formHome, formAway, h2h };
 }
 
+// Only Sisal is playable: the odds tab lists and draws Sisal prices (Pinnacle stays an internal reference of the model).
+const PLAYABLE = "bookmaker LIKE 'sisal%'";
+
 // Every priced selection of a fixture (market, selection, line): the menu of the odds-trend tab.
 export type QuoteKey = { market_code: string; selection: string; line_key: string; n: number };
 export function quoteMenu(id: string) {
   return all<QuoteKey>(
-    "SELECT market_code, selection, COALESCE(line_key, '') AS line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? " +
+    `SELECT market_code, selection, COALESCE(line_key, '') AS line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND ${PLAYABLE} ` +
       "GROUP BY market_code, selection, COALESCE(line_key, '')",
     [id],
   );
@@ -190,7 +193,7 @@ export function quoteMenu(id: string) {
 // Price path of one market line (all its selections, all bookmakers), oldest first.
 export function quotePath(id: string, market: string, lineKey: string) {
   return all<QuotePoint>(
-    "SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND COALESCE(line_key, '') = ? " +
+    `SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND COALESCE(line_key, '') = ? AND ${PLAYABLE} ` +
       "ORDER BY observed_at",
     [id, market, lineKey],
   );

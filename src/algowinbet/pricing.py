@@ -79,7 +79,13 @@ def latest_quotes(quotes: list[OddsQuote]) -> list[OddsQuote]:
     return list(best.values())
 
 
-def build_market_views(quotes: list[OddsQuote], devig_method: str = "power") -> list[MarketView]:
+def _bettable(book: str, bettable: list[str] | None) -> bool:
+    return not bettable or any(b.lower() in book.lower() for b in bettable)
+
+
+def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bettable: list[str] | None = None) -> list[MarketView]:
+    """One view per selection. With `bettable` (e.g. ["sisal"]) a view exists only for selections those bookmakers price and its
+    best odds come from them; the other books (Pinnacle) still feed the devigged market probability of those selections."""
     quotes = latest_quotes(quotes)
     by_ref: dict[str, list[OddsQuote]] = {}
     for q in quotes:
@@ -104,7 +110,10 @@ def build_market_views(quotes: list[OddsQuote], devig_method: str = "power") -> 
 
     views = []
     for key, qs in by_ref.items():
-        top = max(qs, key=lambda q: q.odds)
+        playable = [q for q in qs if _bettable(q.bookmaker, bettable)]
+        if not playable:
+            continue  # nobody we can bet with prices it: not an option at all
+        top = max(playable, key=lambda q: q.odds)
         per_book = p_by_ref_book.get(key, {})
         p_mkt = float(np.mean(list(per_book.values()))) if per_book else None
         disp = float(np.std(list(per_book.values()))) if len(per_book) > 1 else 0.0

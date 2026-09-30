@@ -457,3 +457,44 @@ def test_slip_pool_runs_the_optimizer_for_every_period_and_max_events(monkeypatc
     pub.slip_pool(res, cfg, NOW)
     assert len(calls) == len(pub.SLIP_HORIZONS_H) * len(pub.SLIP_MAX_LEGS) and cfg.optimizer.max_legs == 8  # caller's config untouched
     assert calls[0] == (1, ["a"], 1, 5) and calls[-1] == (3, ["a", "b", "c"], 10, 5)
+
+
+def test_bookings_and_corners_totals_are_never_goal_totals():
+    cat = MARKETS + [
+        {"marketId": 10946, "marketName": "Bookings - Over Under Full Time", "marketType": "totals-bookings", "handicap": 8.5,
+         "period": "fulltime", "sportId": 10, "outcomes": [{"outcomeId": 10946, "outcomeName": "Over"}, {"outcomeId": 10947, "outcomeName": "Under"}]},
+        {"marketId": 777, "marketName": "Bookings Over/Under 4.5", "sportId": 10, "outcomes": []},  # no type: name guess must refuse
+        {"marketId": 778, "marketName": "Over/Under 2.5", "sportId": 10, "outcomes": []},  # no type, plain goals: still guessed
+    ]
+    m = OddsPapiMapper(NAMES, cat, PARTICIPANTS)
+    assert m._market(10946) is None and m._market(777) is None and m._market(1200) is None
+    assert m._market(778) == ("TOTAL_GOALS", 2.5) and m._market(1010) == ("TOTAL_GOALS", 2.5)
+
+
+def test_remap_rebuilds_quotes_from_stored_payloads_without_requests():
+    from algowinbet.oddscollector import remap_stored_odds
+    store = SnapshotStore(":memory:")
+    seed_calendar(store)
+    by_book = lambda q: (200, [fixture_odds(only=q["bookmaker"])])
+    routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/participants": (200, PARTICIPANTS), "/odds-by-tournaments": by_book}
+    c, t = mk_client(routes, store)
+    OddsCollector(c, store, ["17"], ["sisal", "pinnacle"], NAMES, now=lambda: NOW).sync_odds()
+    n = store.db.execute("SELECT COUNT(*) FROM quotes").fetchone()[0]
+    store.db.execute("UPDATE quotes SET odds = 99 WHERE market_code='MATCH_1X2'")  # a wrong mapping to repair
+    sent = len(t.calls)
+    st = remap_stored_odds(store, NAMES)
+    assert st.saved["quotes"] == n and len(t.calls) == sent
+    assert store.db.execute("SELECT MAX(odds) FROM quotes WHERE market_code='MATCH_1X2'").fetchone()[0] < 99
+
+
+def test_only_sisal_selections_are_playable_and_pinnacle_still_feeds_the_market_probability():
+    from algowinbet.domain import OddsQuote
+    from algowinbet.pricing import build_market_views
+    q = lambda book, sel, odds, line=2.5: OddsQuote(fixture_id="f", market_code="TOTAL_GOALS", selection=sel, line=line, bookmaker=book,
+                                                    odds=odds, observed_at=NOW, kind="current")
+    quotes = [q("sisal.it", "OVER", 1.90), q("sisal.it", "UNDER", 1.85), q("pinnacle", "OVER", 2.02), q("pinnacle", "UNDER", 1.88),
+              q("pinnacle", "OVER", 60.0, 8.5), q("pinnacle", "UNDER", 1.001, 8.5)]  # line Sisal does not offer
+    views = {(v.ref.selection, v.ref.line): v for v in build_market_views(quotes, bettable=["sisal"])}
+    assert set(views) == {("OVER", 2.5), ("UNDER", 2.5)}
+    assert views[("OVER", 2.5)].best_book == "sisal.it" and views[("OVER", 2.5)].best_odds == 1.90
+    assert set(views[("OVER", 2.5)].per_book) == {"sisal.it", "pinnacle"}

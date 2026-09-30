@@ -87,6 +87,7 @@ class Config(BaseModel):
     thresholds: Thresholds = Field(default_factory=Thresholds)
     optimizer: OptimizerCfg = Field(default_factory=OptimizerCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
+    bet_bookmakers: list[str] = Field(default_factory=list)  # empty: any bookmaker; e.g. ["sisal"]: only its prices are playable
     calibration_path: str = "configs/calibration.json"
     db_path: str = "algowinbet.db"
 

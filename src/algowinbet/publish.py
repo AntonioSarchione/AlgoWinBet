@@ -57,6 +57,8 @@ def live_config(cfg: Config | None = None) -> Config:
     cfg = cfg or Config()
     if cfg.ensemble.quote_window_hours is None:
         cfg.ensemble.quote_window_hours = 24.0  # analysis only on prices observed in the last 24h
+    if not cfg.bet_bookmakers:
+        cfg.bet_bookmakers = ["sisal"]  # the user bets on Sisal only; Pinnacle is a reference price, never a proposal
     return cfg
 
 
