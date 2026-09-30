@@ -205,13 +205,18 @@ td.wrap { white-space: normal; min-width: 210px; }
 .compact th, .compact td { padding: 9px 10px; }
 .match-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .match-cell .badges { display: flex; }
-.match-cell .badges > :last-child { margin-left: -6px; }
+.match-cell .badges { gap: 2px; }
 .match-cell b { font-weight: 600; }
 .match-cell small { display: block; color: var(--muted); font-size: 12px; }
 .row-link { color: var(--text); }
 .row-link:hover b { text-decoration: underline; text-underline-offset: 3px; }
 .sub { display: block; color: var(--muted); font-size: 12px; }
 
+.crest { flex: none; display: inline-block; object-fit: contain; }
+:root:not([data-theme="light"]) img.crest { filter: drop-shadow(0 0 0.6px rgba(255, 255, 255, 0.75)) drop-shadow(0 0 0.6px rgba(255, 255, 255, 0.45)); }
+.crest-lg { width: 52px; height: 52px; }
+:root { --crest-fill: #2a3640; --crest-line: #3b4a55; --crest-ink: #aab7bf; }
+:root[data-theme="light"] { --crest-fill: #dfe6ea; --crest-line: #c3ced4; --crest-ink: #5a6d77; }
 .badge {
   width: 28px; height: 28px; border-radius: 50%; display: inline-grid; place-items: center; flex: none;
   font-size: 11px; font-weight: 700; letter-spacing: -0.02em; color: #fff; border: 2px solid var(--card);

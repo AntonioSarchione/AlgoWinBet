@@ -1,0 +1,7 @@
+index.json
+matches.json
+teams.txt
+png-cache/
+node_modules/
+package-lock.json
+*.html

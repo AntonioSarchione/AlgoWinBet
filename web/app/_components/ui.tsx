@@ -2,16 +2,27 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { pct } from "./format";
 
-// Club monogram: a stable hue from the name (identity decoration only, the name is always printed next to it).
+import logos from "@/lib/logos.json";
+
+const LOGOS = logos as Record<string, string>;
+
+// Team crest: the club/national logo (football-logos.cc, 96px WebP in /public/logos) when we have it,
+// otherwise a neutral grey shield with the initials. The team name is always printed next to it.
 export function TeamBadge({ name, size = "sm" }: { name: string; size?: "sm" | "lg" }) {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const px = size === "lg" ? 52 : 28;
+  const file = LOGOS[name];
+  if (file) {
+    return <img src={`/logos/${file}`} alt="" width={px} height={px} loading="lazy" decoding="async" className={`crest${size === "lg" ? " crest-lg" : ""}`} />;
+  }
   const words = name.replace(/[^\p{L}\p{N} ]/gu, "").split(" ").filter((w) => w.length > 1 && !/^(fc|ac|as|ss|sc|cf|afc|us|vfb|vfl|rc|ud|cd|sl)$/i.test(w));
   const initials = ((words[0]?.[0] ?? name[0]) + (words[1]?.[0] ?? words[0]?.[1] ?? "")).toUpperCase();
   return (
-    <span className={`badge${size === "lg" ? " badge-lg" : ""}`} style={{ background: `hsl(${h % 360} 45% 34%)` }} aria-hidden="true">
-      {initials}
-    </span>
+    <svg className={`crest${size === "lg" ? " crest-lg" : ""}`} width={px} height={px} viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 2 28 6v9c0 7.2-5 12.6-12 15C9 27.6 4 22.2 4 15V6z" fill="var(--crest-fill)" stroke="var(--crest-line)" strokeWidth="1.5" />
+      <text x="16" y="19.5" textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--crest-ink)" style={{ fontFamily: "var(--font-display)" }}>
+        {initials}
+      </text>
+    </svg>
   );
 }
 

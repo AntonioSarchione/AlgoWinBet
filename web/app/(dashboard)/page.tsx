@@ -312,9 +312,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 {upcoming.map((f) => (
                   <li key={f.fixture_id}>
                     <Link href={`/partita/${encodeURIComponent(f.fixture_id)}`}>
-                      <span className="badges" style={{ display: "flex" }}>
+                      <span className="badges" style={{ display: "flex", gap: 2 }}>
                         <TeamBadge name={f.home} />
-                        <span style={{ marginLeft: -6 }}><TeamBadge name={f.away} /></span>
+                        <TeamBadge name={f.away} />
                       </span>
                       <span style={{ minWidth: 0 }}>
                         <b>{f.home} - {f.away}</b>

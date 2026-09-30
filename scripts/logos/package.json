@@ -1,0 +1,7 @@
+{
+  "name": "algowinbet-logos",
+  "private": true,
+  "type": "module",
+  "description": "Crest pipeline for the dashboard: football-logos.cc 256px PNG -> 96px WebP in web/public/logos",
+  "devDependencies": { "sharp": "^0.34.5" }
+}
