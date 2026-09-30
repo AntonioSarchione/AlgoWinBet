@@ -175,7 +175,8 @@ export async function fixtureDetail(id: string) {
 export type QuoteKey = { market_code: string; selection: string; line_key: string; n: number };
 export function quoteMenu(id: string) {
   return all<QuoteKey>(
-    "SELECT market_code, selection, line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? GROUP BY market_code, selection, line_key",
+    "SELECT market_code, selection, COALESCE(line_key, '') AS line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? " +
+      "GROUP BY market_code, selection, COALESCE(line_key, '')",
     [id],
   );
 }
@@ -183,7 +184,8 @@ export function quoteMenu(id: string) {
 // Price path of one market line (all its selections, all bookmakers), oldest first.
 export function quotePath(id: string, market: string, lineKey: string) {
   return all<QuotePoint>(
-    "SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND line_key = ? ORDER BY observed_at",
+    "SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND COALESCE(line_key, '') = ? " +
+      "ORDER BY observed_at",
     [id, market, lineKey],
   );
 }

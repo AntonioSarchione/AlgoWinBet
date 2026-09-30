@@ -19,16 +19,12 @@ const PERIODS = [
 
 // Slips are published per period and per maximum number of events (see publish.py SLIP_MAX_LEGS)
 const MAX_EVENTS = [
-  { v: "8", l: "Qualsiasi" },
+  { v: "10", l: "Fino a 10" },
   { v: "1", l: "1 (singola)" },
-  { v: "2", l: "Fino a 2" },
-  { v: "3", l: "Fino a 3" },
-  { v: "4", l: "Fino a 4" },
-  { v: "5", l: "Fino a 5" },
-  { v: "6", l: "Fino a 6" },
+  ...[2, 3, 4, 5, 6, 7, 8, 9].map((k) => ({ v: String(k), l: `Fino a ${k}` })),
 ];
 
-type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; comp?: string };
+type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; comp?: string | string[] };
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -48,14 +44,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   // ---- filters (applied to the latest published analysis) ----
   const now = Date.now();
   const hours = PERIODS.some((p) => p.v === sp.h) ? Number(sp.h) : 168;
-  const maxEvents = MAX_EVENTS.some((m) => m.v === sp.n) ? Number(sp.n) : 8;
+  const maxEvents = MAX_EVENTS.some((m) => m.v === sp.n) ? Number(sp.n) : 10;
   const qMin = Number(sp.min) || 0;
   const qMax = Number(sp.max) || 0;
   const lMin = Number(sp.lmin) || 0;
   const lMax = Number(sp.lmax) || 0;
   const legOk = (odds: number) => (!lMin || odds >= lMin) && (!lMax || odds <= lMax);
+  // Competitions: several can be ticked; none in the URL (or all of them) means every competition.
+  const picked = new Set([sp.comp ?? []].flat().filter(Boolean));
   const inWindow = (iso: string, comp: string) =>
-    new Date(iso).getTime() <= now + hours * 3600_000 && (!sp.comp || comp === sp.comp);
+    new Date(iso).getTime() <= now + hours * 3600_000 && (!picked.size || picked.has(comp));
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
   const op = opps.filter((o) => inWindow(o.kickoff, o.competition) && legOk(o.odds));
@@ -74,7 +72,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const expl = parseJSON<{ positive_factors?: string[]; negative_factors?: string[]; what_would_change_it?: string[] }>(best?.explanation, {});
   const featured = pickFeatured(fx, best);
   const upcoming = fx.slice(0, 6);
-  const filtered = Boolean(sp.comp || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "8"));
+  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10"));
+  const allComps = !picked.size || comps.every((c) => picked.has(c));
+  const compLabel = allComps ? "Tutti i campionati" : picked.size === 1 ? [...picked][0] : `${picked.size} campionati`;
 
   return (
     <>
@@ -129,16 +129,24 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </div>
         </div>
         <div className="field">
-          <label htmlFor="comp">Campionati</label>
-          <div className="control">
-            <Trophy size={17} aria-hidden="true" />
-            <select id="comp" name="comp" defaultValue={sp.comp ?? ""}>
-              <option value="">Tutti i campionati</option>
+          <span className="field-label" id="comp-label">Campionati</span>
+          <details className="multi">
+            <summary className="control" aria-labelledby="comp-label">
+              <Trophy size={17} aria-hidden="true" />
+              <span className="multi-value">{compLabel}</span>
+            </summary>
+            <fieldset className="multi-panel" aria-labelledby="comp-label">
               {comps.map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <label key={c} className="check">
+                  <input type="checkbox" name="comp" value={c} defaultChecked={allComps || picked.has(c)} />
+                  {c}
+                </label>
               ))}
-            </select>
-          </div>
+              <button type="submit" className="btn btn-primary btn-sm" style={{ marginTop: 6 }}>
+                <Filter size={15} aria-hidden="true" /> Applica
+              </button>
+            </fieldset>
+          </details>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {filtered && (

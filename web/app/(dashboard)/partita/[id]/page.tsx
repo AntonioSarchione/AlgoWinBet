@@ -257,11 +257,11 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
     (a, b) => Number(a) - Number(b),
   );
   const preferred = m === "TOTAL_GOALS" ? "2.5" : m.startsWith("TEAM_TOTAL") ? "1.5" : ""; // otherwise the line closest to 0
-  const line = lines.includes(q.l ?? "")
+  const line = lines.includes(q.l ?? "") && q.l != null
     ? q.l!
     : lines.includes(preferred)
       ? preferred
-      : [...lines].sort((a, b) => Math.abs(Number(a)) - Math.abs(Number(b)))[0];
+      : ([...lines].sort((a, b) => Math.abs(Number(a)) - Math.abs(Number(b)))[0] ?? "");
   const path = await quotePath(id, m, line);
   const books = [...new Set(path.map((p) => p.bookmaker))].sort((a, b) => Number(b.includes("pinnacle")) - Number(a.includes("pinnacle")));
   const label = quoteLabel(m, sel, line);
@@ -408,7 +408,8 @@ function Form({ home, away, fh, fa, h2h }: { home: string; away: string; fh: Res
           </span>
         </div>
         <div className="card-pad">
-          <div className="kv"><span>Gol fatti / subiti (media)</span><span className="num">{avg("gf")} / {avg("ga")}</span></div>
+          {!rows.length && <p className="muted">Nessuna partita di questa squadra nello storico raccolto.</p>}
+          {rows.length > 0 && <div className="kv"><span>Gol fatti / subiti (media)</span><span className="num">{avg("gf")} / {avg("ga")}</span></div>}
           <table style={{ marginTop: 6 }}>
             <tbody>
               {rows.map((r) => (

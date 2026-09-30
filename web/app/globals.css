@@ -148,7 +148,23 @@ h2.section { font-size: 15px; margin: 6px 0 0; }
 /* ---------- filter bar ---------- */
 .filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 10px; padding: 12px; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.field label { font-size: 12px; color: var(--muted); padding-left: 2px; }
+.field label, .field-label { font-size: 12px; color: var(--muted); padding-left: 2px; }
+/* multi-select dropdown (native details/summary: keyboard and screen-reader friendly, no JavaScript) */
+.multi { position: relative; }
+.multi > summary { list-style: none; cursor: pointer; }
+.multi > summary::-webkit-details-marker { display: none; }
+.multi > summary::after { content: ""; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg) translateY(-2px); }
+.multi[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
+.multi-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multi-panel {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; right: 0; min-width: 240px; max-height: 320px; overflow: auto;
+  margin: 0; padding: 8px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--card); box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.multi-panel .check { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px; border-radius: 8px; font-size: 14px; color: var(--text); cursor: pointer; }
+.multi-panel .check:hover { background: var(--card-2); }
+.multi-panel input { width: 18px; height: 18px; accent-color: var(--accent); }
+.multi-panel .note { margin: 6px 8px 2px; }
 .control {
   display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 10px;
   background: var(--bg-2); border: 1px solid var(--line); transition: border-color 160ms ease;

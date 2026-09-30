@@ -456,4 +456,4 @@ def test_slip_pool_runs_the_optimizer_for_every_period_and_max_events(monkeypatc
     cfg = Config()
     pub.slip_pool(res, cfg, NOW)
     assert len(calls) == len(pub.SLIP_HORIZONS_H) * len(pub.SLIP_MAX_LEGS) and cfg.optimizer.max_legs == 8  # caller's config untouched
-    assert calls[0] == (1, ["a"], 1, 5) and calls[-1] == (3, ["a", "b", "c"], 8, 5)
+    assert calls[0] == (1, ["a"], 1, 5) and calls[-1] == (3, ["a", "b", "c"], 10, 5)

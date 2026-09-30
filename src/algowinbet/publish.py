@@ -48,7 +48,7 @@ EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets
 # The dashboard filters slips by period and by maximum number of events: one optimizer pass per combination, so every filter
 # shows the best slips built for it (not the survivors of one global list).
 SLIP_HORIZONS_H = (24, 48, 72, 168)
-SLIP_MAX_LEGS = (1, 2, 3, 4, 5, 6, 8)
+SLIP_MAX_LEGS = tuple(range(1, 11))  # 1..10 events
 SLIPS_PER_COMBO = 5
 SHOWN = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.WATCH}
 
