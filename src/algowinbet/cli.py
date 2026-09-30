@@ -377,7 +377,7 @@ def cmd_collect_auto(a) -> None:
             print("tick: niente da fare")
         from .autorun import should_publish
         from .publish import analyze_and_publish, last_publication
-        if a.publish and should_publish(results, last_publication(store), datetime.now(timezone.utc)):
+        if a.publish and (a.force_publish or should_publish(results, last_publication(store), datetime.now(timezone.utc))):
             if time.monotonic() - t0 > a.max_seconds + 60:
                 print("analisi: rimandata (tempo del giro esaurito)")
             else:
@@ -649,6 +649,7 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--aliases", default="configs/team_aliases.json")
     ca.add_argument("--max-seconds", type=float, default=360, help="nessun nuovo passo dopo N secondi (il job CI ha un timeout)")
     ca.add_argument("--no-publish", dest="publish", action="store_false", help="non rifare l'analisi per la dashboard")
+    ca.add_argument("--force-publish", action="store_true", help="rifai l'analisi per la dashboard anche senza dati nuovi")
     ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")

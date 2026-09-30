@@ -45,7 +45,7 @@ def live_config(cfg: Config | None = None) -> Config:
     return cfg
 
 
-def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon_days: float = 3.0,
+def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon_days: float = 14.0,
                         now: datetime | None = None, keep_days: int = 14) -> tuple[int, AnalysisResult]:
     cfg = live_config(cfg)
     t = now or datetime.now(timezone.utc)

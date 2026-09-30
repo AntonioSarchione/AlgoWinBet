@@ -11,7 +11,12 @@ on:
     - cron: "5 6 * * *"               # daily: fixtures, results, stats, history backfill, closing lines, daily odds snapshot
     - cron: "*/20 9-20 * * 5,6,0,1"    # Fri-Mon: domestic leagues (lineups window, pre-kickoff odds)
     - cron: "*/20 15-19 * * 2,3,4"     # Tue-Thu: Champions/Europa League and midweek rounds
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Ripubblica l'analisi sulla dashboard anche senza dati nuovi"
+        type: boolean
+        default: false
 
 concurrency:
   group: collect
@@ -38,4 +43,5 @@ jobs:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
-        run: algowinbet collect-auto --config configs/collect.json --db turso
+          FORCE_PUBLISH: ${{ inputs.publish && '--force-publish' || '' }}
+        run: algowinbet collect-auto --config configs/collect.json --db turso $FORCE_PUBLISH
