@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "odds (OddsPapi) oppure goal (GOAL API)"
+        description: "odds (OddsPapi), goal (GOAL API) oppure db (solo database)"
         type: choice
-        options: [odds, goal]
+        options: [odds, goal, db]
         default: odds
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe]
+        options: [account, tournaments, markets, leagues, probe, teams]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -53,6 +53,7 @@ jobs:
           # inputs arrive as environment variables, never interpolated into the script (no shell injection)
           DB=data/probe.db
           if [ -n "$TURSO_DATABASE_URL" ]; then DB=turso; fi   # raw payloads and budget counters persist on Turso
+          if [ "$SOURCE" = "db" ]; then algowinbet teams --db "$DB"; exit 0; fi
           args=("$SOURCE" "$COMMAND")
           if [ "$COMMAND" != "account" ]; then args+=("$ARG"); fi
           if [ "$COMMAND" = "probe" ]; then for kv in $PARAMS; do args+=(--param "$kv"); done; fi

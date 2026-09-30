@@ -353,6 +353,21 @@ def cmd_odds_markets(a) -> None:
     store.close()
 
 
+def cmd_teams(a) -> None:
+    """Every team name in the database (calendar + results), with its competitions. No API request."""
+    store = SnapshotStore(a.db)
+    rows = store.db.execute(
+        "SELECT team, competition, COUNT(*) FROM (SELECT home AS team, competition FROM results UNION ALL SELECT away, competition FROM results "
+        "UNION ALL SELECT home, competition FROM fixtures UNION ALL SELECT away, competition FROM fixtures) GROUP BY team, competition").fetchall()
+    teams: dict[str, list[str]] = {}
+    for team, comp, _ in rows:
+        teams.setdefault(team, []).append(comp)
+    print(f"{len(teams)} squadre")
+    for t in sorted(teams):
+        print(f"TEAM|{t}|{';'.join(sorted(set(teams[t])))}")
+    store.close()
+
+
 def _print_stats(st, budget=None) -> None:
     print(f"{st.mode}: {st.requests} richieste, salvati {st.saved or '{}'}" + (f"; budget {budget.remaining()}" if budget else ""))
     for x in st.skipped[:10]:
@@ -670,6 +685,9 @@ def build_parser() -> argparse.ArgumentParser:
     oc.add_argument("--tournaments", nargs="+", required=True)
     oc.add_argument("--bookmakers", nargs="+", default=["sisal", "pinnacle", "snai"], help="massimo 3")
     oc.set_defaults(fn=cmd_odds_collect)
+    tm = sub.add_parser("teams", help="elenco squadre nel database (nessuna richiesta API)")
+    tm.add_argument("--db", default="turso")
+    tm.set_defaults(fn=cmd_teams)
     ca = sub.add_parser("collect-auto", help="un giro dello scheduler online: esegue solo ciò che serve adesso")
     ca.add_argument("--config", default="configs/collect.json")
     ca.add_argument("--db", default="turso")
