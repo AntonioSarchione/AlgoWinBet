@@ -87,6 +87,7 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                                "market": o.description, "odds": o.odds, "bookmaker": o.bookmaker, "p": round(o.p_final, 4)} for o in s.legs],
                              ensure_ascii=False),
                   json.dumps(s.explanation, ensure_ascii=False, default=str)) for k, s in enumerate(res.optimizer.slips)])
+    store.db.commit()  # a run with no rows would otherwise stay uncommitted on remote libsql
     prune(store, keep_days)
     return run_id, res
 
