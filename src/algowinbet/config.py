@@ -12,6 +12,7 @@ class ModelCfg(BaseModel):
     l2: float = 1.0
     n_bootstrap: int = 0  # >0 = parametric uncertainty by bootstrap (slow); 0 = analytic proxy
     min_history: int = 40
+    history_seasons: int = 2  # results used by the model: current season + this many previous seasons (seasons start 1 July)
     version: str = "dc-poisson-v1"
 
 
@@ -25,6 +26,7 @@ class EnsembleCfg(BaseModel):
     market_prior_sd: float = 0.025
     w_struct: float = 0.5  # used only in fixed mode
     devig_method: str = "power"
+    quote_window_hours: float | None = None  # only prices observed in the last N hours before the cutoff (live: 24, set by the CLI)
 
 
 class Thresholds(BaseModel):

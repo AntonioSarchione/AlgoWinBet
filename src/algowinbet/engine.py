@@ -74,7 +74,7 @@ class Engine:
     def fit(self, competition: str, cutoff: datetime):
         key = (competition, cutoff)
         if key not in self._models:
-            hist = history_at(self.provider, competition, cutoff)
+            hist = history_at(self.provider, competition, cutoff, self.cfg.model.history_seasons)
             if len(hist) < self.cfg.model.min_history:
                 self._models[key] = None
             else:
@@ -95,7 +95,7 @@ class Engine:
             if not roster or fitted is None:
                 self._impact[key] = None
             else:
-                hist = history_at(self.provider, competition, cutoff)
+                hist = history_at(self.provider, competition, cutoff, self.cfg.model.history_seasons)
                 hist_ids = {r.fixture_id for r in hist}
                 fn = getattr(self.provider, "list_lineup_history", None)
                 lus = [l for l in (fn(competition, cutoff) if fn else []) if l.fixture_id in hist_ids]
@@ -133,7 +133,7 @@ class Engine:
                     notes.append(f"{f.competition}: storico insufficiente (<{self.cfg.model.min_history} partite), competizione saltata")
                 continue
             roster = self.roster(f.competition) if self.use_lineups else []
-            state = build_state(self.provider, f, cutoff, roster)
+            state = build_state(self.provider, f, cutoff, roster, quote_window_hours=self.cfg.ensemble.quote_window_hours)
             if extra_events:
                 state.events = _dedupe(state.events + [e for e in extra_events if e.observed_at <= cutoff])
             a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster)

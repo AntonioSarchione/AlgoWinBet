@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from .domain import Fixture, InformationEvent, LineupSnapshot, MatchResult, OddsQuote, Player
 from .information.news import RuleBasedParser
@@ -39,8 +39,10 @@ class MatchState:
         return max(times) if times else None
 
 
-def build_state(provider, fixture: Fixture, cutoff: datetime, roster: list[Player] | None = None, parser=None) -> MatchState:
-    quotes = [q for q in provider.get_quotes(fixture.id) if q.observed_at <= cutoff]
+def build_state(provider, fixture: Fixture, cutoff: datetime, roster: list[Player] | None = None, parser=None,
+                quote_window_hours: float | None = None) -> MatchState:
+    oldest = cutoff - timedelta(hours=quote_window_hours) if quote_window_hours else None
+    quotes = [q for q in provider.get_quotes(fixture.id) if q.observed_at <= cutoff and (oldest is None or q.observed_at >= oldest)]
     events = [e for e in provider.get_events(fixture.id) if e.observed_at <= cutoff]
     news_fn = getattr(provider, "get_news_items", None)
     if news_fn and roster:
@@ -61,6 +63,14 @@ def _dedupe(events: list[InformationEvent]) -> list[InformationEvent]:
     return out
 
 
-def history_at(provider, competition: str, cutoff: datetime) -> list[MatchResult]:
-    """Results already known at cutoff (result availability = kickoff + 3h, enforced again here)."""
-    return [r for r in provider.list_history([competition], cutoff) if r.available_at <= cutoff]
+def season_start(dt: datetime) -> datetime:
+    """European football season: starts 1 July (2026-09-30 -> 2026-07-01)."""
+    year = dt.year if dt.month >= 7 else dt.year - 1
+    return datetime(year, 7, 1, tzinfo=timezone.utc)
+
+
+def history_at(provider, competition: str, cutoff: datetime, seasons: int | None = None) -> list[MatchResult]:
+    """Results already known at cutoff (result availability = kickoff + 3h, enforced again here). With `seasons`, only the
+    current season and that many previous ones (older football says little about today's squads)."""
+    first = season_start(cutoff).replace(year=season_start(cutoff).year - seasons) if seasons is not None else None
+    return [r for r in provider.list_history([competition], cutoff) if r.available_at <= cutoff and (first is None or r.kickoff >= first)]

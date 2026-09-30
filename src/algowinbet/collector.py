@@ -69,6 +69,15 @@ class GoalCollector:
         st.report = self.mapper.report
         return st
 
+    def days_since_last_results(self, default: int = 3) -> int:
+        """Incremental daily update: only the days since the last successful results sync (+1 day overlap for late
+        corrections), never the whole history again."""
+        row = self.store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint LIKE '/leagues/%/results' "
+                                    "AND status=200", (SOURCE,)).fetchone()
+        if not row or not row[0]:
+            return default
+        return max(1, min(default * 10, (self.now() - datetime.fromisoformat(row[0])).days + 1))
+
     def sync_results(self, days_back: int = 3, leagues: list[str] | None = None) -> CollectStats:
         st = CollectStats("results")
         t0 = self.now()
@@ -83,13 +92,16 @@ class GoalCollector:
         st.report = self.mapper.report
         return st
 
-    def backfill_next(self, seasons_days: int = 800) -> CollectStats | None:
+    def backfill_next(self, seasons: int = 2) -> CollectStats | None:
         """Multi-season results history straight from GOAL (replaces manual CSV downloads). One league per call, marked
         done in the store so it never repeats; the daily `results` step keeps it current afterwards."""
         todo = [lid for lid in self.league_ids if not self.store.job_done(f"backfill:goal:{lid}")]
         if not todo:
             return None
-        st = self.sync_results(seasons_days, leagues=[todo[0]])
+        from .state import season_start
+        t = self.now()
+        first = season_start(t).replace(year=season_start(t).year - seasons)
+        st = self.sync_results((t - first).days + 1, leagues=[todo[0]])
         st.mode = f"backfill {todo[0]}"
         if not st.errors:
             self.store.mark_job(f"backfill:goal:{todo[0]}", self.now(), f"{st.saved.get('results', 0)} risultati")

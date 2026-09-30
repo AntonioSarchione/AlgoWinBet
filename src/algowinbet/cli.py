@@ -119,6 +119,8 @@ def _cutoff(prov) -> datetime:
 
 def cmd_analyze(a) -> None:
     cfg = _cfg(a)
+    if a.provider == "snapshots" and cfg.ensemble.quote_window_hours is None:
+        cfg.ensemble.quote_window_hours = 24.0  # live data: analyse only prices observed in the last 24h
     prov = _provider(a)
     cutoff = _cutoff(prov)
     start, end = cutoff, cutoff + timedelta(days=a.days)

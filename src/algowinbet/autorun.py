@@ -44,6 +44,7 @@ class AutoConfig:
     oddspapi_reserve: int = 20
     lineup_window_min: int = 95
     fixtures_days: int = 14
+    history_seasons: int = 2  # backfill: current season + 2 previous, never more
     prekick_min: tuple[int, int] = (30, 75)
 
     @classmethod
@@ -91,7 +92,7 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
             steps.append("backfill")  # one league per tick until every league has its multi-season history
     if cfg.oddspapi_tournaments:
-        upcoming = SnapshotProvider(store).list_fixtures(None, now, now + timedelta(hours=72))
+        upcoming = SnapshotProvider(store).list_fixtures(None, now, now + timedelta(hours=24))  # analysis looks at the last 24h
         lo, hi = cfg.prekick_min
         prekick = [f for f in upcoming if timedelta(minutes=lo) <= f.kickoff - now <= timedelta(minutes=hi)]
         cost = odds_cost or len(cfg.bookmakers)
@@ -115,13 +116,13 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if s == "fixtures":
             out.append(goal.sync_fixtures(cfg.fixtures_days))
         elif s == "results":
-            out.append(goal.sync_results(3))
+            out.append(goal.sync_results(goal.days_since_last_results()))
         elif s == "stats":
             out.append(goal.sync_stats(3))
         elif s == "lineups":
             out.append(goal.sync_lineups(cfg.lineup_window_min))
         elif s == "backfill":
-            st = goal.backfill_next()
+            st = goal.backfill_next(cfg.history_seasons)
             if st:
                 out.append(st)
         elif s == "odds":

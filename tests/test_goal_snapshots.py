@@ -427,3 +427,19 @@ def test_stats_collection_only_for_finished_matches_without_stats():
     st = col.sync_stats(days_back=2)
     assert st.requests == 1 and st.saved["stats"] > 20 and store.stats_of("goal:77")["corners"] == (2.0, 3.0)
     assert col.sync_stats(days_back=2).requests == 0  # already stored
+
+
+def test_live_windows_quotes_24h_and_history_two_previous_seasons():
+    from algowinbet.state import history_at, season_start
+    from algowinbet.domain import MatchResult
+    s = SnapshotStore(":memory:")
+    f = _fx()
+    mk = lambda odds, at: OddsQuote(fixture_id=f.id, market_code="MATCH_1X2", selection="HOME", bookmaker="Sisal", odds=odds, observed_at=at)
+    s.save_quotes("x", [mk(2.0, NOW - timedelta(hours=30)), mk(1.8, NOW - timedelta(hours=2))])
+    assert [q.odds for q in build_state(SnapshotProvider(s), f, NOW, quote_window_hours=24).quotes] == [1.8]
+    assert season_start(NOW) == utc(2026, 7, 1) and season_start(utc(2026, 3, 1)) == utc(2025, 7, 1)
+    olds = [MatchResult(fixture_id=f"goal:{y}", competition="Serie A", home="Inter", away="Empoli", kickoff=utc(y, 1, 10),
+                        home_goals=1, away_goals=0) for y in (2024, 2025, 2026)]
+    s.save_results("x", olds, NOW)
+    # current season 2026/27 + two previous (from 2024-07-01): the January 2024 match (2023/24) is excluded
+    assert [r.kickoff.year for r in history_at(SnapshotProvider(s), "Serie A", NOW, seasons=2)] == [2025, 2026]
