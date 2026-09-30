@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -329,12 +330,15 @@ def cmd_collect_auto(a) -> None:
     if cfg.oddspapi_tournaments and (os.environ.get("ODDSPAPI_API_KEY") or os.environ.get("ODDSPAPI_KEY")):
         oc = OddsPapiClient(store=store, budget=BudgetGuard(store, "oddspapi", monthly=cfg.oddspapi_monthly_limit, reserve=cfg.oddspapi_reserve))
         odds = OddsCollector(oc, store, cfg.oddspapi_tournaments, cfg.bookmakers, names)
+    t0 = time.monotonic()
+
+    def show(st):
+        _print_stats(st)
+        print(f"  ({time.monotonic() - t0:.0f}s dall'inizio)", flush=True)
     try:
-        results = run_tick(store, cfg, goal, odds)
+        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds)
         if not results:
             print("tick: niente da fare")
-        for st in results:
-            _print_stats(st)
     finally:
         store.close()
 
@@ -588,6 +592,7 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--config", default="configs/collect.json")
     ca.add_argument("--db", default="turso")
     ca.add_argument("--aliases", default="configs/team_aliases.json")
+    ca.add_argument("--max-seconds", type=float, default=360, help="nessun nuovo passo dopo N secondi (il job CI ha un timeout)")
     ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")

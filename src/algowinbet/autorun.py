@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -104,11 +105,23 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
 
 
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
-             now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> list[CollectStats]:
+             now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
+             max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic) -> list[CollectStats]:
+    """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
+    whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
+    t0 = clock()
     steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None, odds.snapshot_cost() if odds else None)
     out: list[CollectStats] = []
     for s in steps:
+        if max_seconds is not None and clock() - t0 > max_seconds:
+            skipped = CollectStats(s)
+            skipped.skipped.append("tempo del giro esaurito: rimandato al prossimo tick")
+            out.append(skipped)
+            if on_step:
+                on_step(skipped)
+            continue
+        before = len(out)
         if s in ("fixtures", "results", "stats", "lineups", "backfill") and goal is None:
             continue
         if s in ("odds", "closing") and odds is None:
@@ -129,4 +142,6 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
             out.append(odds.sync_odds())
         elif s == "closing":
             out.append(odds.sync_closing())
+        if on_step and len(out) > before:
+            on_step(out[-1])
     return out

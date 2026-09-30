@@ -38,4 +38,5 @@ jobs:
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
         run: algowinbet collect-auto --config configs/collect.json --db turso

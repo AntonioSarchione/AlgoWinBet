@@ -246,3 +246,32 @@ def test_history_backfill_runs_once_per_league_without_csv():
     assert st.mode == "backfill L1" and st.saved == {"results": 5} and "/leagues/L1/results" in sent[0] and "from=2024-" in sent[0]
     assert col.backfill_next().mode == "backfill L2" and col.backfill_next() is None and len(sent) == 2
     assert len(SnapshotProvider(store).list_history(None, NOW)) == 5
+
+
+def test_tick_stops_starting_steps_after_time_budget_and_reports_each_step():
+    store = SnapshotStore(":memory:")
+    cfg = AutoConfig(goal_leagues=["L"])
+    gc = GoalApiClient(api_key="k", store=store, transport=lambda u, h: (200, {}, b'{"success":true,"data":[],"pagination":{"hasMore":false}}'),
+                       now=lambda: NOW)
+    ticks = iter([0, 1, 500, 501, 502, 503, 504])
+    seen = []
+    res = run_tick(store, cfg, GoalCollector(gc, store, ["L"], NAMES, now=lambda: NOW), None, now=lambda: NOW,
+                   on_step=lambda st: seen.append(st.mode), max_seconds=100, clock=lambda: next(ticks))
+    assert seen[0] == "fixtures" and all("tempo del giro esaurito" in r.skipped[0] for r in res[1:]) and len(seen) == len(res)
+
+
+def test_bulk_writes_use_few_statements():
+    store = SnapshotStore(":memory:")
+    from algowinbet.domain import MatchResult
+    rs = [MatchResult(fixture_id=f"goal:{i}", competition="Serie A", home=f"H{i}", away=f"A{i}", kickoff=NOW - timedelta(days=i),
+                      home_goals=1, away_goals=0) for i in range(1000)]
+    calls = []
+    real = store.db
+    class Spy:
+        def __getattr__(self, k):
+            return getattr(real, k)
+        def execute(self, *a):
+            calls.append(a[0][:20])
+            return real.execute(*a)
+    store.db = Spy()
+    assert store.save_results("x", rs, NOW) == 1000 and len(calls) <= 10

@@ -119,81 +119,75 @@ class SnapshotStore:
         return (row[0], json.loads(self.raw_body(row[0]))) if row else None
 
     # ---------------------------------------------------------- normalised
-    def save_fixtures(self, source: str, fixtures: list[Fixture], observed_at: datetime, raw_id: int | None = None) -> int:
+    # Remote databases (Turso) pay one network round trip per statement: rows are written in multi-row statements, and
+    # lookups are done with one query per batch, never one per row.
+    def _bulk(self, head: str, rows: list[tuple]) -> int:
+        if not rows:
+            return 0
+        width = len(rows[0])
+        per = max(1, 900 // width)  # stay under SQLite's bound-parameter limit on every build
         n = 0
-        for f in fixtures:
-            last = self.db.execute("SELECT kickoff, status FROM fixtures WHERE fixture_id=? ORDER BY observed_at DESC, id DESC LIMIT 1",
-                                   (f.id,)).fetchone()
-            if last and last[0] == _iso(f.kickoff) and last[1] == f.status.value:
-                continue  # unchanged: keep history of CHANGES (postponement, status), not every poll
-            self.db.execute(
-                "INSERT INTO fixtures(source,fixture_id,competition,home,away,kickoff,status,observed_at,raw_id) VALUES(?,?,?,?,?,?,?,?,?)",
-                (source, f.id, f.competition, f.home, f.away, _iso(f.kickoff), f.status.value, _iso(observed_at), raw_id))
-            n += 1
+        for i in range(0, len(rows), per):
+            chunk = rows[i:i + per]
+            values = ",".join(["(" + ",".join(["?"] * width) + ")"] * len(chunk))
+            cur = self.db.execute(f"{head} VALUES {values}", [v for r in chunk for v in r])
+            n += max(cur.rowcount or 0, 0)
         self.db.commit()
         return n
+
+    def _latest_fixture_state(self) -> dict[str, tuple[str, str]]:
+        rows = self.db.execute("SELECT f.fixture_id, f.kickoff, f.status FROM fixtures f "
+                               "JOIN (SELECT fixture_id, MAX(id) mid FROM fixtures GROUP BY fixture_id) m ON f.id=m.mid").fetchall()
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    def save_fixtures(self, source: str, fixtures: list[Fixture], observed_at: datetime, raw_id: int | None = None) -> int:
+        """Keeps the history of CHANGES (postponement, status), not every poll."""
+        last = self._latest_fixture_state()
+        batch: dict[str, tuple] = {}
+        for f in fixtures:
+            if last.get(f.id) == (_iso(f.kickoff), f.status.value):
+                continue
+            batch[f.id] = (source, f.id, f.competition, f.home, f.away, _iso(f.kickoff), f.status.value, _iso(observed_at), raw_id)
+        return self._bulk("INSERT INTO fixtures(source,fixture_id,competition,home,away,kickoff,status,observed_at,raw_id)", list(batch.values()))
 
     def save_results(self, source: str, results: list[MatchResult], observed_at: datetime) -> int:
-        n = 0
-        for r in results:
-            cur = self.db.execute(
-                "INSERT OR IGNORE INTO results(fixture_id,source,competition,home,away,kickoff,home_goals,away_goals,observed_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
-                (r.fixture_id, source, r.competition, r.home, r.away, _iso(r.kickoff), r.home_goals, r.away_goals, _iso(observed_at)))
-            n += cur.rowcount
-        self.db.commit()
-        return n
+        return self._bulk("INSERT OR IGNORE INTO results(fixture_id,source,competition,home,away,kickoff,home_goals,away_goals,observed_at)",
+                          [(r.fixture_id, source, r.competition, r.home, r.away, _iso(r.kickoff), r.home_goals, r.away_goals, _iso(observed_at))
+                           for r in results])
 
     def save_quotes(self, source: str, quotes: list[OddsQuote], raw_id: int | None = None) -> int:
-        n = 0
-        for q in quotes:
-            cur = self.db.execute(
-                "INSERT OR IGNORE INTO quotes(fixture_id,market_code,selection,line,line_key,bookmaker,odds,observed_at,kind,source,raw_id) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (q.fixture_id, q.market_code, q.selection, q.line, "" if q.line is None else repr(q.line), q.bookmaker, q.odds,
-                 _iso(q.observed_at), q.kind, source, raw_id))
-            n += cur.rowcount
-        self.db.commit()
-        return n
+        return self._bulk("INSERT OR IGNORE INTO quotes(fixture_id,market_code,selection,line,line_key,bookmaker,odds,observed_at,kind,source,raw_id)",
+                          [(q.fixture_id, q.market_code, q.selection, q.line, "" if q.line is None else repr(q.line), q.bookmaker, q.odds,
+                            _iso(q.observed_at), q.kind, source, raw_id) for q in quotes])
 
     def save_lineups(self, source: str, lineups: list[LineupSnapshot], raw_id: int | None = None) -> int:
-        n = 0
-        for l in lineups:
-            cur = self.db.execute(
-                "INSERT OR IGNORE INTO lineups(fixture_id,team,status,formation,starters,bench,published_at,observed_at,source,source_level,raw_id) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (l.fixture_id, l.team, l.status, l.formation, json.dumps(l.starters), json.dumps(l.bench), _iso(l.published_at),
-                 _iso(l.observed_at), source, l.source_level, raw_id))
-            n += cur.rowcount
-        self.db.commit()
-        return n
+        return self._bulk("INSERT OR IGNORE INTO lineups(fixture_id,team,status,formation,starters,bench,published_at,observed_at,source,source_level,raw_id)",
+                          [(l.fixture_id, l.team, l.status, l.formation, json.dumps(l.starters), json.dumps(l.bench), _iso(l.published_at),
+                            _iso(l.observed_at), source, l.source_level, raw_id) for l in lineups])
 
     def save_players(self, source: str, players: list[Player], at: datetime) -> int:
+        old = {r[0]: (r[1], r[2]) for r in self.db.execute("SELECT id, importance, start_rate FROM players").fetchall()}
+        rows = {}
         for p in players:
-            old = self.db.execute("SELECT importance, start_rate FROM players WHERE id=?", (p.id,)).fetchone()
-            imp = old[0] if old and p.importance == 1.0 and old[0] is not None else p.importance  # keep hand-tuned values
-            sr = p.start_rate if p.start_rate is not None else (old[1] if old else None)
-            self.db.execute("INSERT OR REPLACE INTO players(id,name,team,position,importance,start_rate,source,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                            (p.id, p.name, p.team, p.position.value, imp, sr, source, _iso(at)))
-        self.db.commit()
+            o = old.get(p.id)
+            imp = o[0] if o and p.importance == 1.0 and o[0] is not None else p.importance  # keep hand-tuned values
+            sr = p.start_rate if p.start_rate is not None else (o[1] if o else None)
+            rows[p.id] = (p.id, p.name, p.team, p.position.value, imp, sr, source, _iso(at))
+        self._bulk("INSERT OR REPLACE INTO players(id,name,team,position,importance,start_rate,source,updated_at)", list(rows.values()))
         return len(players)
 
     def save_news(self, items: list[NewsItem]) -> int:
-        n = 0
+        rows = {}
         for it in items:
             h = hashlib.sha1(f"{it.source}|{it.published_at.isoformat()}|{it.text}".encode()).hexdigest()[:16]
-            cur = self.db.execute("INSERT OR IGNORE INTO news_items VALUES(?,?,?,?,?,?,?,?)",
-                                  (h, it.source, it.source_level, _iso(it.published_at), _iso(it.observed_at), it.text, it.team, it.fixture_id))
-            n += cur.rowcount
-        self.db.commit()
-        return n
+            rows[h] = (h, it.source, it.source_level, _iso(it.published_at), _iso(it.observed_at), it.text, it.team, it.fixture_id)
+        return self._bulk("INSERT OR IGNORE INTO news_items(id,source,level,published_at,observed_at,text,team,fixture_id)", list(rows.values()))
 
     def save_stats(self, source: str, stats: list[MatchStat], raw_id: int | None = None) -> int:
         """Post-match figures: the latest fetch replaces the previous one (providers correct stats after the final whistle)."""
-        for s in stats:
-            self.db.execute("INSERT OR REPLACE INTO match_stats(fixture_id,period,stat,home,away,observed_at,source,raw_id) VALUES(?,?,?,?,?,?,?,?)",
-                            (s.fixture_id, s.period, s.stat, s.home, s.away, _iso(s.observed_at), source, raw_id))
-        self.db.commit()
+        rows = {(x.fixture_id, x.period, x.stat): (x.fixture_id, x.period, x.stat, x.home, x.away, _iso(x.observed_at), source, raw_id)
+                for x in stats}
+        self._bulk("INSERT OR REPLACE INTO match_stats(fixture_id,period,stat,home,away,observed_at,source,raw_id)", list(rows.values()))
         return len(stats)
 
     def stats_of(self, fixture_id: str, period: str = "FT") -> dict[str, tuple[float | None, float | None]]:
