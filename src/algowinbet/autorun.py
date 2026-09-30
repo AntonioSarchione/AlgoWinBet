@@ -82,8 +82,10 @@ def _stale(last: datetime | None, now: datetime, age: timedelta) -> bool:
     return last is None or now - last >= age
 
 
-def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: datetime | None, odds_cost: int | None = None) -> list[str]:
-    """Pure decision (no network): which steps this tick should run."""
+def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: datetime | None, odds_cost: int | None = None,
+              force_odds: bool = False, history: bool = False) -> list[str]:
+    """Pure decision (no network): which steps this tick should run. force_odds (manual run) takes a snapshot now, still
+    within the monthly BudgetGuard; history adds the /historical-odds price paths of the fixtures not played yet."""
     steps: list[str] = []
     if cfg.goal_leagues:
         stale = lambda kind: any(_stale(_last_ok(store, "goal-api", f"/leagues/{lid}/{kind}"), now, timedelta(hours=20)) for lid in cfg.goal_leagues)
@@ -100,20 +102,24 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         prekick = [f for f in upcoming if timedelta(minutes=lo) <= f.kickoff - now <= timedelta(minutes=hi)]
         cost = odds_cost or len(cfg.bookmakers)
         due = (upcoming and _stale(last_odds, now, timedelta(hours=20))) or (prekick and _stale(last_odds, now, timedelta(minutes=hi - lo + 5)))
-        if due and odds_allowed_today(store, cfg, now, cost):
+        if force_odds or (due and odds_allowed_today(store, cfg, now, cost)):
             steps.append("odds")
+        if history:
+            steps.append("history")
         steps.append("closing")
     return steps
 
 
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
-             max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic) -> list[CollectStats]:
+             max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
+             force_odds: bool = False, history: bool = False) -> list[CollectStats]:
     """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
     whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
     t0 = clock()
-    steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None, odds.snapshot_cost() if odds else None)
+    steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None, odds.snapshot_cost() if odds else None,
+                      force_odds=force_odds, history=history)
     out: list[CollectStats] = []
     for s in steps:
         if max_seconds is not None and clock() - t0 > max_seconds:
@@ -126,7 +132,7 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         before = len(out)
         if s in ("fixtures", "results", "stats", "lineups", "backfill") and goal is None:
             continue
-        if s in ("odds", "closing") and odds is None:
+        if s in ("odds", "history", "closing") and odds is None:
             continue
         if s == "fixtures":
             out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
@@ -142,6 +148,8 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 out.append(st)
         elif s == "odds":
             out.append(odds.sync_odds())
+        elif s == "history":
+            out.append(odds.sync_prematch_history())
         elif s == "closing":
             out.append(odds.sync_closing())
         if on_step and len(out) > before:

@@ -184,7 +184,48 @@ def test_snapshot_then_free_closing_under_the_goal_fixture_id():
     assert col2.sync_closing().requests == 0
 
 
+def _counter_account(counter):
+    return lambda q: (200, {"current_subscription_id": 1, "subscriptions": [{"subscription_id": 1, "request_limit": 250,
+                                                                            "request_count": counter[0]}]})
+
+
+def test_prematch_history_saves_price_paths_when_free_and_stops_when_billed():
+    store = SnapshotStore(":memory:")
+    seed_calendar(store)
+    early = utc(2026, 10, 10, 9)  # both matches still to play
+    series = {"101": {"players": {"0": [{"createdAt": "2026-10-08T09:00:00Z", "price": 2.6}, {"createdAt": "2026-10-10T08:00:00Z", "price": 2.4}]}}}
+    hist = {"bookmakers": {"sisal.it": {"markets": {"101": {"outcomes": series}}}}}
+    counter = [40]
+
+    def billed_hist(q):
+        counter[0] += 1
+        return 200, hist
+    by_book = lambda q: (200, [fixture_odds(only=q["bookmaker"]), fixture_odds("op-2", 3, 4, "2026-10-10T16:00:00Z", only=q["bookmaker"])])
+    routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/participants": (200, PARTICIPANTS),
+              "/odds-by-tournaments": by_book, "/account": _counter_account(counter), "/historical-odds": (200, hist)}
+    c, t = mk_client(routes, store, now=early)
+    col = OddsCollector(c, store, ["17"], ["sisal", "pinnacle"], NAMES, now=lambda: early)
+    col.sync_odds()
+    st = col.sync_prematch_history()
+    assert sum("historical-odds" in u for u in t.calls) == 2 and st.saved["quotes"] == 4 and not st.skipped
+    assert {r[0] for r in store.db.execute("SELECT kind FROM quotes WHERE observed_at < '2026-10-10T09'").fetchall()} == {"current"}
+
+    routes["/historical-odds"] = billed_hist
+    c2, t2 = mk_client(routes, store, now=early)
+    st2 = OddsCollector(c2, store, ["17"], ["sisal", "pinnacle"], NAMES, now=lambda: early).sync_prematch_history()
+    assert sum("historical-odds" in u for u in t2.calls) == 1 and "non è gratuito" in st2.skipped[0]
+
+
 # ------------------------------------------------------------------ tick
+def test_manual_run_forces_the_snapshot_and_adds_history():
+    store = SnapshotStore(":memory:")
+    seed_calendar(store)
+    cfg = AutoConfig(oddspapi_tournaments=["17"])
+    t = utc(2026, 10, 10, 9)
+    assert plan_tick(store, cfg, t, t - timedelta(hours=1)) == ["closing"]
+    assert plan_tick(store, cfg, t, t - timedelta(hours=1), force_odds=True, history=True) == ["odds", "history", "closing"]
+
+
 def test_plan_tick_schedules_by_staleness_and_kickoff_slots():
     store = SnapshotStore(":memory:")
     seed_calendar(store)

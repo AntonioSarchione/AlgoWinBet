@@ -348,9 +348,10 @@ class OddsPapiMapper:
                                              odds=float(price), observed_at=observed_at, kind=kind, source_level="B"))
         return out
 
-    def history(self, payload: dict, fixture: Fixture) -> list[OddsQuote]:
+    def history(self, payload: dict, fixture: Fixture, closing: bool = True) -> list[OddsQuote]:
         """/historical-odds: every price change with its own timestamp. Points after kickoff are dropped (in-play); the last
-        pre-kickoff point of each selection is marked kind='close' (closing line, for CLV)."""
+        pre-kickoff point of each selection is marked kind='close' (closing line, for CLV). With closing=False (fixture not
+        played yet) every point stays kind='current': the last one is simply the latest price."""
         out: list[OddsQuote] = []
         for book, bdata in (payload.get("bookmakers") or {}).items():
             for mid_s, mdata in ((bdata or {}).get("markets") or {}).items():
@@ -375,7 +376,7 @@ class OddsPapiMapper:
                         pts.sort()
                         for i, (at, price) in enumerate(pts):
                             out.append(OddsQuote(fixture_id=fixture.id, market_code=mk[0], selection=sel, line=mk[1], bookmaker=book,
-                                                 odds=price, observed_at=at, kind="close" if i == len(pts) - 1 else "current",
+                                                 odds=price, observed_at=at, kind="close" if closing and i == len(pts) - 1 else "current",
                                                  source_level="B"))
                         self.report.good("storico")
         return out

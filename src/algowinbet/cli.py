@@ -410,7 +410,7 @@ def cmd_collect_auto(a) -> None:
         _print_stats(st)
         print(f"  ({time.monotonic() - t0:.0f}s dall'inizio)", flush=True)
     try:
-        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds)
+        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, force_odds=a.force_odds, history=a.history)
         if not results:
             print("tick: niente da fare")
         from .autorun import should_publish
@@ -695,6 +695,8 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--max-seconds", type=float, default=360, help="nessun nuovo passo dopo N secondi (il job CI ha un timeout)")
     ca.add_argument("--no-publish", dest="publish", action="store_false", help="non rifare l'analisi per la dashboard")
     ca.add_argument("--force-publish", action="store_true", help="rifai l'analisi per la dashboard anche senza dati nuovi")
+    ca.add_argument("--force-odds", action="store_true", help="fotografia quote adesso (1 richiesta per bookmaker, sempre entro il budget)")
+    ca.add_argument("--history", action="store_true", help="storico prezzi /historical-odds delle partite future (verifica che sia gratuito)")
     ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")
