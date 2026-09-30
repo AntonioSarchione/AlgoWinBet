@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS news_items(id TEXT PRIMARY KEY, source TEXT, level TE
   team TEXT, fixture_id TEXT);
 CREATE TABLE IF NOT EXISTS match_stats(fixture_id TEXT, period TEXT, stat TEXT, home REAL, away REAL, observed_at TEXT, source TEXT,
   raw_id INTEGER, PRIMARY KEY(fixture_id, period, stat, source));
+CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY, done_at TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRIMARY KEY(source, period));
 """
 
@@ -198,6 +199,14 @@ class SnapshotStore:
     def stats_of(self, fixture_id: str, period: str = "FT") -> dict[str, tuple[float | None, float | None]]:
         rows = self.db.execute("SELECT stat, home, away FROM match_stats WHERE fixture_id=? AND period=?", (fixture_id, period)).fetchall()
         return {r[0]: (r[1], r[2]) for r in rows}
+
+    # --------------------------------------------------------------- jobs
+    def job_done(self, name: str) -> bool:
+        return self.db.execute("SELECT 1 FROM jobs WHERE name=?", (name,)).fetchone() is not None
+
+    def mark_job(self, name: str, at: datetime, detail: str = "") -> None:
+        self.db.execute("INSERT OR REPLACE INTO jobs(name, done_at, detail) VALUES(?,?,?)", (name, _iso(at), detail))
+        self.db.commit()
 
     # ------------------------------------------------------------- budget
     def usage(self, source: str, period: str) -> int:

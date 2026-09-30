@@ -189,7 +189,8 @@ def test_plan_tick_schedules_by_staleness_and_kickoff_slots():
     store = SnapshotStore(":memory:")
     seed_calendar(store)
     cfg = AutoConfig(goal_leagues=["L"], oddspapi_tournaments=["17"])
-    assert plan_tick(store, cfg, NOW, None) == ["fixtures", "results", "stats", "lineups", "odds", "closing"]
+    assert plan_tick(store, cfg, NOW, None) == ["fixtures", "results", "stats", "lineups", "backfill", "odds", "closing"]
+    store.mark_job("backfill:goal:L", NOW)
     store.put_raw("goal-api", "/leagues/L/fixtures", {}, 200, b"{}", NOW - timedelta(hours=2))
     store.put_raw("goal-api", "/leagues/L/results", {}, 200, b"{}", NOW - timedelta(hours=2))
     t = utc(2026, 10, 10, 12, 10)  # 50 min before Genoa-Fiorentina: pre-kickoff slot
@@ -216,6 +217,7 @@ def test_tick_with_nothing_due_sends_nothing():
     cfg = AutoConfig(goal_leagues=["L"])
     for ep in ("/leagues/L/fixtures", "/leagues/L/results"):
         store.put_raw("goal-api", ep, {}, 200, b"{}", NOW - timedelta(hours=1))
+    store.mark_job("backfill:goal:L", NOW - timedelta(days=3))
     sent = []
     gc = GoalApiClient(api_key="k", store=store, transport=lambda u, h: sent.append(u) or (200, {}, b'{"success":true,"data":[]}'),
                        now=lambda: NOW)
@@ -227,3 +229,20 @@ def test_auto_config_file_loads_saved_ids():
     cfg = AutoConfig.load("configs/collect.json")
     assert cfg.goal_leagues and cfg.oddspapi_monthly_limit == 250 and cfg.prekick_min == (30, 75)
     assert cfg.oddspapi_tournaments == ["23", "17", "35", "34", "8", "238", "37", "7", "679"] and len(cfg.leagues) == 9
+
+
+def test_history_backfill_runs_once_per_league_without_csv():
+    store = SnapshotStore(":memory:")
+    rows = [{"id": f"r{i}", "matchStatus": "FINISHED", "kickoffUtc": f"2025-0{1 + i % 8}-1{i % 9}T18:00:00.000Z", "league": {"name": "Serie A"},
+             "homeTeam": {"name": f"H{i}"}, "awayTeam": {"name": f"A{i}"}, "homeTeamScore": "1", "awayTeamScore": "0"} for i in range(5)]
+    sent = []
+
+    def transport(url, headers):
+        sent.append(url)
+        return 200, {}, json.dumps({"success": True, "data": rows, "pagination": {"hasMore": False}}).encode()
+    gc = GoalApiClient(api_key="k", store=store, transport=transport, now=lambda: NOW)
+    col = GoalCollector(gc, store, ["L1", "L2"], NAMES, now=lambda: NOW)
+    st = col.backfill_next()
+    assert st.mode == "backfill L1" and st.saved == {"results": 5} and "/leagues/L1/results" in sent[0] and "from=2024-" in sent[0]
+    assert col.backfill_next().mode == "backfill L2" and col.backfill_next() is None and len(sent) == 2
+    assert len(SnapshotProvider(store).list_history(None, NOW)) == 5

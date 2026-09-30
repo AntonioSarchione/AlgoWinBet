@@ -6,6 +6,7 @@ Plan per tick (UTC):
   - GOAL fixtures ........ if the last successful sync is older than 20h            (~1 request/league/day)
   - GOAL results + stats . if the last successful sync is older than 20h            (~1 + 1 per finished match)
   - GOAL lineups ......... fixtures kicking off within the lineup window, until both XI are confirmed
+  - GOAL backfill ........ once per league, one league per tick: multi-season results history (no manual CSV)
   - OddsPapi snapshot .... daily (next 72h has fixtures, last snapshot >20h ago) and once per kickoff slot
                            30-75 min before kickoff, i.e. after the official XI: the moment stale prices exist
   - OddsPapi closing ..... free /historical-odds after kickoff (closing line for CLV)
@@ -87,6 +88,8 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         if _stale(_last_ok(store, "goal-api", "/leagues/%/results"), now, timedelta(hours=20)):
             steps += ["results", "stats"]
         steps.append("lineups")  # costs nothing when no fixture is inside the window
+        if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
+            steps.append("backfill")  # one league per tick until every league has its multi-season history
     if cfg.oddspapi_tournaments:
         upcoming = SnapshotProvider(store).list_fixtures(None, now, now + timedelta(hours=72))
         lo, hi = cfg.prekick_min
@@ -105,7 +108,7 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
     steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None, odds.snapshot_cost() if odds else None)
     out: list[CollectStats] = []
     for s in steps:
-        if s in ("fixtures", "results", "stats", "lineups") and goal is None:
+        if s in ("fixtures", "results", "stats", "lineups", "backfill") and goal is None:
             continue
         if s in ("odds", "closing") and odds is None:
             continue
@@ -117,6 +120,10 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
             out.append(goal.sync_stats(3))
         elif s == "lineups":
             out.append(goal.sync_lineups(cfg.lineup_window_min))
+        elif s == "backfill":
+            st = goal.backfill_next()
+            if st:
+                out.append(st)
         elif s == "odds":
             out.append(odds.sync_odds())
         elif s == "closing":

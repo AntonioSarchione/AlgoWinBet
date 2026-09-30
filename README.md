@@ -81,6 +81,8 @@ Ogni esecuzione è un "tick" che fa solo ciò che serve in quel momento (`src/al
 - OddsPapi: 1 istantanea al giorno e 1 per ogni fascia di calcio d'inizio 30–75 minuti prima (dopo le formazioni ufficiali),
   con 1 sola richiesta per tutto il campionato; linee di chiusura dallo storico (gratuito secondo la documentazione OddsPapi).
 - Budget: GOAL 1.000/giorno con riserva, OddsPapi 250/mese con riserva; contatore sincronizzato con `/account` (gratuito).
+- Storico risultati: scaricato da GOAL in automatico (una volta per campionato, poi aggiornato ogni giorno), niente CSV da scaricare a mano.
+  Il provider `csv` resta solo come opzione per esperimenti offline.
 
 Configurazione: `configs/collect.json` (id lega GOAL, id torneo OddsPapi, bookmaker). Segreti del repository (mai nel codice):
 `GOALAPI_KEY`, `ODDSPAPI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`.

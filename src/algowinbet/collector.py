@@ -69,18 +69,30 @@ class GoalCollector:
         st.report = self.mapper.report
         return st
 
-    def sync_results(self, days_back: int = 3) -> CollectStats:
+    def sync_results(self, days_back: int = 3, leagues: list[str] | None = None) -> CollectStats:
         st = CollectStats("results")
         t0 = self.now()
 
         def work():
-            for lid in self.league_ids:
+            for lid in leagues or self.league_ids:
                 rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days_back):%Y-%m-%d}", "to": f"{t0:%Y-%m-%d}"}, max_pages=60))
                 res = [r for r in (self.mapper.result(x) for x in rows) if r]
                 st.add("results", self.store.save_results(SOURCE, res, t0))
                 self.store.save_fixtures(SOURCE, [f for f in (self.mapper.fixture(x) for x in rows) if f], t0)  # final status
         self._run(st, work)
         st.report = self.mapper.report
+        return st
+
+    def backfill_next(self, seasons_days: int = 800) -> CollectStats | None:
+        """Multi-season results history straight from GOAL (replaces manual CSV downloads). One league per call, marked
+        done in the store so it never repeats; the daily `results` step keeps it current afterwards."""
+        todo = [lid for lid in self.league_ids if not self.store.job_done(f"backfill:goal:{lid}")]
+        if not todo:
+            return None
+        st = self.sync_results(seasons_days, leagues=[todo[0]])
+        st.mode = f"backfill {todo[0]}"
+        if not st.errors:
+            self.store.mark_job(f"backfill:goal:{todo[0]}", self.now(), f"{st.saved.get('results', 0)} risultati")
         return st
 
     def _upcoming(self, within: timedelta) -> list[Fixture]:
