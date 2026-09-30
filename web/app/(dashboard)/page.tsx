@@ -87,7 +87,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
         </div>
       </header>
 
-      <form className="card filters" method="get" role="search" aria-label="Filtra l'analisi">
+      {/* key: a new query string remounts the form, so "Azzera" and back/forward reset the uncontrolled fields */}
+      <form key={JSON.stringify(sp)} className="card filters" method="get" role="search" aria-label="Filtra l'analisi">
         <div className="field">
           <label htmlFor="min">Quota schedina (min – max)</label>
           <div className="control">

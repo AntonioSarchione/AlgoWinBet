@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -53,6 +53,7 @@ jobs:
           # inputs arrive as environment variables, never interpolated into the script (no shell injection)
           DB=data/probe.db
           if [ -n "$TURSO_DATABASE_URL" ]; then DB=turso; fi   # raw payloads and budget counters persist on Turso
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "inspect" ]; then algowinbet inspect "$ARG" --db "$DB"; exit 0; fi
           if [ "$SOURCE" = "db" ]; then algowinbet teams --db "$DB"; exit 0; fi
           args=("$SOURCE" "$COMMAND")
           if [ "$COMMAND" != "account" ]; then args+=("$ARG"); fi

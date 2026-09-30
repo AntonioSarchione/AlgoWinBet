@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import time
 import sys
@@ -368,6 +369,49 @@ def cmd_teams(a) -> None:
     store.close()
 
 
+def cmd_inspect(a) -> None:
+    """Debug a fixture's goal-total prices from the stored raw payloads (no API request): for each total-goals market of the
+    catalogue, the raw OddsPapi row (market id, name, type, line, period, outcome, price) next to what we stored."""
+    store = SnapshotStore(a.db)
+    like = f"%{a.team}%"
+    fxs = store.db.execute("SELECT id, home, away, kickoff FROM fixtures WHERE home LIKE ? OR away LIKE ? ORDER BY kickoff", (like, like)).fetchall()
+    cat_raw = store.last_raw("oddspapi", "/markets")
+    catalogue = {int(m["marketId"]): m for m in (json.loads(store.raw_body(cat_raw[0])) if cat_raw else []) if "marketId" in m}
+    raws = store.db.execute("SELECT id, params FROM raw_requests WHERE source='oddspapi' AND endpoint='/odds-by-tournaments' AND status=200 "
+                            "ORDER BY id DESC LIMIT 8").fetchall()
+    for fid, home, away, ko in fxs:
+        links = [r[0] for r in store.db.execute("SELECT ext_id FROM fixture_links WHERE fixture_id=?", (fid,)).fetchall()]
+        if not links:
+            continue
+        print(f"== {home} - {away} {ko} ({fid}) oddspapi {links}")
+        for rid, params in raws:
+            body = json.loads(store.raw_body(rid))
+            for row in body if isinstance(body, list) else [body]:
+                if str(row.get("fixtureId")) not in links:
+                    continue
+                for book, bd in (row.get("bookmakerOdds") or {}).items():
+                    for mid, md in ((bd or {}).get("markets") or {}).items():
+                        m = catalogue.get(int(mid), {})
+                        mtype = str(m.get("marketType") or "")
+                        if a.all_markets or "total" in mtype.lower() or "total" in str(m.get("marketName") or "").lower():
+                            outs = {int(o["outcomeId"]): o.get("outcomeName") for o in m.get("outcomes") or []}
+                            prices = "; ".join(f"{outs.get(int(oid), oid)}={next(iter((od.get('players') or {}).values()), {}).get('price')}"
+                                               for oid, od in (md.get("outcomes") or {}).items())
+                            print(f"  RAW {book} m{mid} '{m.get('marketName')}' type={mtype} line={m.get('handicap')} "
+                                  f"period={m.get('period')} sport={m.get('sportId')} :: {prices}")
+                break
+            else:
+                continue
+            break
+        for row in store.db.execute(
+                "SELECT market_code, selection, line, bookmaker, odds, observed_at FROM quotes q WHERE fixture_id=? AND market_code LIKE 'TOTAL%' "
+                "AND observed_at = (SELECT MAX(observed_at) FROM quotes q2 WHERE q2.fixture_id=q.fixture_id AND q2.market_code=q.market_code "
+                "AND q2.selection=q.selection AND q2.line_key=q.line_key AND q2.bookmaker=q.bookmaker) ORDER BY bookmaker, line, selection",
+                (fid,)).fetchall():
+            print(f"  DB  {row}")
+    store.close()
+
+
 def _print_stats(st, budget=None) -> None:
     print(f"{st.mode}: {st.requests} richieste, salvati {st.saved or '{}'}" + (f"; budget {budget.remaining()}" if budget else ""))
     for x in st.skipped[:10]:
@@ -685,6 +729,11 @@ def build_parser() -> argparse.ArgumentParser:
     oc.add_argument("--tournaments", nargs="+", required=True)
     oc.add_argument("--bookmakers", nargs="+", default=["sisal", "pinnacle", "snai"], help="massimo 3")
     oc.set_defaults(fn=cmd_odds_collect)
+    ins = sub.add_parser("inspect", help="quote grezze OddsPapi vs quote salvate per le partite di una squadra (nessuna richiesta API)")
+    ins.add_argument("team")
+    ins.add_argument("--db", default="algowinbet.db")
+    ins.add_argument("--all-markets", action="store_true")
+    ins.set_defaults(fn=cmd_inspect)
     tm = sub.add_parser("teams", help="elenco squadre nel database (nessuna richiesta API)")
     tm.add_argument("--db", default="turso")
     tm.set_defaults(fn=cmd_teams)

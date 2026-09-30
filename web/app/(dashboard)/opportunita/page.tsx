@@ -47,7 +47,7 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
         </div>
       </header>
       <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <form method="get" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }} aria-label="Filtra per quota">
+        <form key={`${s}|${comp}|${lmin}|${lmax}`} method="get" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }} aria-label="Filtra per quota">
           {s && <input type="hidden" name="s" value={s} />}
           {comp && <input type="hidden" name="comp" value={comp} />}
           <div className="field" style={{ minWidth: 260 }}>
