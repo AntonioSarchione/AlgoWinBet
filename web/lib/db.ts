@@ -111,12 +111,15 @@ export const runFixtures = cache((runId: number) =>
 );
 
 // Lists never need the per-market explanation (factors): the match page reads it on its own.
+// `match` is an SQL keyword: selected under an alias (the remote driver dropped the bare column name) and mapped back.
 const OPP_COLS =
-  "fixture_id, kickoff, competition, match, market, bookmaker, odds, fair_odds, p_final, p_market, ev, ev_lower, uncertainty, " +
+  "fixture_id, kickoff, competition, pub_opportunities.\"match\" AS match_label, market, bookmaker, odds, fair_odds, p_final, p_market, ev, ev_lower, uncertainty, " +
   "data_quality, status, odds_stale, lineup_state, p_struct, p_low, p_high, n_books, edge, NULL AS factors";
 
-export const runOpps = cache((runId: number) =>
-  all<OppRow>(`SELECT ${OPP_COLS} FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC`, [runId]),
+const withMatch = (rows: (OppRow & { match_label?: string })[]) => rows.map(({ match_label, ...o }) => ({ ...o, match: match_label ?? o.match ?? "" }));
+
+export const runOpps = cache(async (runId: number) =>
+  withMatch(await all<OppRow>(`SELECT ${OPP_COLS} FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC`, [runId])),
 );
 
 export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
@@ -141,7 +144,10 @@ export async function fixtureDetail(id: string) {
   const fx = (await all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? AND fixture_id = ?", [run.id, id]))[0];
   if (!fx) return null;
   const [opps, nq, lineups, formHome, formAway, h2h] = await Promise.all([
-    all<OppRow>("SELECT * FROM pub_opportunities WHERE run_id = ? AND fixture_id = ? ORDER BY ev DESC", [run.id, id]),
+    all<OppRow>(`SELECT ${OPP_COLS.replace("NULL AS factors", "factors")} FROM pub_opportunities WHERE run_id = ? AND fixture_id = ? ORDER BY ev DESC`, [
+      run.id,
+      id,
+    ]).then(withMatch),
     all<{ n: number }>("SELECT COUNT(*) AS n FROM quotes WHERE fixture_id = ?", [id]),
     all<LineupRow>(
       "SELECT team, status, formation, starters, bench, observed_at FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC",

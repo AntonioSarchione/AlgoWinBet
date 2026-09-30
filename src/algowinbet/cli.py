@@ -374,7 +374,8 @@ def cmd_inspect(a) -> None:
     catalogue, the raw OddsPapi row (market id, name, type, line, period, outcome, price) next to what we stored."""
     store = SnapshotStore(a.db)
     like = f"%{a.team}%"
-    fxs = store.db.execute("SELECT id, home, away, kickoff FROM fixtures WHERE home LIKE ? OR away LIKE ? ORDER BY kickoff", (like, like)).fetchall()
+    fxs = store.db.execute("SELECT DISTINCT fixture_id, home, away, kickoff FROM fixtures WHERE (home LIKE ? OR away LIKE ?) AND kickoff > ? ORDER BY kickoff",
+                       (like, like, (datetime.now(timezone.utc) - timedelta(days=1)).isoformat())).fetchall()
     cat_raw = store.last_raw("oddspapi", "/markets")
     catalogue = {int(m["marketId"]): m for m in (json.loads(store.raw_body(cat_raw[0])) if cat_raw else []) if "marketId" in m}
     raws = store.db.execute("SELECT id, params FROM raw_requests WHERE source='oddspapi' AND endpoint='/odds-by-tournaments' AND status=200 "
