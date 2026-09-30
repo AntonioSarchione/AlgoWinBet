@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="28 38 184 184">
+<defs>
+<linearGradient id="a" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#00F2FE"/><stop offset="100%" stop-color="#4FACFE"/></linearGradient>
+<linearGradient id="w" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00FF87"/><stop offset="100%" stop-color="#60EFFF"/></linearGradient>
+<linearGradient id="b" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00F2FE" stop-opacity=".9"/><stop offset="50%" stop-color="#00FF87" stop-opacity=".5"/><stop offset="100%" stop-color="#3B82F6" stop-opacity=".25"/></linearGradient>
+</defs>
+<polygon points="120,45 190,85 190,175 120,215 50,175 50,85" fill="#0F172A" stroke="url(#b)" stroke-width="6"/>
+<g opacity=".35" fill="url(#a)"><rect x="75" y="140" width="8" height="25" rx="2"/><rect x="90" y="125" width="8" height="40" rx="2"/><rect x="105" y="110" width="8" height="55" rx="2"/><rect x="120" y="130" width="8" height="35" rx="2"/><rect x="135" y="95" width="8" height="70" rx="2"/><rect x="150" y="80" width="8" height="85" rx="2"/></g>
+<g fill="none" stroke="url(#w)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M72 150 92 130 112 142 142 92 168 70"/><path d="M150 70 170 68 168 88"/></g>
+</svg>

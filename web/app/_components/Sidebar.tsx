@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, CalendarDays, LayoutDashboard, LogOut, Moon, Sparkles, Sun, Target, TrendingUp } from "lucide-react";
+import { Activity, CalendarDays, LayoutDashboard, LogOut, Moon, Sparkles, Sun, Target } from "lucide-react";
+import { LogoMark, Wordmark } from "./Logo";
 import { logout } from "@/app/login/actions";
 
 const NAV = [
@@ -37,11 +38,9 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <Link href="/" className="brand" aria-label="AlgoWinBet, home">
-        <span className="brand-mark">
-          <TrendingUp size={19} strokeWidth={2.4} aria-hidden="true" />
-        </span>
+        <LogoMark size={38} id="side" />
         <span>
-          <b>AlgoWinBet</b>
+          <Wordmark />
           <small>Dati · Analisi · Opportunità</small>
         </span>
       </Link>

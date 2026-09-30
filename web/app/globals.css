@@ -10,10 +10,10 @@
   --text: #f1f6f8;
   --text-2: #b4c2ca;
   --muted: #8397a3;
-  --accent: #22c55e;
-  --accent-strong: #16a34a;
+  --accent: #00e27a;
+  --accent-strong: #00c46a;
   --accent-ink: #04130a;
-  --accent-soft: rgba(34, 197, 94, 0.12);
+  --accent-soft: rgba(0, 226, 122, 0.12);
   --good: #3ddc84;
   --warn: #fab219;
   --bad: #f06a6a;
@@ -89,11 +89,13 @@ button, input, select { font: inherit; color: inherit; }
   padding: 20px 14px; border-right: 1px solid var(--line); background: var(--bg-2);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
-.brand-mark {
-  width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
-  background: linear-gradient(135deg, var(--accent), #0ea5a4); color: var(--accent-ink);
-}
-.brand b { display: block; font-size: 16px; letter-spacing: -0.01em; }
+.brand .wordmark { display: block; font-size: 18px; }
+.wordmark { font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; }
+.wm-algo { background: linear-gradient(90deg, #00f2fe, #4facfe); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.wm-win { background: linear-gradient(135deg, #00ff87, #60efff); -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 900; }
+.wm-bet { color: var(--text); }
+:root[data-theme="light"] .wm-algo { background-image: linear-gradient(90deg, #0891b2, #2563eb); }
+:root[data-theme="light"] .wm-win { background-image: linear-gradient(135deg, #059669, #0891b2); }
 .brand small { color: var(--muted); font-size: 12px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav a {
@@ -339,8 +341,7 @@ td.wrap { white-space: normal; min-width: 210px; }
     var(--bg);
 }
 .login-card { width: 100%; max-width: 380px; padding: 32px 28px 28px; display: flex; flex-direction: column; align-items: center; text-align: center; }
-.login-mark { width: 52px; height: 52px; border-radius: 14px; }
-.login-card h1 { margin: 16px 0 2px; font-size: 24px; letter-spacing: -0.02em; }
+.login-card h1 { margin: 14px 0 2px; font-size: 30px; }
 .login-card > p { margin: 0 0 24px; font-size: 13px; }
 .login-form { width: 100%; display: flex; flex-direction: column; gap: 16px; text-align: left; }
 .control[data-invalid], .control[data-invalid]:focus-within { border-color: var(--bad); }
