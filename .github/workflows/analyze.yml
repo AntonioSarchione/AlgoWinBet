@@ -8,6 +8,10 @@ on:
       days:
         description: "giorni di palinsesto da analizzare"
         default: "2"
+      fair:
+        description: "solo probabilità del modello (senza quote)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,4 +33,7 @@ jobs:
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
           DAYS: ${{ inputs.days }}
-        run: algowinbet analyze --provider snapshots --db turso --days "$DAYS"
+          FAIR: ${{ inputs.fair }}
+        run: |
+          if [ "$FAIR" = "true" ]; then algowinbet analyze --provider snapshots --db turso --days "$DAYS" --fair
+          else algowinbet analyze --provider snapshots --db turso --days "$DAYS"; fi

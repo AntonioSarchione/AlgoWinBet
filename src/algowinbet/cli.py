@@ -118,8 +118,44 @@ def _cutoff(prov) -> datetime:
     return prov.as_of if hasattr(prov, "as_of") else datetime.now(timezone.utc)
 
 
+def cmd_fair(a, cfg: Config, prov, cutoff: datetime) -> None:
+    """Model-only view: fair probabilities and odds per fixture, no bookmaker price needed. Validates the model on real
+    data before any quote is collected (it is NOT a betting signal: value needs the market price)."""
+    from .markets import probability
+    from .domain import SelectionRef
+    eng = Engine(prov, cfg, use_lineups=False)
+    refs = [("1", SelectionRef(market_code="MATCH_1X2", selection="HOME")), ("X", SelectionRef(market_code="MATCH_1X2", selection="DRAW")),
+            ("2", SelectionRef(market_code="MATCH_1X2", selection="AWAY")),
+            ("O2.5", SelectionRef(market_code="TOTAL_GOALS", selection="OVER", line=2.5)), ("GG", SelectionRef(market_code="BTTS", selection="YES"))]
+    fixtures = [f for f in prov.list_fixtures(a.competitions, cutoff, cutoff + timedelta(days=a.days)) if f.kickoff > cutoff]
+    print(f"Probabilità del modello (quota equa) — {len(fixtures)} partite, storico: stagione corrente + {cfg.model.history_seasons} precedenti")
+    missing: dict[str, int] = {}
+    for f in fixtures:
+        fitted = eng.fit(f.competition, cutoff)
+        if fitted is None or not (fitted[0].knows(f.home) and fitted[0].knows(f.away)):
+            missing[f.competition] = missing.get(f.competition, 0) + 1
+            continue
+        m = fitted[0].score_matrix(f.home, f.away)
+        cells = "  ".join(f"{k} {probability(m, r):.0%} ({1 / max(probability(m, r), 1e-9):.2f})" for k, r in refs)
+        print(f"  {_local_short(f.kickoff)}  {f.home} - {f.away}  [{f.competition}]  {cells}")
+    for c, n in sorted(missing.items()):
+        print(f"  ! {c}: {n} partite senza storico sufficiente per una o entrambe le squadre")
+
+
+def _local_short(dt: datetime) -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        return f"{dt.astimezone(ZoneInfo('Europe/Rome')):%d/%m %H:%M}"
+    except Exception:
+        return f"{dt:%d/%m %H:%M}Z"
+
+
 def cmd_analyze(a) -> None:
     cfg = _cfg(a)
+    if getattr(a, "fair", False):
+        prov = _provider(a)
+        cmd_fair(a, cfg, prov, _cutoff(prov))
+        return
     if a.provider == "snapshots" and cfg.ensemble.quote_window_hours is None:
         cfg.ensemble.quote_window_hours = 24.0  # live data: analyse only prices observed in the last 24h
     prov = _provider(a)
@@ -509,6 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--bankroll", type=float)
     a.add_argument("--include-watch", action="store_true")
     a.add_argument("--save", action="store_true", help="salva run/opportunità/schedine/eventi in SQLite")
+    a.add_argument("--fair", action="store_true", help="solo modello: probabilità e quote eque, senza quote del bookmaker")
     a.set_defaults(fn=cmd_analyze)
     b = sub.add_parser("backtest", help="walk-forward + paper betting")
     common(b)
