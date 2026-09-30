@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Fira_Code, Fira_Sans } from "next/font/google";
+import { Barlow, Barlow_Condensed, Barlow_Semi_Condensed } from "next/font/google";
 import "./globals.css";
 
-const sans = Fira_Sans({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-fira-sans", display: "swap" });
-const mono = Fira_Code({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-fira-code", display: "swap" });
+// UI UX Pro Max "Sports/Fitness" pairing: Barlow Condensed for headings, Barlow for text, Semi Condensed for figures.
+const sans = Barlow({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-body", display: "swap" });
+const display = Barlow_Condensed({ subsets: ["latin"], weight: ["600", "700", "800"], variable: "--font-display-face", display: "swap" });
+const figures = Barlow_Semi_Condensed({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-figures", display: "swap" });
 
 export const metadata: Metadata = {
   title: { default: "AlgoWinBet", template: "%s · AlgoWinBet" },
@@ -18,7 +20,7 @@ const THEME_SCRIPT = `try{var t=localStorage.getItem("awb-theme");if(t==="light"
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="it" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="it" className={`${sans.variable} ${display.variable} ${figures.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>

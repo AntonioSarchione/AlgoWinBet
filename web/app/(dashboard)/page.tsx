@@ -18,7 +18,7 @@ const PERIODS = [
   { v: "336", l: "Prossimi 14 giorni" },
 ];
 
-type SP = { min?: string; max?: string; h?: string; comp?: string };
+type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; comp?: string };
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -40,14 +40,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const hours = Number(sp.h) || 336;
   const qMin = Number(sp.min) || 0;
   const qMax = Number(sp.max) || 0;
+  const lMin = Number(sp.lmin) || 0;
+  const lMax = Number(sp.lmax) || 0;
+  const legOk = (odds: number) => (!lMin || odds >= lMin) && (!lMax || odds <= lMax);
   const inWindow = (iso: string, comp: string) =>
     new Date(iso).getTime() <= now + hours * 3600_000 && (!sp.comp || comp === sp.comp);
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
-  const op = opps.filter((o) => inWindow(o.kickoff, o.competition));
+  const op = opps.filter((o) => inWindow(o.kickoff, o.competition) && legOk(o.odds));
   const sl = slips
     .map((s) => ({ ...s, legList: parseJSON<Leg[]>(s.legs, []) }))
-    .filter((s) => s.legList.every((l) => inWindow(l.kickoff, l.competition)))
+    .filter((s) => s.legList.every((l) => inWindow(l.kickoff, l.competition) && legOk(l.odds)))
     .filter((s) => (!qMin || s.total_odds >= qMin) && (!qMax || s.total_odds <= qMax));
   const best = sl[0];
   const statusCounts = parseJSON<Record<string, number>>(run.status_counts, {});
@@ -57,7 +60,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const expl = parseJSON<{ positive_factors?: string[]; negative_factors?: string[]; what_would_change_it?: string[] }>(best?.explanation, {});
   const featured = pickFeatured(fx, best);
   const upcoming = fx.slice(0, 6);
-  const filtered = Boolean(sp.comp || sp.min || sp.max || (sp.h && sp.h !== "336"));
+  const filtered = Boolean(sp.comp || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "336"));
 
   return (
     <>
@@ -78,6 +81,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <input id="min" name="min" type="number" inputMode="decimal" step="0.05" min="1" placeholder="1.50" defaultValue={sp.min} aria-label="Quota minima" />
             <span className="dash">–</span>
             <input name="max" type="number" inputMode="decimal" step="0.05" min="1" placeholder="15.00" defaultValue={sp.max} aria-label="Quota massima" />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="lmin">Quota singolo evento (min – max)</label>
+          <div className="control">
+            <Target size={17} aria-hidden="true" />
+            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1" placeholder="1.20" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
+            <span className="dash">–</span>
+            <input name="lmax" type="number" inputMode="decimal" step="0.05" min="1" placeholder="3.00" defaultValue={sp.lmax} aria-label="Quota massima del singolo evento" />
           </div>
         </div>
         <div className="field">

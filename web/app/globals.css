@@ -30,8 +30,9 @@
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -18px rgba(0, 0, 0, 0.8);
-  --font-sans: var(--font-fira-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: var(--font-fira-code), ui-monospace, "Cascadia Code", monospace;
+  --font-sans: var(--font-body), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-display-face, var(--font-body)), system-ui, sans-serif;
+  --font-mono: var(--font-figures), var(--font-body), system-ui, sans-serif;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -68,14 +69,17 @@ html, body { margin: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 var(--font-sans);
+  font: 16px/1.5 var(--font-sans);
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "tnum" 1;
 }
 a { color: inherit; text-decoration: none; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
-.num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums lining-nums; font-weight: 600; letter-spacing: 0; }
+h1, h2, h3, .hero-stat b, .kpi b, .wordmark, .login-card h1 { font-family: var(--font-display); letter-spacing: 0.005em; }
+h1 { font-weight: 700; }
+h2, h3 { font-weight: 600; letter-spacing: 0.01em; }
 .muted { color: var(--muted); }
 .text-2 { color: var(--text-2); }
 .pos { color: var(--good); }
@@ -142,7 +146,7 @@ h2.section { font-size: 15px; margin: 6px 0 0; }
 .kpi b { font-size: 19px; }
 
 /* ---------- filter bar ---------- */
-.filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; padding: 12px; align-items: end; }
+.filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 10px; padding: 12px; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field label { font-size: 12px; color: var(--muted); padding-left: 2px; }
 .control {
@@ -301,6 +305,7 @@ td.wrap { white-space: normal; min-width: 210px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1280px) {
+  .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .layout { grid-template-columns: minmax(0, 1fr); }
   .rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
 }
