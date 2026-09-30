@@ -14,7 +14,9 @@ from datetime import datetime, timedelta, timezone
 from .config import Config
 from .domain import OpportunityStatus, SelectionRef
 from .engine import AnalysisResult, Engine
-from .explain import explain_leg
+from .explain import explain_leg, explain_slip
+from .optimizer import optimize
+from .risk import assign_stakes
 from .markets import probability
 from .snapshots import SnapshotProvider, SnapshotStore
 
@@ -41,7 +43,13 @@ FAIR_REFS = {"p_home": SelectionRef(market_code="MATCH_1X2", selection="HOME"),
 # Columns added after the first release: added in place on existing databases (see _migrate).
 EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets": "TEXT"},
                  "pub_opportunities": {"p_struct": "REAL", "p_low": "REAL", "p_high": "REAL", "n_books": "INTEGER", "edge": "REAL",
-                                       "factors": "TEXT"}}
+                                       "factors": "TEXT"},
+                 "pub_slips": {"horizon_h": "INTEGER", "max_legs": "INTEGER"}}
+# The dashboard filters slips by period and by maximum number of events: one optimizer pass per combination, so every filter
+# shows the best slips built for it (not the survivors of one global list).
+SLIP_HORIZONS_H = (24, 48, 72, 168)
+SLIP_MAX_LEGS = (1, 2, 3, 4, 5, 6, 8)
+SLIPS_PER_COMBO = 5
 SHOWN = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.WATCH}
 
 
@@ -95,7 +103,25 @@ def model_markets(m: np.ndarray) -> list[dict]:
     return out
 
 
-def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon_days: float = 14.0,
+def slip_pool(res: AnalysisResult, cfg: Config, t: datetime) -> list[tuple[int, int, object]]:
+    """(horizon_h, max_legs, slip) for every period / max-events combination the dashboard offers."""
+    out = []
+    for h in SLIP_HORIZONS_H:
+        end = t + timedelta(hours=h)
+        opps = [o for o in res.opportunities if o.kickoff <= end]
+        analyses = {k: a for k, a in res.analyses.items() if any(o.fixture_id == k for o in opps)}
+        for k in SLIP_MAX_LEGS:
+            c = cfg.model_copy(deep=True)
+            c.optimizer.max_legs, c.optimizer.output_count = k, SLIPS_PER_COMBO
+            r = optimize(opps, analyses, c)
+            assign_stakes(r.slips, c.risk)
+            for sl in r.slips:
+                sl.explanation.update(explain_slip(sl, c))
+                out.append((h, k, sl))
+    return out
+
+
+def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon_days: float = 7.0,
                         now: datetime | None = None, keep_days: int = 14) -> tuple[int, AnalysisResult]:
     cfg = live_config(cfg)
     t = now or datetime.now(timezone.utc)
@@ -136,12 +162,13 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                   round(o.p_struct, 4), round(o.p_low, 4), round(o.p_high, 4), o.n_books, None if o.edge is None else round(o.edge, 4),
                   json.dumps({k: explain_leg(o)[k] for k in ("positive_factors", "negative_factors")}, ensure_ascii=False))
                  for o in res.opportunities if o.status in SHOWN])
-    store._bulk("INSERT INTO pub_slips(run_id,rank,total_odds,joint_probability,ev,ev_lower,stake,legs,explanation)",
+    pool = slip_pool(res, cfg, t)
+    store._bulk("INSERT INTO pub_slips(run_id,rank,total_odds,joint_probability,ev,ev_lower,stake,legs,explanation,horizon_h,max_legs)",
                 [(run_id, k + 1, round(s.total_odds, 3), round(s.joint_probability, 4), round(s.ev, 4), round(s.ev_lower, 4), round(s.stake, 2),
                   json.dumps([{"match": f"{o.home} - {o.away}", "competition": o.competition, "kickoff": o.kickoff.isoformat(),
                                "market": o.description, "odds": o.odds, "bookmaker": o.bookmaker, "p": round(o.p_final, 4)} for o in s.legs],
                              ensure_ascii=False),
-                  json.dumps(s.explanation, ensure_ascii=False, default=str)) for k, s in enumerate(res.optimizer.slips)])
+                  json.dumps(s.explanation, ensure_ascii=False, default=str), h, ml) for k, (h, ml, s) in enumerate(pool)])
     store.db.commit()  # a run with no rows would otherwise stay uncommitted on remote libsql
     prune(store, keep_days)
     return run_id, res

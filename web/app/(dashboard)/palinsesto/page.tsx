@@ -30,7 +30,7 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
       <header className="page-head">
         <div>
           <h1>Palinsesto completo</h1>
-          <p>Probabilità del modello per ogni partita dei prossimi 14 giorni. Passa sopra una percentuale per la quota equa.</p>
+          <p>Probabilità del modello per ogni partita dei prossimi 7 giorni. Passa sopra una percentuale per la quota equa.</p>
         </div>
       </header>
 

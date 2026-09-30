@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, History, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
-import { fixtureDetail, parseJSON, type ModelMarket, type OppRow, type QuotePoint, type ResultRow } from "@/lib/db";
+import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
+import { lineName, MARKET_NAMES, MARKET_ORDER, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
@@ -16,7 +17,8 @@ const TABS = [
   { v: "forma", l: "Forma e precedenti", icon: History },
 ] as const;
 
-type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> };
+type QSP = { m?: string; s?: string; l?: string };
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string } & QSP> };
 
 export async function generateMetadata({ params }: Props) {
   const d = await fixtureDetail(decodeURIComponent((await params).id));
@@ -25,7 +27,8 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function Partita({ params, searchParams }: Props) {
   const id = decodeURIComponent((await params).id);
-  const tab = (await searchParams).tab ?? "probabilita";
+  const sp = await searchParams;
+  const tab = sp.tab ?? "probabilita";
   const d = await fixtureDetail(id);
   if (!d) notFound();
   const { fx } = d;
@@ -62,7 +65,7 @@ export default async function Partita({ params, searchParams }: Props) {
             <div className="hero-stat">
               <small>Mercati con quote (24h)</small>
               <b className="num">{d.opps.length}</b>
-              <span className="note">{d.quotes.length ? `${d.quotes.length} rilevazioni 1X2` : "quote non ancora raccolte"}</span>
+              <span className="note">{d.nQuotes ? `${d.nQuotes.toLocaleString("it-IT")} rilevazioni di quote` : "quote non ancora raccolte"}</span>
             </div>
           </div>
         </div>
@@ -80,7 +83,7 @@ export default async function Partita({ params, searchParams }: Props) {
           {tab === "mercati" ? (
             <Markets mk={mk} opps={d.opps} />
           ) : tab === "quote" ? (
-            <Quotes quotes={d.quotes} home={fx.home} away={fx.away} />
+            <Quotes id={id} home={fx.home} away={fx.away} q={sp} />
           ) : tab === "formazioni" ? (
             <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} />
           ) : tab === "forma" ? (
@@ -229,35 +232,76 @@ function Markets({ mk, opps }: { mk: ModelMarket[]; opps: OppRow[] }) {
   );
 }
 
-function Quotes({ quotes, home, away }: { quotes: QuotePoint[]; home: string; away: string }) {
-  if (!quotes.length) {
+const BOOK_STYLE = [
+  { color: "var(--s1)", dash: undefined },
+  { color: "var(--s2)", dash: "6 4" },
+  { color: "var(--s3)", dash: "2 4" },
+];
+
+// Odds tab: pick a market, then a selection, then (for markets with lines) the line; the chart shows that one price over
+// time, one line per bookmaker. Every choice is a link (?m=&s=&l=), so the view is shareable and works without JavaScript.
+async function Quotes({ id, home, away, q }: { id: string; home: string; away: string; q: QSP }) {
+  const menu = await quoteMenu(id);
+  if (!menu.length) {
     return (
       <Empty icon={LineChart} title="Andamento quote non ancora disponibile">
-        La prima rilevazione avviene il giorno della partita; poi 30–75 minuti prima del calcio d&apos;inizio.
+        Le quote arrivano dalla fotografia giornaliera e dallo storico dei bookmaker appena la partita è in palinsesto.
       </Empty>
     );
   }
-  const books = [...new Set(quotes.map((q) => q.bookmaker))];
-  const book = books.find((b) => b.includes("pinnacle")) ?? books[0];
-  const def: [string, string, string, string, string | undefined][] = [
-    ["HOME", "1", `1 ${home}`, "var(--s1)", undefined],
-    ["DRAW", "X", "X pareggio", "var(--s2)", "6 4"],
-    ["AWAY", "2", `2 ${away}`, "var(--s3)", "2 4"],
-  ];
-  const series: Series[] = def
-    .map(([sel, short, label, color, dash]) => ({
-      key: sel, short, label, color, dash,
-      points: quotes.filter((q) => q.bookmaker === book && q.selection === sel).map((q) => ({ t: new Date(q.observed_at).getTime(), v: q.odds })),
+  const markets = MARKET_ORDER.filter((m) => menu.some((k) => k.market_code === m));
+  const m = markets.includes(q.m ?? "") ? q.m! : markets[0];
+  const sels = [...new Set(menu.filter((k) => k.market_code === m).map((k) => k.selection))].sort(sortSelections);
+  const sel = sels.includes(q.s ?? "") ? q.s! : sels[0];
+  const lines = [...new Set(menu.filter((k) => k.market_code === m && k.selection === sel).map((k) => k.line_key))].sort(
+    (a, b) => Number(a) - Number(b),
+  );
+  const preferred = m === "TOTAL_GOALS" ? "2.5" : m.startsWith("TEAM_TOTAL") ? "1.5" : ""; // otherwise the line closest to 0
+  const line = lines.includes(q.l ?? "")
+    ? q.l!
+    : lines.includes(preferred)
+      ? preferred
+      : [...lines].sort((a, b) => Math.abs(Number(a)) - Math.abs(Number(b)))[0];
+  const path = await quotePath(id, m, line);
+  const books = [...new Set(path.map((p) => p.bookmaker))].sort((a, b) => Number(b.includes("pinnacle")) - Number(a.includes("pinnacle")));
+  const label = quoteLabel(m, sel, line);
+  const series: Series[] = books
+    .map((b, i) => ({
+      key: b, short: b.replace(/\..*$/, ""), label: b, ...BOOK_STYLE[i % BOOK_STYLE.length],
+      points: path.filter((p) => p.bookmaker === b && p.selection === sel).map((p) => ({ t: new Date(p.observed_at).getTime(), v: p.odds })),
     }))
     .filter((s) => s.points.length);
-  const latest = books.map((b) => {
-    const last = (sel: string) => quotes.filter((q) => q.bookmaker === b && q.selection === sel).at(-1);
-    return { b, h: last("HOME"), d: last("DRAW"), a: last("AWAY") };
-  });
+  const lineSels = [...new Set(path.map((p) => p.selection))].sort(sortSelections);
+  const latest = (b: string, s: string) => path.filter((p) => p.bookmaker === b && p.selection === s).at(-1);
+  const href = (next: Partial<QSP>) => {
+    const u = new URLSearchParams({ tab: "quote", m, s: sel, l: line, ...next });
+    for (const [k, v] of [...u]) if (!v) u.delete(k);
+    return `/partita/${encodeURIComponent(id)}?${u}`;
+  };
+
   return (
     <div className="col">
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <nav className="chips" aria-label="Mercato">
+          {markets.map((x) => (
+            <Link key={x} href={href({ m: x, s: "", l: "" })} scroll={false} aria-current={x === m ? "true" : undefined}>{MARKET_NAMES[x]}</Link>
+          ))}
+        </nav>
+        <nav className="chips chips-sub" aria-label="Esito">
+          {sels.map((x) => (
+            <Link key={x} href={href({ s: x })} scroll={false} aria-current={x === sel ? "true" : undefined}>{selectionName(m, x)}</Link>
+          ))}
+        </nav>
+        {lines.length > 1 || (lines[0] ?? "") !== "" ? (
+          <nav className="chips chips-sub" aria-label="Linea">
+            {lines.map((x) => (
+              <Link key={x} href={href({ l: x })} scroll={false} aria-current={x === line ? "true" : undefined}>{lineName(m, x)}</Link>
+            ))}
+          </nav>
+        ) : null}
+      </div>
       <div>
-        <h2 className="section">Andamento quote 1X2 · {book}</h2>
+        <h2 className="section">Andamento · {label}</h2>
         <div className="legend" style={{ margin: "8px 0" }}>
           {series.map((s) => (
             <span key={s.key}>
@@ -266,24 +310,32 @@ function Quotes({ quotes, home, away }: { quotes: QuotePoint[]; home: string; aw
             </span>
           ))}
         </div>
-        {series.length ? <OddsChart series={series} title={`Andamento quote 1X2 ${home} - ${away}, bookmaker ${book}`} /> : null}
-        <p className="note">Usa le frecce sinistra/destra sul grafico per scorrere le rilevazioni.</p>
+        {series.length ? <OddsChart series={series} title={`Andamento quota ${label}, ${home} - ${away}`} /> : null}
+        <p className="note">Una linea per bookmaker. Usa le frecce sinistra/destra sul grafico per scorrere le rilevazioni.</p>
       </div>
       <div>
-        <h2 className="section">Ultime quote per bookmaker</h2>
+        <h2 className="section">Ultime quote · {MARKET_NAMES[m]}{line ? ` ${lineName(m, line)}` : ""}</h2>
         <div className="table-wrap" style={{ marginTop: 10 }}>
           <table>
-            <thead><tr><th>Bookmaker</th><th className="num">1</th><th className="num">X</th><th className="num">2</th><th>Rilevata</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Bookmaker</th>
+                {lineSels.map((x) => <th key={x} className="num">{selectionName(m, x)}</th>)}
+                <th>Rilevata</th>
+              </tr>
+            </thead>
             <tbody>
-              {latest.map((r) => (
-                <tr key={r.b}>
-                  <td>{r.b}</td>
-                  <td className="num">{r.h?.odds.toFixed(2) ?? "–"}</td>
-                  <td className="num">{r.d?.odds.toFixed(2) ?? "–"}</td>
-                  <td className="num">{r.a?.odds.toFixed(2) ?? "–"}</td>
-                  <td className="muted">{r.h ? dayTime(r.h.observed_at) : "–"}</td>
-                </tr>
-              ))}
+              {books.map((b) => {
+                const last = lineSels.map((x) => latest(b, x));
+                const when = last.map((r) => r?.observed_at ?? "").sort().at(-1);
+                return (
+                  <tr key={b}>
+                    <td>{b}</td>
+                    {last.map((r, i) => <td key={i} className="num">{r?.odds.toFixed(2) ?? "–"}</td>)}
+                    <td className="muted">{when ? dayTime(when) : "–"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
-  Layers, Percent, Search, ShieldCheck, Target, Trophy, TrendingUp,
+  Layers, ListOrdered, Percent, Search, ShieldCheck, Target, Trophy, TrendingUp,
 } from "lucide-react";
 import { lastTick, latestRun, parseJSON, runFixtures, runOpps, runSlips, usage, type FixtureRow, type Leg, type ModelMarket } from "@/lib/db";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
@@ -15,10 +15,20 @@ const PERIODS = [
   { v: "48", l: "Prossime 48 ore" },
   { v: "72", l: "Prossimi 3 giorni" },
   { v: "168", l: "Prossimi 7 giorni" },
-  { v: "336", l: "Prossimi 14 giorni" },
 ];
 
-type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; comp?: string };
+// Slips are published per period and per maximum number of events (see publish.py SLIP_MAX_LEGS)
+const MAX_EVENTS = [
+  { v: "8", l: "Qualsiasi" },
+  { v: "1", l: "1 (singola)" },
+  { v: "2", l: "Fino a 2" },
+  { v: "3", l: "Fino a 3" },
+  { v: "4", l: "Fino a 4" },
+  { v: "5", l: "Fino a 5" },
+  { v: "6", l: "Fino a 6" },
+];
+
+type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; comp?: string };
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -37,7 +47,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
 
   // ---- filters (applied to the latest published analysis) ----
   const now = Date.now();
-  const hours = Number(sp.h) || 336;
+  const hours = PERIODS.some((p) => p.v === sp.h) ? Number(sp.h) : 168;
+  const maxEvents = MAX_EVENTS.some((m) => m.v === sp.n) ? Number(sp.n) : 8;
   const qMin = Number(sp.min) || 0;
   const qMax = Number(sp.max) || 0;
   const lMin = Number(sp.lmin) || 0;
@@ -48,8 +59,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
   const op = opps.filter((o) => inWindow(o.kickoff, o.competition) && legOk(o.odds));
+  const built = slips.some((s) => s.horizon_h != null);
   const sl = slips
+    .filter((s) => !built || (s.horizon_h === hours && s.max_legs === maxEvents))
     .map((s) => ({ ...s, legList: parseJSON<Leg[]>(s.legs, []) }))
+    .filter((s) => s.legList.length <= maxEvents)
     .filter((s) => s.legList.every((l) => inWindow(l.kickoff, l.competition) && legOk(l.odds)))
     .filter((s) => (!qMin || s.total_odds >= qMin) && (!qMax || s.total_odds <= qMax));
   const best = sl[0];
@@ -60,7 +74,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const expl = parseJSON<{ positive_factors?: string[]; negative_factors?: string[]; what_would_change_it?: string[] }>(best?.explanation, {});
   const featured = pickFeatured(fx, best);
   const upcoming = fx.slice(0, 6);
-  const filtered = Boolean(sp.comp || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "336"));
+  const filtered = Boolean(sp.comp || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "8"));
 
   return (
     <>
@@ -99,6 +113,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <select id="h" name="h" defaultValue={String(hours)}>
               {PERIODS.map((p) => (
                 <option key={p.v} value={p.v}>{p.l}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="n">Numero massimo di eventi</label>
+          <div className="control">
+            <ListOrdered size={17} aria-hidden="true" />
+            <select id="n" name="n" defaultValue={String(maxEvents)}>
+              {MAX_EVENTS.map((m) => (
+                <option key={m.v} value={m.v}>{m.l}</option>
               ))}
             </select>
           </div>
@@ -209,7 +234,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                       <tbody>
                         {best.legList.map((l, i) => {
                           const o = oppOf(l);
-                          const [home, away] = l.match.split(" - ");
+                          const [home, away] = (l.match ?? "").split(" - ");
                           return (
                             <tr key={i}>
                               <td className="muted num">{i + 1}</td>
@@ -384,7 +409,7 @@ function Mini({ label, value, tone }: { label: string; value: string; tone?: "po
 
 function pickFeatured(fx: FixtureRow[], best?: { legList: Leg[] }) {
   if (best) {
-    const [h, a] = best.legList[0].match.split(" - ");
+    const [h, a] = (best.legList[0]?.match ?? "").split(" - ");
     const f = fx.find((x) => x.home === h && x.away === a);
     if (f) return f;
   }

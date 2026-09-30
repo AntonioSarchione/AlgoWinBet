@@ -17,6 +17,8 @@ const STATUSES = [
 
 type SP = { s?: string; comp?: string; lmin?: string; lmax?: string };
 
+const MAX_ROWS = 200; // thousands of rows make a slow, heavy page: the filters narrow the list
+
 export default async function Opportunita({ searchParams }: { searchParams: Promise<SP> }) {
   const { s = "", comp = "", lmin = "", lmax = "" } = await searchParams;
   const lo = Number(lmin) || 0;
@@ -75,7 +77,14 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
       </div>
       <section className="card">
         {rows.length ? (
-          <OppTable rows={rows} />
+          <>
+            <OppTable rows={rows.slice(0, MAX_ROWS)} />
+            {rows.length > MAX_ROWS && (
+              <p className="note card-pad">
+                Mostrate le prime {MAX_ROWS} su {rows.length} per EV. Usa i filtri per stato, competizione o quota per vedere le altre.
+              </p>
+            )}
+          </>
         ) : (
           <Empty icon={Percent} title="Nessuna opportunità">
             Le quote vengono raccolte nelle 24 ore prima delle partite. Senza prezzi recenti il motore non calcola il valore atteso e non propone

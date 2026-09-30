@@ -359,7 +359,10 @@ def test_publish_writes_dashboard_tables_and_prunes():
     assert n_fx[0] == len(res.fixtures) > 0 and n_fx[1] == n_fx[0]
     run = s.db.execute("SELECT no_bet, n_fixtures FROM pub_runs WHERE id=?", (rid,)).fetchone()
     assert run[1] == len(res.fixtures) and last_publication(s) is not None
-    assert s.db.execute("SELECT COUNT(*) FROM pub_slips WHERE run_id=?", (rid,)).fetchone()[0] == len(res.optimizer.slips)
+    combos = s.db.execute("SELECT horizon_h, max_legs, COUNT(*), MAX(json_array_length(legs)) FROM pub_slips WHERE run_id=? "
+                          "GROUP BY horizon_h, max_legs", (rid,)).fetchall()
+    assert all(n <= 5 and legs <= k for _, k, n, legs in combos)  # each filter combination has its own best slips
+    assert bool(res.optimizer.slips) == any(h == 168 and k == 8 for h, k, *_ in combos)
     xg_h, raw = s.db.execute("SELECT xg_home, markets FROM pub_fixtures WHERE run_id=? LIMIT 1", (rid,)).fetchone()
     mk = {(m["g"], m["l"]): m["p"] for m in json.loads(raw)}
     assert xg_h > 0 and abs(mk[("1X2", "1")] + mk[("1X2", "X")] + mk[("1X2", "2")] - 1) < 0.01
@@ -436,3 +439,21 @@ def test_mapper_covers_the_real_goal_market_catalogue():
     assert not any(c == "MATCH_1X2" for c, *_ in qs)  # first-half 1X2 is not a full-time market
     from algowinbet.domain import SelectionRef
     assert all(is_supported(SelectionRef(market_code=c, selection=s, line=l)) for c, s, l in qs)
+
+
+def test_slip_pool_runs_the_optimizer_for_every_period_and_max_events(monkeypatch):
+    from types import SimpleNamespace
+    import algowinbet.publish as pub
+    from algowinbet.config import Config
+    calls = []
+
+    def fake_optimize(opps, analyses, cfg):
+        calls.append((len(opps), sorted(analyses), cfg.optimizer.max_legs, cfg.optimizer.output_count))
+        return SimpleNamespace(slips=[])
+    monkeypatch.setattr(pub, "optimize", fake_optimize)
+    opp = lambda fid, h: SimpleNamespace(fixture_id=fid, kickoff=NOW + timedelta(hours=h))
+    res = SimpleNamespace(opportunities=[opp("a", 10), opp("b", 40), opp("c", 100)], analyses={"a": 1, "b": 2, "c": 3})
+    cfg = Config()
+    pub.slip_pool(res, cfg, NOW)
+    assert len(calls) == len(pub.SLIP_HORIZONS_H) * len(pub.SLIP_MAX_LEGS) and cfg.optimizer.max_legs == 8  # caller's config untouched
+    assert calls[0] == (1, ["a"], 1, 5) and calls[-1] == (3, ["a", "b", "c"], 8, 5)

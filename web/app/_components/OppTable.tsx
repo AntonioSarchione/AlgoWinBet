@@ -14,7 +14,7 @@ export function OppTable({ rows }: { rows: OppRow[] }) {
         </thead>
         <tbody>
           {rows.map((o, i) => {
-            const [home, away] = o.match.split(" - ");
+            const [home, away] = (o.match ?? "").split(" - ");
             return (
               <tr key={i}>
                 <td className="wrap">

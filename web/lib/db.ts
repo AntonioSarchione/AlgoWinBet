@@ -80,6 +80,8 @@ export type SlipRow = {
   stake: number;
   legs: string;
   explanation: string;
+  horizon_h: number | null; // period the slip was built for (null: runs published before the per-filter pool)
+  max_legs: number | null; // maximum number of events allowed when it was built
 };
 
 export type Leg = { match: string; competition: string; kickoff: string; market: string; odds: number; bookmaker: string; p: number };
@@ -89,9 +91,11 @@ export type QuotePoint = { selection: string; bookmaker: string; odds: number; o
 export type LineupRow = { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string };
 export type ResultRow = { fixture_id: string; kickoff: string; competition: string; home: string; away: string; home_goals: number; away_goals: number };
 
+// Rows become plain objects keyed by the column names the server reports (never the driver's Row objects, whose named
+// properties were missing in production for some columns).
 async function all<T>(sql: string, args: InValue[] = []): Promise<T[]> {
   const r = await db().execute({ sql, args });
-  return r.rows as unknown as T[];
+  return r.rows.map((row) => Object.fromEntries(r.columns.map((c, i) => [c, row[i]]))) as T[];
 }
 
 export const latestRun = cache(async (): Promise<Run | null> => {
@@ -106,7 +110,14 @@ export const runFixtures = cache((runId: number) =>
   all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? ORDER BY kickoff, competition, home", [runId]),
 );
 
-export const runOpps = cache((runId: number) => all<OppRow>("SELECT * FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC", [runId]));
+// Lists never need the per-market explanation (factors): the match page reads it on its own.
+const OPP_COLS =
+  "fixture_id, kickoff, competition, match, market, bookmaker, odds, fair_odds, p_final, p_market, ev, ev_lower, uncertainty, " +
+  "data_quality, status, odds_stale, lineup_state, p_struct, p_low, p_high, n_books, edge, NULL AS factors";
+
+export const runOpps = cache((runId: number) =>
+  all<OppRow>(`SELECT ${OPP_COLS} FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC`, [runId]),
+);
 
 export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
 
@@ -129,12 +140,9 @@ export async function fixtureDetail(id: string) {
   if (!run) return null;
   const fx = (await all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? AND fixture_id = ?", [run.id, id]))[0];
   if (!fx) return null;
-  const [opps, quotes, lineups, formHome, formAway, h2h] = await Promise.all([
+  const [opps, nq, lineups, formHome, formAway, h2h] = await Promise.all([
     all<OppRow>("SELECT * FROM pub_opportunities WHERE run_id = ? AND fixture_id = ? ORDER BY ev DESC", [run.id, id]),
-    all<QuotePoint>(
-      "SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = 'MATCH_1X2' ORDER BY observed_at",
-      [id],
-    ),
+    all<{ n: number }>("SELECT COUNT(*) AS n FROM quotes WHERE fixture_id = ?", [id]),
     all<LineupRow>(
       "SELECT team, status, formation, starters, bench, observed_at FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC",
       [id],
@@ -160,7 +168,24 @@ export async function fixtureDetail(id: string) {
     );
     for (const r of rows) players.set(r.id, { name: r.name, position: r.position });
   }
-  return { run, fx, opps, quotes, lineups: [...latest.values()], players, formHome, formAway, h2h };
+  return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, formHome, formAway, h2h };
+}
+
+// Every priced selection of a fixture (market, selection, line): the menu of the odds-trend tab.
+export type QuoteKey = { market_code: string; selection: string; line_key: string; n: number };
+export function quoteMenu(id: string) {
+  return all<QuoteKey>(
+    "SELECT market_code, selection, line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? GROUP BY market_code, selection, line_key",
+    [id],
+  );
+}
+
+// Price path of one market line (all its selections, all bookmakers), oldest first.
+export function quotePath(id: string, market: string, lineKey: string) {
+  return all<QuotePoint>(
+    "SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND line_key = ? ORDER BY observed_at",
+    [id, market, lineKey],
+  );
 }
 
 function teamForm(team: string, before: string) {
