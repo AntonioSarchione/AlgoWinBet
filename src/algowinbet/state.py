@@ -69,8 +69,9 @@ def season_start(dt: datetime) -> datetime:
     return datetime(year, 7, 1, tzinfo=timezone.utc)
 
 
-def history_at(provider, competition: str, cutoff: datetime, seasons: int | None = None) -> list[MatchResult]:
+def history_at(provider, competition: str | None, cutoff: datetime, seasons: int | None = None) -> list[MatchResult]:
     """Results already known at cutoff (result availability = kickoff + 3h, enforced again here). With `seasons`, only the
     current season and that many previous ones (older football says little about today's squads)."""
     first = season_start(cutoff).replace(year=season_start(cutoff).year - seasons) if seasons is not None else None
-    return [r for r in provider.list_history([competition], cutoff) if r.available_at <= cutoff and (first is None or r.kickoff >= first)]
+    comps = None if competition is None else [competition]  # None = every competition (pooled model)
+    return [r for r in provider.list_history(comps, cutoff) if r.available_at <= cutoff and (first is None or r.kickoff >= first)]

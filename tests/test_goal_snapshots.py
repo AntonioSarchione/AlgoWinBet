@@ -341,7 +341,7 @@ def test_engine_runs_on_collected_snapshots_only():
     mock = MockProvider(seed=7, open_noise=0.0, close_noise=0.0)
     s = SnapshotStore(":memory:")
     comp = mock.list_competitions()[0]
-    s.save_results("mock", mock.list_history([comp], mock.as_of), mock.as_of)
+    s.save_results("mock", mock.list_history(None, mock.as_of), mock.as_of)  # pooled model: every competition
     fxs = mock.list_fixtures([comp], mock.as_of, mock.as_of + timedelta(days=3))
     s.save_fixtures("mock", fxs, mock.as_of - timedelta(days=1))
     for f in fxs:

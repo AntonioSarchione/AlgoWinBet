@@ -35,3 +35,38 @@ def test_unknown_team_falls_back_without_crashing():
     m = DixonColes().fit(history_at(prov, comp, prov.as_of), prov.as_of)
     assert not m.knows("Nobody FC")
     assert abs(m.score_matrix("Nobody FC", "Other FC").sum() - 1) < 1e-9
+
+
+def test_pooled_model_puts_clubs_from_different_leagues_on_one_scale():
+    """League A clubs are truly stronger than league B clubs. Domestic games alone cannot reveal it (each league is
+    centred on itself); cup games between the leagues do, and only the pooled model uses them."""
+    import numpy as np
+    from datetime import timedelta
+    from algowinbet.domain import MatchResult, utc
+    from algowinbet.models.dixon_coles import DixonColes
+    rng = np.random.default_rng(3)
+    strength = {**{f"A{i}": 0.35 for i in range(8)}, **{f"B{i}": -0.35 for i in range(8)}}
+    res, t0, k = [], utc(2025, 8, 1), 0
+
+    def play(h, a, comp):
+        nonlocal k
+        lh, la = np.exp(0.2 + 0.25 + strength[h] - strength[a]), np.exp(0.2 + strength[a] - strength[h])
+        res.append(MatchResult(fixture_id=f"m{k}", competition=comp, home=h, away=a, kickoff=t0 + timedelta(hours=k),
+                               home_goals=int(rng.poisson(lh)), away_goals=int(rng.poisson(la))))
+        k += 1
+    for lg in "AB":
+        for _ in range(2):
+            for i in range(8):
+                for j in range(8):
+                    if i != j:
+                        play(f"{lg}{i}", f"{lg}{j}", f"League {lg}")
+    for _ in range(6):
+        for i in range(8):
+            play(f"A{i}", f"B{i}", "Cup")
+            play(f"B{i}", f"A{i}", "Cup")
+    pooled = DixonColes(comp_mu=True).fit(res, t0 + timedelta(days=400)).for_competition("Cup")
+    a_home = np.mean([pooled.expected_goals(f"A{i}", f"B{i}")[0] - pooled.expected_goals(f"B{i}", f"A{i}")[0] for i in range(8)])
+    assert a_home > 0.5  # A clubs score clearly more against B clubs than vice versa
+    solo_a = DixonColes().fit([r for r in res if r.competition == "League A"], t0 + timedelta(days=400))
+    solo_b = DixonColes().fit([r for r in res if r.competition == "League B"], t0 + timedelta(days=400))
+    assert abs(np.mean(solo_a.attack) - np.mean(solo_b.attack)) < 0.1  # per-league models see two equal leagues

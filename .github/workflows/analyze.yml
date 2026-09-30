@@ -1,0 +1,32 @@
+# Analysis on the data collected in Turso (read-only on the data providers: no API request is spent here).
+# Manual for now; it will be scheduled (morning + after lineups) once the output is published somewhere readable.
+name: analyze
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "giorni di palinsesto da analizzare"
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[turso]"
+      - name: analyze
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+          DAYS: ${{ inputs.days }}
+        run: algowinbet analyze --provider snapshots --db turso --days "$DAYS"

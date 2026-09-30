@@ -26,9 +26,13 @@ def _tau(i: np.ndarray, j: np.ndarray, lh: np.ndarray, la: np.ndarray, rho: floa
 
 
 class DixonColes:
-    def __init__(self, xi: float = math.log(2) / 365.0, l2: float = 1.0):
+    def __init__(self, xi: float = math.log(2) / 365.0, l2: float = 1.0, comp_mu: bool = False):
         self.xi = xi  # decay per day (default half-life 1 year)
         self.l2 = l2
+        # comp_mu: one pooled model over every competition, with its own unpenalised goal level per competition. Team
+        # strengths are shared, so Champions/Europa League matches put clubs from different leagues on one scale.
+        self.comp_mu = comp_mu
+        self.mu_comp: dict[str, float] = {}
         self.teams: dict[str, int] = {}
         self.attack = np.zeros(0)
         self.defence = np.zeros(0)
@@ -52,32 +56,41 @@ class DixonColes:
         y = np.array([r.away_goals for r in results], dtype=float)
         age = np.array([(as_of - r.kickoff).total_seconds() / 86400.0 for r in results])
         w = np.exp(-self.xi * np.clip(age, 0, None))
+        comps = sorted({r.competition for r in results}) if self.comp_mu else ["*"]
+        cidx = {c: k for k, c in enumerate(comps)}
+        C = len(comps)
+        ci = np.array([cidx[r.competition] if self.comp_mu else 0 for r in results])
 
         def unpack(th):
-            return th[:T], th[T : 2 * T], th[2 * T], th[2 * T + 1]
+            return th[:T], th[T : 2 * T], th[2 * T], th[2 * T + 1 :]
 
         def nll(th):
             a, d, h, mu = unpack(th)
-            eh = mu + h + a[hi] - d[ai]
-            ea = mu + a[ai] - d[hi]
+            m = mu[ci]
+            eh = m + h + a[hi] - d[ai]
+            ea = m + a[ai] - d[hi]
             lh, la = np.exp(eh), np.exp(ea)
             ll = np.sum(w * (x * eh - lh + y * ea - la))
             rh, ra = w * (x - lh), w * (y - la)
             ga = np.bincount(hi, rh, T) + np.bincount(ai, ra, T)
             gd = -np.bincount(ai, rh, T) - np.bincount(hi, ra, T)
-            grad = np.concatenate([-ga + 2 * self.l2 * a, -gd + 2 * self.l2 * d, [-rh.sum(), -(rh + ra).sum()]])
+            gmu = np.bincount(ci, rh + ra, C)
+            grad = np.concatenate([-ga + 2 * self.l2 * a, -gd + 2 * self.l2 * d, [-rh.sum()], -gmu])
             return -ll + self.l2 * (a @ a + d @ d), grad
 
-        th0 = np.zeros(2 * T + 2)
+        th0 = np.zeros(2 * T + 1 + C)
         th0[2 * T] = 0.25
-        th0[2 * T + 1] = math.log(max((x.mean() + y.mean()) / 2, 0.5))
+        th0[2 * T + 1 :] = math.log(max((x.mean() + y.mean()) / 2, 0.5))
         res = minimize(nll, th0, jac=True, method="L-BFGS-B")
         a, d, h, mu = unpack(res.x)
-        self.attack, self.defence, self.home_adv, self.mu = a, d, float(h), float(mu)
+        self.attack, self.defence, self.home_adv = a, d, float(h)
+        counts_c = np.bincount(ci, None, C)
+        self.mu = float(np.average(mu, weights=counts_c))
+        self.mu_comp = {c: float(mu[k]) for c, k in cidx.items()} if self.comp_mu else {}
 
         # stage 2: rho on low-score cells
-        lh = np.exp(mu + h + a[hi] - d[ai])
-        la = np.exp(mu + a[ai] - d[hi])
+        lh = np.exp(mu[ci] + h + a[hi] - d[ai])
+        la = np.exp(mu[ci] + a[ai] - d[hi])
 
         def neg_rho(r):
             t = _tau(x, y, lh, la, r)
@@ -99,16 +112,20 @@ class DixonColes:
     def knows(self, team: str) -> bool:
         return team in self.teams
 
-    def expected_goals(self, home: str, away: str) -> tuple[float, float]:
+    def expected_goals(self, home: str, away: str, competition: str | None = None) -> tuple[float, float]:
         ah = self.attack[self.teams[home]] if home in self.teams else 0.0
         dh = self.defence[self.teams[home]] if home in self.teams else 0.0
         aa = self.attack[self.teams[away]] if away in self.teams else 0.0
         da = self.defence[self.teams[away]] if away in self.teams else 0.0
-        return float(math.exp(self.mu + self.home_adv + ah - da)), float(math.exp(self.mu + aa - dh))
+        mu = self.mu_comp.get(competition, self.mu) if competition else self.mu
+        return float(math.exp(mu + self.home_adv + ah - da)), float(math.exp(mu + aa - dh))
 
-    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0)) -> np.ndarray:
+    def for_competition(self, competition: str) -> "CompetitionView":
+        return CompetitionView(self, competition)
+
+    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0), competition: str | None = None) -> np.ndarray:
         """log_adj shifts log-lambda of (home, away), e.g. from lineup/availability effects."""
-        lh, la = self.expected_goals(home, away)
+        lh, la = self.expected_goals(home, away, competition)
         lh, la = lh * math.exp(log_adj[0]), la * math.exp(log_adj[1])
         g = np.arange(GRID)
         m = np.outer(poisson.pmf(g, lh), poisson.pmf(g, la))
@@ -134,3 +151,19 @@ class DixonColes:
             except ValueError:
                 continue
         return out
+
+
+class CompetitionView:
+    """A pooled model seen from one competition: same team strengths, that competition's goal level. Drop-in for DixonColes."""
+
+    def __init__(self, model: DixonColes, competition: str):
+        self.model, self.competition = model, competition
+
+    def expected_goals(self, home: str, away: str, competition: str | None = None) -> tuple[float, float]:
+        return self.model.expected_goals(home, away, competition or self.competition)
+
+    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0), competition: str | None = None) -> np.ndarray:
+        return self.model.score_matrix(home, away, log_adj, competition or self.competition)
+
+    def __getattr__(self, item):
+        return getattr(self.model, item)

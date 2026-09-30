@@ -72,18 +72,30 @@ class Engine:
         return {p.id: p for c in self._rosters.values() for p in c}
 
     def fit(self, competition: str, cutoff: datetime):
+        m = self.cfg.model
+        if m.pooled:
+            key = ("*", cutoff)
+            if key not in self._models:
+                hist = history_at(self.provider, None, cutoff, m.history_seasons)
+                self._models[key] = self._fit_hist(hist, cutoff, comp_mu=True)
+            pooled = self._models[key]
+            if pooled is None or competition not in pooled[0].mu_comp:
+                return None  # no history for this competition at all: no model, no bet
+            model, boots = pooled
+            return model.for_competition(competition), [b.for_competition(competition) for b in boots]
         key = (competition, cutoff)
         if key not in self._models:
-            hist = history_at(self.provider, competition, cutoff, self.cfg.model.history_seasons)
-            if len(hist) < self.cfg.model.min_history:
-                self._models[key] = None
-            else:
-                m = self.cfg.model
-                kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2)
-                model = DixonColes(**kw).fit(hist, cutoff)
-                boots = DixonColes.bootstrap(hist, cutoff, m.n_bootstrap, seed=1, **kw) if m.n_bootstrap else []
-                self._models[key] = (model, boots)
+            self._models[key] = self._fit_hist(history_at(self.provider, competition, cutoff, m.history_seasons), cutoff, comp_mu=False)
         return self._models[key]
+
+    def _fit_hist(self, hist, cutoff: datetime, comp_mu: bool):
+        m = self.cfg.model
+        if len(hist) < m.min_history:
+            return None
+        kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2, comp_mu=comp_mu)
+        model = DixonColes(**kw).fit(hist, cutoff)
+        boots = DixonColes.bootstrap(hist, cutoff, m.n_bootstrap, seed=1, **kw) if m.n_bootstrap else []
+        return model, boots
 
     def impact(self, competition: str, cutoff: datetime) -> PlayerImpactModel | None:
         if not self.use_lineups:
