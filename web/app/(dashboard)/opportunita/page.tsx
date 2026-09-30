@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Filter, Percent, Target } from "lucide-react";
-import { latestRun, runOpps } from "@/lib/db";
+import { latestRun, oppSummary, runCompetitions } from "@/lib/db";
 import { dayTime } from "@/app/_components/format";
 import { OppTable } from "@/app/_components/OppTable";
 import { Empty } from "@/app/_components/ui";
@@ -17,18 +17,22 @@ const STATUSES = [
 
 type SP = { s?: string; comp?: string; lmin?: string; lmax?: string };
 
-const MAX_ROWS = 200; // thousands of rows make a slow, heavy page: the filters narrow the list
+const MAX_ROWS = 200; // the database filters and returns only the first rows by EV: the page stays light
 
 export default async function Opportunita({ searchParams }: { searchParams: Promise<SP> }) {
   const { s = "", comp = "", lmin = "", lmax = "" } = await searchParams;
   const lo = Number(lmin) || 0;
   const hi = Number(lmax) || 0;
   const run = await latestRun();
-  const opps = run ? await runOpps(run.id) : [];
-  const comps = [...new Set(opps.map((o) => o.competition))].sort();
-  const rows = opps.filter(
-    (o) => (!s || o.status === s) && (!comp || o.competition === comp) && (!lo || o.odds >= lo) && (!hi || o.odds <= hi),
-  );
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 16); // minute precision: equal filters share the data cache
+  const [comps, res] = run
+    ? await Promise.all([
+        runCompetitions(run.id),
+        oppSummary(run.id, { from: iso(Date.now()), until: "9999", comps: comp ? [comp] : [], lmin: lo, lmax: hi, status: s || undefined }, MAX_ROWS),
+      ])
+    : [[], { count: 0, top: [] }];
+  const rows = res.top;
+  const total = res.count;
   const href = (next: { s?: string; comp?: string }) => {
     const q = new URLSearchParams({ ...(s && { s }), ...(comp && { comp }), ...(lmin && { lmin }), ...(lmax && { lmax }), ...next });
     for (const [k, v] of [...q]) if (!v) q.delete(k);
@@ -78,10 +82,10 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
       <section className="card">
         {rows.length ? (
           <>
-            <OppTable rows={rows.slice(0, MAX_ROWS)} />
-            {rows.length > MAX_ROWS && (
+            <OppTable rows={rows} />
+            {total > rows.length && (
               <p className="note card-pad">
-                Mostrate le prime {MAX_ROWS} su {rows.length} per EV. Usa i filtri per stato, competizione o quota per vedere le altre.
+                Mostrate le prime {rows.length} su {total} per EV. Usa i filtri per stato, competizione o quota per vedere le altre.
               </p>
             )}
           </>

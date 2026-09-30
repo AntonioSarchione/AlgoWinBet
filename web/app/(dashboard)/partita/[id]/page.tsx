@@ -346,7 +346,7 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
 
 const ROLE: Record<string, string> = { GK: "P", DEF: "D", MID: "C", FWD: "A" };
 
-function Lineups({ lineups, players, home, away }: { lineups: { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string }[]; players: Map<string, { name: string; position: string }>; home: string; away: string }) {
+function Lineups({ lineups, players, home, away }: { lineups: { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string }[]; players: Record<string, { name: string; position: string }>; home: string; away: string }) {
   if (!lineups.length) {
     return (
       <Empty icon={Shirt} title="Formazioni non ancora disponibili">
@@ -354,8 +354,8 @@ function Lineups({ lineups, players, home, away }: { lineups: { team: string; st
       </Empty>
     );
   }
-  const name = (id: string) => players.get(id)?.name ?? id;
-  const role = (id: string) => ROLE[players.get(id)?.position ?? ""] ?? "";
+  const name = (id: string) => players[id]?.name ?? id;
+  const role = (id: string) => ROLE[players[id]?.position ?? ""] ?? "";
   return (
     <div className="split" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
       {[home, away].map((team) => {

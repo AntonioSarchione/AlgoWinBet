@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { createClient, type Client, type InValue } from "@libsql/client";
 
 let client: Client | null = null;
@@ -25,6 +26,7 @@ export type Run = {
   reasons: string;
   status_counts: string;
   notes: string;
+  optimizer: string | null; // settings for web/lib/optimizer.ts (null on runs published before on-demand slips)
 };
 
 export type FixtureRow = {
@@ -69,6 +71,12 @@ export type OppRow = {
   n_books: number | null;
   edge: number | null;
   factors: string | null;
+  sel_key?: string | null;
+  home?: string | null;
+  away?: string | null;
+  score?: number | null;
+  disagreement?: number | null;
+  dq_lineup?: number | null;
 };
 
 export type SlipRow = {
@@ -98,16 +106,27 @@ async function all<T>(sql: string, args: InValue[] = []): Promise<T[]> {
   return r.rows.map((row) => Object.fromEntries(r.columns.map((c, i) => [c, row[i]]))) as T[];
 }
 
-export const latestRun = cache(async (): Promise<Run | null> => {
+// Server-side data cache (shared by every request and page). A published run never changes, so reads keyed by run id can be
+// kept for long; only "which run is the latest" and the counters are refreshed every minute. Moving between pages then
+// costs no database round trip for data already read.
+const RUN_TTL = 6 * 3600;
+const LIVE_TTL = 60;
+function persist<A extends unknown[], R>(fn: (...args: A) => Promise<R>, name: string, seconds: number) {
+  return cache(unstable_cache(fn, [name], { revalidate: seconds }));
+}
+
+export const latestRun = persist(async (): Promise<Run | null> => {
   try {
     return (await all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 1"))[0] ?? null;
   } catch {
     return null; // tables not created yet: nothing published
   }
-});
+}, "latestRun", LIVE_TTL);
 
-export const runFixtures = cache((runId: number) =>
-  all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? ORDER BY kickoff, competition, home", [runId]),
+export const runFixtures = persist(
+  (runId: number) => all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? ORDER BY kickoff, competition, home", [runId]),
+  "runFixtures",
+  RUN_TTL,
 );
 
 // Lists never need the per-market explanation (factors): the match page reads it on its own.
@@ -122,23 +141,78 @@ export const runOpps = cache(async (runId: number) =>
   withMatch(await all<OppRow>(`SELECT ${OPP_COLS} FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC`, [runId])),
 );
 
+// ---- filtered reads for the home page: the database does the filtering, only what is shown travels ----
+export type OppFilter = { from: string; until: string; comps: string[]; lmin: number; lmax: number; status?: string };
+
+function oppWhere(runId: number, f: OppFilter) {
+  const parts = ["run_id = ?", "kickoff > ?", "kickoff <= ?"];
+  const args: InValue[] = [runId, f.from, f.until];
+  if (f.comps.length) {
+    parts.push(`competition IN (${f.comps.map(() => "?").join(",")})`);
+    args.push(...f.comps);
+  }
+  if (f.lmin) {
+    parts.push("odds >= ?");
+    args.push(f.lmin);
+  }
+  if (f.lmax) {
+    parts.push("odds <= ?");
+    args.push(f.lmax);
+  }
+  if (f.status) {
+    parts.push("status = ?");
+    args.push(f.status);
+  }
+  return { where: parts.join(" AND "), args };
+}
+
+export const oppSummary = persist(async (runId: number, f: OppFilter, limit = 8) => {
+  const w = oppWhere(runId, f);
+  const [n, top] = await Promise.all([
+    all<{ n: number }>(`SELECT COUNT(*) AS n FROM pub_opportunities WHERE ${w.where}`, w.args),
+    all<OppRow>(`SELECT ${OPP_COLS} FROM pub_opportunities WHERE ${w.where} ORDER BY ev DESC LIMIT ${limit}`, w.args).then(withMatch),
+  ]);
+  return { count: Number(n[0]?.n ?? 0), top };
+}, "oppSummary", RUN_TTL);
+
+export const runCompetitions = persist(
+  async (runId: number) =>
+    (await all<{ competition: string }>("SELECT DISTINCT competition FROM pub_fixtures WHERE run_id = ? ORDER BY competition", [runId])).map(
+      (r) => r.competition,
+    ),
+  "runCompetitions",
+  RUN_TTL,
+);
+
+// Candidates for the on-demand slip optimizer: only the statuses it may use, with its inputs.
+export const slipCandidates = persist(async (runId: number, f: OppFilter, statuses: string[]) => {
+  const w = oppWhere(runId, f);
+  return all<OppRow>(
+    `SELECT ${OPP_COLS}, sel_key, home, away, score, disagreement, dq_lineup FROM pub_opportunities ` +
+      `WHERE ${w.where} AND status IN (${statuses.map(() => "?").join(",")}) AND sel_key IS NOT NULL`,
+    [...w.args, ...statuses],
+  ).then(withMatch);
+}, "slipCandidates", RUN_TTL);
+
 export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
 
-export const usage = cache(async () => {
+export const usage = persist(async () => {
   const now = new Date();
   const day = `D${now.toISOString().slice(0, 10)}`;
   const month = `M${now.toISOString().slice(0, 7)}`;
   const rows = await all<Usage>("SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", [day, month]);
   const get = (src: string, kind: "D" | "M") => rows.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
   return { goalDay: get("goal-api", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D") };
-});
+}, "usage", LIVE_TTL);
 
-export const lastTick = cache(async () => {
+export const lastTick = persist(async () => {
   const r = await all<{ t: string | null }>("SELECT MAX(fetched_at) AS t FROM raw_requests");
   return r[0]?.t ?? null;
-});
+}, "lastTick", LIVE_TTL);
 
-export async function fixtureDetail(id: string) {
+export const fixtureDetail = persist(fixtureDetailUncached, "fixtureDetail", 300);
+
+async function fixtureDetailUncached(id: string) {
   const run = await latestRun();
   if (!run) return null;
   const fx = (await all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? AND fixture_id = ?", [run.id, id]))[0];
@@ -165,14 +239,14 @@ export async function fixtureDetail(id: string) {
   for (const l of lineups) if (!latest.has(l.team)) latest.set(l.team, l);
   // lineups store player ids: resolve names and roles from the players table
   const ids = [...latest.values()].flatMap((l) => [...parseJSON<string[]>(l.starters, []), ...parseJSON<string[]>(l.bench, [])]);
-  const players = new Map<string, { name: string; position: string }>();
+  const players: Record<string, { name: string; position: string }> = {}; // plain object: the data cache stores JSON
   for (let k = 0; k < ids.length; k += 200) {
     const chunk = ids.slice(k, k + 200);
     const rows = await all<{ id: string; name: string; position: string }>(
       `SELECT id, name, position FROM players WHERE id IN (${chunk.map(() => "?").join(",")})`,
       chunk,
     );
-    for (const r of rows) players.set(r.id, { name: r.name, position: r.position });
+    for (const r of rows) players[r.id] = { name: r.name, position: r.position };
   }
   return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, formHome, formAway, h2h };
 }
@@ -182,7 +256,8 @@ const PLAYABLE = "bookmaker LIKE 'sisal%'";
 
 // Every priced selection of a fixture (market, selection, line): the menu of the odds-trend tab.
 export type QuoteKey = { market_code: string; selection: string; line_key: string; n: number };
-export function quoteMenu(id: string) {
+export const quoteMenu = persist(quoteMenuUncached, "quoteMenu", 300);
+function quoteMenuUncached(id: string) {
   return all<QuoteKey>(
     `SELECT market_code, selection, COALESCE(line_key, '') AS line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND ${PLAYABLE} ` +
       "GROUP BY market_code, selection, COALESCE(line_key, '')",
@@ -191,7 +266,8 @@ export function quoteMenu(id: string) {
 }
 
 // Price path of one market line (all its selections, all bookmakers), oldest first.
-export function quotePath(id: string, market: string, lineKey: string) {
+export const quotePath = persist(quotePathUncached, "quotePath", 300);
+function quotePathUncached(id: string, market: string, lineKey: string) {
   return all<QuotePoint>(
     `SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND COALESCE(line_key, '') = ? AND ${PLAYABLE} ` +
       "ORDER BY observed_at",

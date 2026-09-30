@@ -3,7 +3,8 @@ import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
   Layers, ListOrdered, Percent, Search, ShieldCheck, Target, Trophy, TrendingUp,
 } from "lucide-react";
-import { lastTick, latestRun, parseJSON, runFixtures, runOpps, runSlips, usage, type FixtureRow, type Leg, type ModelMarket } from "@/lib/db";
+import { lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
+import { explainSlip, optimize, type OptOpp, type OptSettings } from "@/lib/optimizer";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
 import { OppTable } from "@/app/_components/OppTable";
@@ -17,7 +18,6 @@ const PERIODS = [
   { v: "168", l: "Prossimi 7 giorni" },
 ];
 
-// Slips are published per period and per maximum number of events (see publish.py SLIP_MAX_LEGS)
 const MAX_EVENTS = [
   { v: "10", l: "Fino a 10" },
   { v: "1", l: "1 (singola)" },
@@ -39,9 +39,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
       </div>
     );
   }
-  const [fixtures, opps, slips] = await Promise.all([runFixtures(run.id), runOpps(run.id), runSlips(run.id)]);
-
-  // ---- filters (applied to the latest published analysis) ----
+  // ---- filters: every change rebuilds the slips on the published opportunities (web/lib/optimizer.ts) ----
   const now = Date.now();
   const hours = PERIODS.some((p) => p.v === sp.h) ? Number(sp.h) : 168;
   const maxEvents = MAX_EVENTS.some((m) => m.v === sp.n) ? Number(sp.n) : 10;
@@ -49,27 +47,40 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const qMax = Number(sp.max) || 0;
   const lMin = Number(sp.lmin) || 0;
   const lMax = Number(sp.lmax) || 0;
-  const legOk = (odds: number) => (!lMin || odds >= lMin) && (!lMax || odds <= lMax);
   // Competitions: several can be ticked; none in the URL (or all of them) means every competition.
   const picked = new Set([sp.comp ?? []].flat().filter(Boolean));
-  const inWindow = (iso: string, comp: string) =>
-    new Date(iso).getTime() <= now + hours * 3600_000 && (!picked.size || picked.has(comp));
+  const settings = parseJSON<OptSettings | null>(run.optimizer, null);
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 16); // minute precision: equal filters share the data cache
+  const filter = { from: iso(now), until: iso(now + hours * 3600_000), comps: [...picked], lmin: lMin, lmax: lMax };
+  const statuses = ["STRONG", "CANDIDATE", ...(settings?.optimizer.include_watch ? ["WATCH"] : [])];
+  const [fixtures, summary, cands] = await Promise.all([
+    runFixtures(run.id),
+    oppSummary(run.id, filter),
+    settings ? slipCandidates(run.id, filter, statuses) : Promise.resolve([] as OppRow[]),
+  ]);
+  const inWindow = (isoTime: string, comp: string) =>
+    new Date(isoTime).getTime() <= now + hours * 3600_000 && (!picked.size || picked.has(comp));
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
-  const op = opps.filter((o) => inWindow(o.kickoff, o.competition) && legOk(o.odds));
-  const built = slips.some((s) => s.horizon_h != null);
-  const sl = slips
-    .filter((s) => !built || (s.horizon_h === hours && s.max_legs === maxEvents))
-    .map((s) => ({ ...s, legList: parseJSON<Leg[]>(s.legs, []) }))
-    .filter((s) => s.legList.length <= maxEvents)
-    .filter((s) => s.legList.every((l) => inWindow(l.kickoff, l.competition) && legOk(l.odds)))
-    .filter((s) => (!qMin || s.total_odds >= qMin) && (!qMax || s.total_odds <= qMax));
+  type Cand = OptOpp & OppRow;
+  const legs: Cand[] = cands.map((o) => ({
+    ...o, sel_key: o.sel_key ?? "", home: o.home ?? "", away: o.away ?? "", p_struct: o.p_struct ?? o.p_final,
+    score: o.score ?? 0, disagreement: o.disagreement ?? 0, dq_lineup: o.dq_lineup ?? 0,
+  }));
+  const result = settings
+    ? optimize(legs, {
+        ...settings,
+        optimizer: { ...settings.optimizer, max_legs: maxEvents, odds_min: qMin || settings.optimizer.odds_min, odds_max: qMax || settings.optimizer.odds_max },
+      })
+    : { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0 };
+  const sl = result.slips;
   const best = sl[0];
   const statusCounts = parseJSON<Record<string, number>>(run.status_counts, {});
   const nMarkets = Object.values(statusCounts).reduce((a, b) => a + b, 0);
-  const reasons = parseJSON<string[]>(run.reasons, []);
-  const oppOf = (l: Leg) => op.find((o) => o.match === l.match && o.market === l.market && o.bookmaker === l.bookmaker);
-  const expl = parseJSON<{ positive_factors?: string[]; negative_factors?: string[]; what_would_change_it?: string[] }>(best?.explanation, {});
+  const reasons = result.reasons;
+  const expl = best && settings ? explainSlip(best, settings.z) : null;
+  const op = summary.top;
+  const nOpp = summary.count;
   const featured = pickFeatured(fx, best);
   const upcoming = fx.slice(0, 6);
   const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10"));
@@ -172,8 +183,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               <h2 id="hero-title">{best ? "Ecco la tua schedina ottimizzata" : "Nessuna schedina: niente supera le soglie"}</h2>
               <p>
                 Abbiamo analizzato <b>{fx.length}</b> partite
-                {nMarkets > 0 && <>, valutato <b>{nMarkets.toLocaleString("it-IT")}</b> mercati</>} e trovato <b>{op.length}</b>{" "}
-                {op.length === 1 ? "opportunità" : "opportunità"} da osservare.
+                {nMarkets > 0 && <>, valutato <b>{nMarkets.toLocaleString("it-IT")}</b> mercati</>} e trovato <b>{nOpp}</b> opportunità da osservare.
                 {!best && (reasons[0] ? ` ${reasons[0]}` : " Senza quote recenti il motore non propone giocate.")}
               </p>
             </div>
@@ -213,7 +223,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           <div className="kpis">
             <Kpi icon={Layers} label="Partite analizzate" value={fx.length} />
             <Kpi icon={BarChart3} label="Mercati valutati" value={nMarkets} />
-            <Kpi icon={Target} label="Opportunità" value={op.length} />
+            <Kpi icon={Target} label="Opportunità" value={nOpp} />
             <Kpi icon={ShieldCheck} label="Schedine" value={sl.length} />
           </div>
 
@@ -222,7 +232,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <section className="card" aria-labelledby="slip-title">
               <div className="card-head">
                 <h2 id="slip-title">
-                  La tua schedina consigliata {best && <span className="count">{best.legList.length} eventi</span>}
+                  La tua schedina consigliata {best && <span className="count">{best.legs.length} {best.legs.length === 1 ? "evento" : "eventi"}</span>}
                 </h2>
                 {best && (
                   <span className="muted">
@@ -241,23 +251,23 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                         </tr>
                       </thead>
                       <tbody>
-                        {best.legList.map((l, i) => {
-                          const o = oppOf(l);
+                        {best.legs.map((l, i) => {
+                          const o = l;
                           const [home, away] = (l.match ?? "").split(" - ");
                           return (
                             <tr key={i}>
                               <td className="muted num">{i + 1}</td>
                               <td className="wrap">
-                                <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={o ? `/partita/${encodeURIComponent(o.fixture_id)}` : undefined} />
+                                <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={`/partita/${encodeURIComponent(o.fixture_id)}`} />
                               </td>
                               <td className="num">{l.odds.toFixed(2)}</td>
                               <td className="num">
-                                {pct(l.p, 1)}
+                                {pct(l.p_final, 1)}
                                 {o?.p_low != null && o.p_high != null && <span className="sub">({pct(o.p_low, 1)} – {pct(o.p_high, 1)})</span>}
                               </td>
                               <td className="num">
-                                <span className={o && o.ev >= 0 ? "pos" : "neg"}>{o ? signed(o.ev) : "–"}</span>
-                                {o && <span className="sub"><span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span></span>}
+                                <span className={o.ev >= 0 ? "pos" : "neg"}>{signed(o.ev)}</span>
+                                {<span className="sub"><span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span></span>}
                               </td>
                             </tr>
                           );
@@ -287,10 +297,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 <ul className="checklist">
                   {best ? (
                     <>
-                      {(expl.positive_factors ?? []).map((x, i) => (
+                      {(expl?.positive_factors ?? []).map((x, i) => (
                         <li key={`p${i}`}><CheckCircle2 size={17} className="ok" aria-label="a favore" /> <span>{x}</span></li>
                       ))}
-                      {(expl.negative_factors ?? []).map((x, i) => (
+                      {(expl?.negative_factors ?? []).map((x, i) => (
                         <li key={`n${i}`}><AlertTriangle size={17} className="ko" aria-label="attenzione" /> <span>{x}</span></li>
                       ))}
                     </>
@@ -300,11 +310,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                     ))
                   )}
                 </ul>
-                {best && (expl.what_would_change_it ?? []).length > 0 && (
+                {best && (expl?.what_would_change_it ?? []).length > 0 && (
                   <>
                     <h3 className="note" style={{ margin: "16px 0 6px", textTransform: "uppercase", letterSpacing: ".06em" }}>Cosa la cambierebbe</h3>
                     <ul className="checklist">
-                      {(expl.what_would_change_it ?? []).map((x, i) => (
+                      {(expl?.what_would_change_it ?? []).map((x, i) => (
                         <li key={i}><ArrowRight size={17} className="muted" aria-hidden="true" /> <span>{x}</span></li>
                       ))}
                     </ul>
@@ -317,7 +327,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           {/* ---------------- opportunities ---------------- */}
           <section className="card" aria-labelledby="opp-title">
             <div className="card-head">
-              <h2 id="opp-title"><TrendingUp size={17} color="var(--accent)" aria-hidden="true" /> Migliori opportunità <span className="count">{op.length}</span></h2>
+              <h2 id="opp-title"><TrendingUp size={17} color="var(--accent)" aria-hidden="true" /> Migliori opportunità <span className="count">{nOpp}</span></h2>
               <Link href="/opportunita" className="btn btn-ghost btn-sm">Vedi tutte <ChevronRight size={15} aria-hidden="true" /></Link>
             </div>
             {op.length ? <OppTable rows={op.slice(0, 8)} /> : (
@@ -416,9 +426,9 @@ function Mini({ label, value, tone }: { label: string; value: string; tone?: "po
   );
 }
 
-function pickFeatured(fx: FixtureRow[], best?: { legList: Leg[] }) {
+function pickFeatured(fx: FixtureRow[], best?: { legs: { match: string }[] }) {
   if (best) {
-    const [h, a] = (best.legList[0]?.match ?? "").split(" - ");
+    const [h, a] = (best.legs[0]?.match ?? "").split(" - ");
     const f = fx.find((x) => x.home === h && x.away === a);
     if (f) return f;
   }
