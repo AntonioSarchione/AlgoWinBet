@@ -69,10 +69,10 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                         ops[0].lineup_state if ops else "none", len(ops)))
 
     cur = store.db.execute(
-        "INSERT INTO pub_runs(created_at,cutoff,horizon_days,n_fixtures,n_with_quotes,no_bet,reasons,status_counts,notes) VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO pub_runs(created_at,cutoff,horizon_days,n_fixtures,n_with_quotes,no_bet,reasons,status_counts,notes) VALUES(?,?,?,?,?,?,?,?,?) RETURNING id",
         (datetime.now(timezone.utc).isoformat(), t.isoformat(), horizon_days, len(res.fixtures), len(by_fx), int(res.optimizer.no_bet),
          json.dumps(res.optimizer.reasons, ensure_ascii=False), json.dumps(res.status_counts()), json.dumps(res.notes, ensure_ascii=False)))
-    run_id = int(cur.lastrowid)
+    run_id = int(cur.fetchall()[0][0])  # not lastrowid: the remote libsql driver does not report it reliably
     store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes)",
                 [(run_id, *r) for r in fx_rows])
     store._bulk("INSERT INTO pub_opportunities(run_id,fixture_id,kickoff,competition,match,market,bookmaker,odds,fair_odds,p_final,p_market,ev,"

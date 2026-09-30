@@ -228,7 +228,7 @@ def test_tick_with_nothing_due_sends_nothing():
 def test_auto_config_file_loads_saved_ids():
     cfg = AutoConfig.load("configs/collect.json")
     assert cfg.goal_leagues and cfg.oddspapi_monthly_limit == 250 and cfg.prekick_min == (30, 75)
-    assert cfg.oddspapi_tournaments == ["23", "17", "35", "34", "8", "238", "37", "7", "679"] and len(cfg.leagues) == 9
+    assert cfg.oddspapi_tournaments == ["23", "17", "35", "34", "8", "238", "37", "7", "679", "23755"] and len(cfg.leagues) == 10
 
 
 def test_history_backfill_runs_once_per_league_without_csv():

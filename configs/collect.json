@@ -9,7 +9,8 @@
     {"name": "Liga Portugal", "goal": "cmr77dvun00adrx06xz20yfxe", "oddspapi": 238},
     {"name": "Eredivisie", "goal": "cmr77dvrh007vrx0664phtxs5", "oddspapi": 37},
     {"name": "UEFA Champions League", "goal": "cmr77dw3900f5rx06j05wgzv4", "oddspapi": 7},
-    {"name": "UEFA Europa League", "goal": "cmr77dw3900f6rx06tuqwft2d", "oddspapi": 679}
+    {"name": "UEFA Europa League", "goal": "cmr77dw3900f6rx06tuqwft2d", "oddspapi": 679},
+    {"name": "UEFA Nations League", "goal": "cmr77dw4800fgrx06rwmig2h8", "oddspapi": 23755}
   ],
   "bookmakers": ["sisal", "pinnacle"],
   "goal_daily_limit": 1000,
