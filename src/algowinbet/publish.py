@@ -7,11 +7,14 @@ recent ones, and the full audit trail stays in the snapshot tables.
 from __future__ import annotations
 
 import json
+
+import numpy as np
 from datetime import datetime, timedelta, timezone
 
 from .config import Config
 from .domain import OpportunityStatus, SelectionRef
 from .engine import AnalysisResult, Engine
+from .explain import explain_leg
 from .markets import probability
 from .snapshots import SnapshotProvider, SnapshotStore
 
@@ -35,6 +38,10 @@ FAIR_REFS = {"p_home": SelectionRef(market_code="MATCH_1X2", selection="HOME"),
              "p_away": SelectionRef(market_code="MATCH_1X2", selection="AWAY"),
              "p_over25": SelectionRef(market_code="TOTAL_GOALS", selection="OVER", line=2.5),
              "p_btts": SelectionRef(market_code="BTTS", selection="YES")}
+# Columns added after the first release: added in place on existing databases (see _migrate).
+EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets": "TEXT"},
+                 "pub_opportunities": {"p_struct": "REAL", "p_low": "REAL", "p_high": "REAL", "n_books": "INTEGER", "edge": "REAL",
+                                       "factors": "TEXT"}}
 SHOWN = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.WATCH}
 
 
@@ -45,6 +52,45 @@ def live_config(cfg: Config | None = None) -> Config:
     return cfg
 
 
+def _migrate(store: SnapshotStore) -> None:
+    store.db.executescript(SCHEMA)
+    for table, cols in EXTRA_COLUMNS.items():
+        have = {r[1] for r in store.db.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, kind in cols.items():
+            if name not in have:
+                store.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+    store.db.commit()
+
+
+def model_markets(m: np.ndarray) -> list[dict]:
+    """Fair probabilities of the goal markets the dashboard shows, all read from one score matrix (model only, no price).
+    Multigol and same-match combos are exact sums over the joint score distribution."""
+    n = m.shape[0]
+    i, j = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    tot = i + j
+    home, draw, away, gg = i > j, i == j, i < j, (i > 0) & (j > 0)
+    p = lambda mask: round(float(m[mask].sum()), 4)
+    out = [{"g": "1X2", "l": "1", "p": p(home)}, {"g": "1X2", "l": "X", "p": p(draw)}, {"g": "1X2", "l": "2", "p": p(away)},
+           {"g": "Doppia chance", "l": "1X", "p": p(i >= j)}, {"g": "Doppia chance", "l": "X2", "p": p(i <= j)},
+           {"g": "Doppia chance", "l": "12", "p": p(i != j)},
+           {"g": "Gol/NoGol", "l": "Gol", "p": p(gg)}, {"g": "Gol/NoGol", "l": "NoGol", "p": p(~gg)}]
+    for line in (0.5, 1.5, 2.5, 3.5, 4.5):
+        out += [{"g": "Under/Over", "l": f"Over {line}", "p": p(tot > line)}, {"g": "Under/Over", "l": f"Under {line}", "p": p(tot < line)}]
+    for a, b in ((1, 2), (1, 3), (2, 3), (2, 4), (3, 5), (4, 6)):
+        out.append({"g": "Multigol", "l": f"Multigol {a}-{b}", "p": p((tot >= a) & (tot <= b))})
+    for side, g in (("casa", i), ("ospite", j)):
+        for line in (0.5, 1.5, 2.5):
+            out.append({"g": "Gol squadra", "l": f"Over {line} {side}", "p": p(g > line)})
+    for label, mask in (("1 + Over 2.5", home & (tot > 2.5)), ("2 + Over 2.5", away & (tot > 2.5)), ("1 + Gol", home & gg),
+                        ("2 + Gol", away & gg), ("Gol + Over 2.5", gg & (tot > 2.5)), ("1X + Under 3.5", (i >= j) & (tot < 3.5)),
+                        ("X2 + Under 3.5", (i <= j) & (tot < 3.5)), ("1X + Over 1.5", (i >= j) & (tot > 1.5)),
+                        ("X2 + Over 1.5", (i <= j) & (tot > 1.5)), ("NoGol + Under 2.5", ~gg & (tot < 2.5))):
+        out.append({"g": "Combo", "l": label, "p": p(mask)})
+    flat = sorted(((float(m[a, b]), a, b) for a in range(min(n, 7)) for b in range(min(n, 7))), reverse=True)[:8]
+    out += [{"g": "Risultato esatto", "l": f"{a}-{b}", "p": round(v, 4)} for v, a, b in flat]
+    return out
+
+
 def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon_days: float = 14.0,
                         now: datetime | None = None, keep_days: int = 14) -> tuple[int, AnalysisResult]:
     cfg = live_config(cfg)
@@ -52,7 +98,7 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     prov = SnapshotProvider(store)
     eng = Engine(prov, cfg, use_lineups=True)
     res = eng.analyze(None, t, t + timedelta(days=horizon_days), t)
-    store.db.executescript(SCHEMA)
+    _migrate(store)
 
     by_fx: dict[str, list] = {}
     for o in res.opportunities:
@@ -61,25 +107,30 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     for f in res.fixtures:
         fitted = eng.fit(f.competition, t)
         probs = {k: None for k in FAIR_REFS}
+        xg, markets = (None, None), None
         if fitted and fitted[0].knows(f.home) and fitted[0].knows(f.away):
             m = fitted[0].score_matrix(f.home, f.away)
             probs = {k: round(probability(m, r), 4) for k, r in FAIR_REFS.items()}
+            xg = tuple(round(float(x), 3) for x in fitted[0].expected_goals(f.home, f.away))
+            markets = json.dumps(model_markets(m), ensure_ascii=False)
         ops = by_fx.get(f.id, [])
         fx_rows.append((f.id, f.kickoff.isoformat(), f.competition, f.home, f.away, *probs.values(),
-                        ops[0].lineup_state if ops else "none", len(ops)))
+                        ops[0].lineup_state if ops else "none", len(ops), *xg, markets))
 
     cur = store.db.execute(
         "INSERT INTO pub_runs(created_at,cutoff,horizon_days,n_fixtures,n_with_quotes,no_bet,reasons,status_counts,notes) VALUES(?,?,?,?,?,?,?,?,?) RETURNING id",
         (datetime.now(timezone.utc).isoformat(), t.isoformat(), horizon_days, len(res.fixtures), len(by_fx), int(res.optimizer.no_bet),
          json.dumps(res.optimizer.reasons, ensure_ascii=False), json.dumps(res.status_counts()), json.dumps(res.notes, ensure_ascii=False)))
     run_id = int(cur.fetchall()[0][0])  # not lastrowid: the remote libsql driver does not report it reliably
-    store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes)",
+    store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes,xg_home,xg_away,markets)",
                 [(run_id, *r) for r in fx_rows])
     store._bulk("INSERT INTO pub_opportunities(run_id,fixture_id,kickoff,competition,match,market,bookmaker,odds,fair_odds,p_final,p_market,ev,"
-                "ev_lower,uncertainty,data_quality,status,odds_stale,lineup_state)",
+                "ev_lower,uncertainty,data_quality,status,odds_stale,lineup_state,p_struct,p_low,p_high,n_books,edge,factors)",
                 [(run_id, o.fixture_id, o.kickoff.isoformat(), o.competition, f"{o.home} - {o.away}", o.description, o.bookmaker, o.odds,
                   round(o.fair_odds, 3), round(o.p_final, 4), None if o.p_market is None else round(o.p_market, 4), round(o.ev, 4),
-                  round(o.ev_lower, 4), round(o.uncertainty, 4), round(o.data_quality, 3), o.status.value, int(o.odds_stale), o.lineup_state)
+                  round(o.ev_lower, 4), round(o.uncertainty, 4), round(o.data_quality, 3), o.status.value, int(o.odds_stale), o.lineup_state,
+                  round(o.p_struct, 4), round(o.p_low, 4), round(o.p_high, 4), o.n_books, None if o.edge is None else round(o.edge, 4),
+                  json.dumps({k: explain_leg(o)[k] for k in ("positive_factors", "negative_factors")}, ensure_ascii=False))
                  for o in res.opportunities if o.status in SHOWN])
     store._bulk("INSERT INTO pub_slips(run_id,rank,total_odds,joint_probability,ev,ev_lower,stake,legs,explanation)",
                 [(run_id, k + 1, round(s.total_odds, 3), round(s.joint_probability, 4), round(s.ev, 4), round(s.ev_lower, 4), round(s.stake, 2),
@@ -107,6 +158,6 @@ def prune(store: SnapshotStore, keep_days: int = 14) -> None:
 
 
 def last_publication(store: SnapshotStore) -> datetime | None:
-    store.db.executescript(SCHEMA)
+    _migrate(store)
     row = store.db.execute("SELECT MAX(created_at) FROM pub_runs").fetchone()
     return datetime.fromisoformat(row[0]) if row and row[0] else None

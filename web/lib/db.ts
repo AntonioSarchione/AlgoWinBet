@@ -1,5 +1,6 @@
 import "server-only";
-import { createClient, type Client } from "@libsql/client";
+import { cache } from "react";
+import { createClient, type Client, type InValue } from "@libsql/client";
 
 let client: Client | null = null;
 
@@ -39,6 +40,9 @@ export type FixtureRow = {
   p_btts: number | null;
   lineup_state: string;
   n_quotes: number;
+  xg_home: number | null;
+  xg_away: number | null;
+  markets: string | null;
 };
 
 export type OppRow = {
@@ -59,6 +63,12 @@ export type OppRow = {
   status: string;
   odds_stale: number;
   lineup_state: string;
+  p_struct: number | null;
+  p_low: number | null;
+  p_high: number | null;
+  n_books: number | null;
+  edge: number | null;
+  factors: string | null;
 };
 
 export type SlipRow = {
@@ -69,38 +79,121 @@ export type SlipRow = {
   ev_lower: number;
   stake: number;
   legs: string;
+  explanation: string;
 };
 
 export type Leg = { match: string; competition: string; kickoff: string; market: string; odds: number; bookmaker: string; p: number };
-
 export type Usage = { source: string; period: string; used: number };
+export type ModelMarket = { g: string; l: string; p: number };
+export type QuotePoint = { selection: string; bookmaker: string; odds: number; observed_at: string };
+export type LineupRow = { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string };
+export type ResultRow = { fixture_id: string; kickoff: string; competition: string; home: string; away: string; home_goals: number; away_goals: number };
 
-function rows<T>(r: { rows: unknown[] }): T[] {
+async function all<T>(sql: string, args: InValue[] = []): Promise<T[]> {
+  const r = await db().execute({ sql, args });
   return r.rows as unknown as T[];
 }
 
-export async function loadDashboard() {
-  const c = db();
-  const run = rows<Run>(await c.execute("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 1"))[0];
+export const latestRun = cache(async (): Promise<Run | null> => {
+  try {
+    return (await all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 1"))[0] ?? null;
+  } catch {
+    return null; // tables not created yet: nothing published
+  }
+});
+
+export const runFixtures = cache((runId: number) =>
+  all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? ORDER BY kickoff, competition, home", [runId]),
+);
+
+export const runOpps = cache((runId: number) => all<OppRow>("SELECT * FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC", [runId]));
+
+export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
+
+export const usage = cache(async () => {
   const now = new Date();
   const day = `D${now.toISOString().slice(0, 10)}`;
   const month = `M${now.toISOString().slice(0, 7)}`;
-  const [usage, lastTick] = await Promise.all([
-    c.execute({ sql: "SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", args: [day, month] }),
-    c.execute("SELECT MAX(fetched_at) AS t FROM raw_requests"),
+  const rows = await all<Usage>("SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", [day, month]);
+  const get = (src: string, kind: "D" | "M") => rows.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
+  return { goalDay: get("goal-api", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D") };
+});
+
+export const lastTick = cache(async () => {
+  const r = await all<{ t: string | null }>("SELECT MAX(fetched_at) AS t FROM raw_requests");
+  return r[0]?.t ?? null;
+});
+
+export async function fixtureDetail(id: string) {
+  const run = await latestRun();
+  if (!run) return null;
+  const fx = (await all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? AND fixture_id = ?", [run.id, id]))[0];
+  if (!fx) return null;
+  const [opps, quotes, lineups, formHome, formAway, h2h] = await Promise.all([
+    all<OppRow>("SELECT * FROM pub_opportunities WHERE run_id = ? AND fixture_id = ? ORDER BY ev DESC", [run.id, id]),
+    all<QuotePoint>(
+      "SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = 'MATCH_1X2' ORDER BY observed_at",
+      [id],
+    ),
+    all<LineupRow>(
+      "SELECT team, status, formation, starters, bench, observed_at FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC",
+      [id],
+    ),
+    teamForm(fx.home, fx.kickoff),
+    teamForm(fx.away, fx.kickoff),
+    all<ResultRow>(
+      "SELECT fixture_id, kickoff, competition, home, away, home_goals, away_goals FROM results " +
+        "WHERE ((home = ? AND away = ?) OR (home = ? AND away = ?)) AND kickoff < ? ORDER BY kickoff DESC LIMIT 5",
+      [fx.home, fx.away, fx.away, fx.home, fx.kickoff],
+    ),
   ]);
-  if (!run) return { run: null, fixtures: [], opps: [], slips: [], usage: rows<Usage>(usage), lastTick: null };
-  const [fixtures, opps, slips] = await Promise.all([
-    c.execute({ sql: "SELECT * FROM pub_fixtures WHERE run_id = ? ORDER BY kickoff, competition", args: [run.id] }),
-    c.execute({ sql: "SELECT * FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC", args: [run.id] }),
-    c.execute({ sql: "SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", args: [run.id] }),
+  const latest = new Map<string, LineupRow>();
+  for (const l of lineups) if (!latest.has(l.team)) latest.set(l.team, l);
+  // lineups store player ids: resolve names and roles from the players table
+  const ids = [...latest.values()].flatMap((l) => [...parseJSON<string[]>(l.starters, []), ...parseJSON<string[]>(l.bench, [])]);
+  const players = new Map<string, { name: string; position: string }>();
+  for (let k = 0; k < ids.length; k += 200) {
+    const chunk = ids.slice(k, k + 200);
+    const rows = await all<{ id: string; name: string; position: string }>(
+      `SELECT id, name, position FROM players WHERE id IN (${chunk.map(() => "?").join(",")})`,
+      chunk,
+    );
+    for (const r of rows) players.set(r.id, { name: r.name, position: r.position });
+  }
+  return { run, fx, opps, quotes, lineups: [...latest.values()], players, formHome, formAway, h2h };
+}
+
+function teamForm(team: string, before: string) {
+  return all<ResultRow>(
+    "SELECT fixture_id, kickoff, competition, home, away, home_goals, away_goals FROM results " +
+      "WHERE (home = ? OR away = ?) AND kickoff < ? ORDER BY kickoff DESC LIMIT 6",
+    [team, team, before],
+  );
+}
+
+export async function systemStatus() {
+  const tables = ["raw_requests", "fixtures", "results", "quotes", "lineups", "match_stats"] as const;
+  const counts = await Promise.all(tables.map((t) => all<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`)));
+  const [runs, jobs, byComp] = await Promise.all([
+    all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 12"),
+    all<{ name: string; done_at: string; detail: string | null }>("SELECT name, done_at, detail FROM jobs ORDER BY done_at DESC"),
+    all<{ competition: string; n: number; first: string; last: string }>(
+      "SELECT competition, COUNT(*) AS n, MIN(kickoff) AS first, MAX(kickoff) AS last FROM results GROUP BY competition ORDER BY n DESC",
+    ),
   ]);
   return {
-    run,
-    fixtures: rows<FixtureRow>(fixtures),
-    opps: rows<OppRow>(opps),
-    slips: rows<SlipRow>(slips),
-    usage: rows<Usage>(usage),
-    lastTick: (lastTick.rows[0]?.t as string | null) ?? null,
+    counts: Object.fromEntries(tables.map((t, i) => [t, Number(counts[i][0]?.n ?? 0)])) as Record<(typeof tables)[number], number>,
+    runs,
+    jobs,
+    byComp,
   };
+}
+
+export function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
 }

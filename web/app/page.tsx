@@ -1,149 +1,422 @@
 import Link from "next/link";
-import { loadDashboard, type FixtureRow, type Leg } from "@/lib/db";
+import {
+  AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
+  Layers, Percent, Search, ShieldCheck, Target, Trophy, TrendingUp,
+} from "lucide-react";
+import { lastTick, latestRun, parseJSON, runFixtures, runOpps, runSlips, usage, type FixtureRow, type Leg, type ModelMarket } from "@/lib/db";
+import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "./_components/format";
+import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "./_components/ui";
+import { OppTable } from "./_components/OppTable";
 
 export const dynamic = "force-dynamic";
 
-const TZ = "Europe/Rome";
-const dt = (iso: string) =>
-  new Date(iso).toLocaleString("it-IT", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-const pct = (p: number | null | undefined) => (p == null ? "–" : `${Math.round(p * 100)}%`);
-const fair = (p: number | null | undefined) => (p == null || p <= 0 ? "" : (1 / p).toFixed(2));
-const signed = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+const PERIODS = [
+  { v: "24", l: "Prossime 24 ore" },
+  { v: "48", l: "Prossime 48 ore" },
+  { v: "72", l: "Prossimi 3 giorni" },
+  { v: "168", l: "Prossimi 7 giorni" },
+  { v: "336", l: "Prossimi 14 giorni" },
+];
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ comp?: string }> }) {
-  const { comp } = await searchParams;
-  const d = await loadDashboard();
+type SP = { min?: string; max?: string; h?: string; comp?: string };
 
-  if (!d.run) {
+export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
+  const sp = await searchParams;
+  const run = await latestRun();
+  const [use, tick] = await Promise.all([usage(), lastTick()]);
+  if (!run) {
     return (
-      <main>
-        <h1>AlgoWinBet</h1>
-        <p className="muted">Nessuna analisi pubblicata ancora: la prima arriva dal prossimo giro di raccolta.</p>
-      </main>
+      <div className="card">
+        <Empty icon={Database} title="Nessuna analisi pubblicata">
+          La prima arriva dal prossimo giro di raccolta automatico.
+        </Empty>
+      </div>
     );
   }
+  const [fixtures, opps, slips] = await Promise.all([runFixtures(run.id), runOpps(run.id), runSlips(run.id)]);
 
-  const reasons: string[] = JSON.parse(d.run.reasons || "[]");
-  const notes: string[] = JSON.parse(d.run.notes || "[]");
-  const comps = Array.from(new Set(d.fixtures.map((f) => f.competition))).sort();
-  const shown: FixtureRow[] = comp ? d.fixtures.filter((f) => f.competition === comp) : d.fixtures;
-  const use = (src: string, kind: "D" | "M") => d.usage.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
+  // ---- filters (applied to the latest published analysis) ----
+  const now = Date.now();
+  const hours = Number(sp.h) || 336;
+  const qMin = Number(sp.min) || 0;
+  const qMax = Number(sp.max) || 0;
+  const inWindow = (iso: string, comp: string) =>
+    new Date(iso).getTime() <= now + hours * 3600_000 && (!sp.comp || comp === sp.comp);
+  const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
+  const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
+  const op = opps.filter((o) => inWindow(o.kickoff, o.competition));
+  const sl = slips
+    .map((s) => ({ ...s, legList: parseJSON<Leg[]>(s.legs, []) }))
+    .filter((s) => s.legList.every((l) => inWindow(l.kickoff, l.competition)))
+    .filter((s) => (!qMin || s.total_odds >= qMin) && (!qMax || s.total_odds <= qMax));
+  const best = sl[0];
+  const statusCounts = parseJSON<Record<string, number>>(run.status_counts, {});
+  const nMarkets = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+  const reasons = parseJSON<string[]>(run.reasons, []);
+  const oppOf = (l: Leg) => op.find((o) => o.match === l.match && o.market === l.market && o.bookmaker === l.bookmaker);
+  const expl = parseJSON<{ positive_factors?: string[]; negative_factors?: string[]; what_would_change_it?: string[] }>(best?.explanation, {});
+  const featured = pickFeatured(fx, best);
+  const upcoming = fx.slice(0, 6);
+  const filtered = Boolean(sp.comp || sp.min || sp.max || (sp.h && sp.h !== "336"));
 
   return (
-    <main>
-      <h1>AlgoWinBet</h1>
-      <p className="muted">
-        Analisi del {dt(d.run.created_at)} · prossimi {d.run.horizon_days} giorni · uso personale, solo paper trading
-      </p>
-
-      <div className="grid">
-        <div className="panel stat"><span className="muted">Partite</span><b>{d.run.n_fixtures}</b></div>
-        <div className="panel stat"><span className="muted">Con quote (ultime 24h)</span><b>{d.run.n_with_quotes}</b></div>
-        <div className="panel stat"><span className="muted">Schedine</span><b>{d.slips.length}</b></div>
-        <div className="panel stat">
-          <span className="muted">Richieste API</span>
-          <b style={{ fontSize: 14 }}>GOAL {use("goal-api", "D")}/1000 oggi · OddsPapi {use("oddspapi", "M")}/250 mese</b>
+    <>
+      <header className="page-head">
+        <div>
+          <h1>Home</h1>
+          <p>
+            Analisi del {dayTime(run.created_at)} · ultima raccolta dati {ago(tick)} · uso personale, solo paper trading
+          </p>
         </div>
-      </div>
+      </header>
 
-      <h2>Schedine</h2>
-      {d.slips.length === 0 ? (
-        <div className="panel nobet">
-          <b>NO BET</b>
-          <ul>{reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
+      <form className="card filters" method="get" role="search" aria-label="Filtra l'analisi">
+        <div className="field">
+          <label htmlFor="min">Quota schedina (min – max)</label>
+          <div className="control">
+            <Gauge size={17} aria-hidden="true" />
+            <input id="min" name="min" type="number" inputMode="decimal" step="0.05" min="1" placeholder="1.50" defaultValue={sp.min} aria-label="Quota minima" />
+            <span className="dash">–</span>
+            <input name="max" type="number" inputMode="decimal" step="0.05" min="1" placeholder="15.00" defaultValue={sp.max} aria-label="Quota massima" />
+          </div>
         </div>
-      ) : (
-        d.slips.map((s) => {
-          const legs: Leg[] = JSON.parse(s.legs);
-          return (
-            <div className="panel slip" key={s.rank}>
-              <b>#{s.rank} · quota {s.total_odds.toFixed(2)} · probabilità {pct(s.joint_probability)}</b>{" "}
-              <span className={s.ev >= 0 ? "pos" : "neg"}>EV {signed(s.ev)}</span>{" "}
-              <span className="muted">(prudente {signed(s.ev_lower)}) · puntata paper {s.stake.toFixed(2)}</span>
-              <ul>
-                {legs.map((l, i) => (
-                  <li key={i}>
-                    {dt(l.kickoff)} · <b>{l.match}</b> <span className="muted">[{l.competition}]</span> — {l.market} @ {l.odds.toFixed(2)}{" "}
-                    <span className="muted">({l.bookmaker}, p {pct(l.p)})</span>
+        <div className="field">
+          <label htmlFor="h">Periodo</label>
+          <div className="control">
+            <CalendarClock size={17} aria-hidden="true" />
+            <select id="h" name="h" defaultValue={String(hours)}>
+              {PERIODS.map((p) => (
+                <option key={p.v} value={p.v}>{p.l}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="comp">Campionati</label>
+          <div className="control">
+            <Trophy size={17} aria-hidden="true" />
+            <select id="comp" name="comp" defaultValue={sp.comp ?? ""}>
+              <option value="">Tutti i campionati</option>
+              {comps.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {filtered && (
+            <Link href="/" className="btn btn-ghost" aria-label="Azzera filtri">Azzera</Link>
+          )}
+          <button type="submit" className="btn btn-primary">
+            <Filter size={17} aria-hidden="true" /> Applica
+          </button>
+        </div>
+      </form>
+
+      <div className="layout">
+        <div className="col">
+          {/* ---------------- hero ---------------- */}
+          <section className="card hero" aria-labelledby="hero-title">
+            <div>
+              {best ? (
+                <span className="pill pill-good"><CheckCircle2 size={13} aria-hidden="true" /> Analisi completata</span>
+              ) : (
+                <span className="pill pill-warn"><CircleSlash size={13} aria-hidden="true" /> No bet</span>
+              )}
+              <h2 id="hero-title">{best ? "Ecco la tua schedina ottimizzata" : "Nessuna schedina: niente supera le soglie"}</h2>
+              <p>
+                Abbiamo analizzato <b>{fx.length}</b> partite
+                {nMarkets > 0 && <>, valutato <b>{nMarkets.toLocaleString("it-IT")}</b> mercati</>} e trovato <b>{op.length}</b>{" "}
+                {op.length === 1 ? "opportunità" : "opportunità"} da osservare.
+                {!best && (reasons[0] ? ` ${reasons[0]}` : " Senza quote recenti il motore non propone giocate.")}
+              </p>
+            </div>
+            <div className="hero-stats">
+              {best ? (
+                <>
+                  <div className="hero-stat">
+                    <small>Quota totale</small>
+                    <b className="num">{best.total_odds.toFixed(2)}</b>
+                    <span className={`chip-ev ${best.ev >= 0 ? "pos" : "neg"}`} style={{ background: best.ev >= 0 ? "var(--good-soft)" : "var(--bad-soft)" }}>
+                      EV {signed(best.ev)}
+                    </span>
+                  </div>
+                  <div className="hero-stat">
+                    <small>Probabilità complessiva</small>
+                    <b className="num">{pct(best.joint_probability, 1)}</b>
+                    <span className="note">EV prudente {signed(best.ev_lower)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="hero-stat">
+                    <small>Partite con quote (24h)</small>
+                    <b className="num">{run.n_with_quotes}</b>
+                    <span className="note">su {run.n_fixtures} in calendario</span>
+                  </div>
+                  <div className="hero-stat">
+                    <small>Schedine proposte</small>
+                    <b className="num">0</b>
+                    <span className="note">meglio nessuna giocata che una senza valore</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+
+          <div className="kpis">
+            <Kpi icon={Layers} label="Partite analizzate" value={fx.length} />
+            <Kpi icon={BarChart3} label="Mercati valutati" value={nMarkets} />
+            <Kpi icon={Target} label="Opportunità" value={op.length} />
+            <Kpi icon={ShieldCheck} label="Schedine" value={sl.length} />
+          </div>
+
+          {/* ---------------- slip + why ---------------- */}
+          <div className="split">
+            <section className="card" aria-labelledby="slip-title">
+              <div className="card-head">
+                <h2 id="slip-title">
+                  La tua schedina consigliata {best && <span className="count">{best.legList.length} eventi</span>}
+                </h2>
+                {best && (
+                  <span className="muted">
+                    Quota totale <b className="num pos">{best.total_odds.toFixed(2)}</b>
+                  </span>
+                )}
+              </div>
+              {best ? (
+                <>
+                  <div className="table-wrap">
+                    <table className="compact">
+                      <thead>
+                        <tr>
+                          <th>#</th><th>Evento / Mercato</th><th className="num">Quota</th><th className="num">Probabilità</th>
+                          <th className="num">EV · Stato</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {best.legList.map((l, i) => {
+                          const o = oppOf(l);
+                          const [home, away] = l.match.split(" - ");
+                          return (
+                            <tr key={i}>
+                              <td className="muted num">{i + 1}</td>
+                              <td className="wrap">
+                                <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={o ? `/partita/${encodeURIComponent(o.fixture_id)}` : undefined} />
+                              </td>
+                              <td className="num">{l.odds.toFixed(2)}</td>
+                              <td className="num">
+                                {pct(l.p, 1)}
+                                {o?.p_low != null && o.p_high != null && <span className="sub">({pct(o.p_low, 1)} – {pct(o.p_high, 1)})</span>}
+                              </td>
+                              <td className="num">
+                                <span className={o && o.ev >= 0 ? "pos" : "neg"}>{o ? signed(o.ev) : "–"}</span>
+                                {o && <span className="sub"><span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span></span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="kpis" style={{ padding: 12, borderTop: "1px solid var(--line)" }}>
+                    <Mini label="Quota totale" value={best.total_odds.toFixed(2)} />
+                    <Mini label="Probabilità complessiva" value={pct(best.joint_probability, 1)} />
+                    <Mini label="EV stimato" value={signed(best.ev)} tone={best.ev >= 0 ? "pos" : "neg"} />
+                    <Mini label="Puntata paper" value={`${best.stake.toFixed(2)} €`} />
+                  </div>
+                </>
+              ) : (
+                <Empty icon={CircleSlash} title="NO BET">
+                  {reasons.length ? reasons.join(" ") : "Nessuna combinazione con valore atteso positivo e probabilità sopra soglia."}
+                </Empty>
+              )}
+            </section>
+
+            <section className="card" aria-labelledby="why-title">
+              <div className="card-head">
+                <h2 id="why-title"><Brain size={17} color="var(--accent)" aria-hidden="true" /> {best ? "Perché questa schedina?" : "Perché nessuna schedina?"}</h2>
+              </div>
+              <div className="card-pad">
+                <ul className="checklist">
+                  {best ? (
+                    <>
+                      {(expl.positive_factors ?? []).map((x, i) => (
+                        <li key={`p${i}`}><CheckCircle2 size={17} className="ok" aria-label="a favore" /> <span>{x}</span></li>
+                      ))}
+                      {(expl.negative_factors ?? []).map((x, i) => (
+                        <li key={`n${i}`}><AlertTriangle size={17} className="ko" aria-label="attenzione" /> <span>{x}</span></li>
+                      ))}
+                    </>
+                  ) : (
+                    (reasons.length ? reasons : ["Nessuna quota recente da confrontare con il modello."]).map((x, i) => (
+                      <li key={i}><AlertTriangle size={17} className="ko" aria-label="motivo" /> <span>{x}</span></li>
+                    ))
+                  )}
+                </ul>
+                {best && (expl.what_would_change_it ?? []).length > 0 && (
+                  <>
+                    <h3 className="note" style={{ margin: "16px 0 6px", textTransform: "uppercase", letterSpacing: ".06em" }}>Cosa la cambierebbe</h3>
+                    <ul className="checklist">
+                      {(expl.what_would_change_it ?? []).map((x, i) => (
+                        <li key={i}><ArrowRight size={17} className="muted" aria-hidden="true" /> <span>{x}</span></li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* ---------------- opportunities ---------------- */}
+          <section className="card" aria-labelledby="opp-title">
+            <div className="card-head">
+              <h2 id="opp-title"><TrendingUp size={17} color="var(--accent)" aria-hidden="true" /> Migliori opportunità <span className="count">{op.length}</span></h2>
+              <Link href="/opportunita" className="btn btn-ghost btn-sm">Vedi tutte <ChevronRight size={15} aria-hidden="true" /></Link>
+            </div>
+            {op.length ? <OppTable rows={op.slice(0, 8)} /> : (
+              <Empty icon={Percent} title="Nessun mercato sopra le soglie">
+                Le quote arrivano da OddsPapi nelle 24 ore prima delle partite: senza prezzi recenti non si calcola il valore atteso.
+              </Empty>
+            )}
+          </section>
+
+          {featured && <DeepPreview f={featured} />}
+        </div>
+
+        {/* ---------------- right rail ---------------- */}
+        <aside className="col rail" aria-label="Pannelli rapidi">
+          <section className="card">
+            <div className="card-head"><h2>Analisi rapida di una partita</h2></div>
+            <form action="/palinsesto" method="get" role="search" style={{ padding: "12px 16px 4px" }}>
+              <label htmlFor="q" className="sr-only">Cerca squadra o campionato</label>
+              <div className="control">
+                <Search size={17} aria-hidden="true" />
+                <input id="q" name="q" type="search" placeholder="Cerca squadra o campionato…" />
+              </div>
+            </form>
+            {upcoming.length ? (
+              <ul className="quick">
+                {upcoming.map((f) => (
+                  <li key={f.fixture_id}>
+                    <Link href={`/partita/${encodeURIComponent(f.fixture_id)}`}>
+                      <span className="badges" style={{ display: "flex" }}>
+                        <TeamBadge name={f.home} />
+                        <span style={{ marginLeft: -6 }}><TeamBadge name={f.away} /></span>
+                      </span>
+                      <span style={{ minWidth: 0 }}>
+                        <b>{f.home} - {f.away}</b>
+                        <small>{compShort(f.competition)} · {dayTime(f.kickoff)}</small>
+                      </span>
+                      <ChevronRight size={17} aria-hidden="true" />
+                    </Link>
                   </li>
                 ))}
               </ul>
+            ) : (
+              <Empty icon={CalendarClock} title="Nessuna partita nel periodo" />
+            )}
+          </section>
+
+          <section className="card">
+            <div className="card-head"><h2>Mercati analizzati</h2></div>
+            <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
+              <div>
+                <span className="note">Con quote dei bookmaker (valore atteso)</span>
+                <div className="text-2">1X2, Doppia chance, Under/Over, Gol/NoGol</div>
+              </div>
+              <div>
+                <span className="note">Solo probabilità del modello (quota equa)</span>
+                <div className="text-2">Multigol, Combo, Gol squadra, Risultato esatto</div>
+              </div>
             </div>
-          );
-        })
-      )}
+          </section>
 
-      <h2>Opportunità</h2>
-      {d.opps.length === 0 ? (
-        <p className="muted">Nessun mercato sopra le soglie di osservazione.</p>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Stato</th><th>Partita</th><th>Mercato</th><th>Book</th>
-                <th className="num">Quota</th><th className="num">Equa</th><th className="num">p modello</th>
-                <th className="num">p mercato</th><th className="num">EV</th><th>Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.opps.map((o, i) => (
-                <tr key={i}>
-                  <td className={o.status}>{o.status}</td>
-                  <td>{dt(o.kickoff)} · {o.match}</td>
-                  <td>{o.market}</td>
-                  <td>{o.bookmaker}</td>
-                  <td className="num">{o.odds.toFixed(2)}</td>
-                  <td className="num">{o.fair_odds.toFixed(2)}</td>
-                  <td className="num">{pct(o.p_final)}</td>
-                  <td className="num">{pct(o.p_market)}</td>
-                  <td className={`num ${o.ev >= 0 ? "pos" : "neg"}`}>{signed(o.ev)}</td>
-                  <td className="muted">{o.odds_stale ? "quota da ricontrollare" : o.lineup_state === "confirmed" ? "XI ufficiali" : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <h2>Probabilità del modello</h2>
-      <nav className="comps">
-        <Link href="/" className={!comp ? "on" : ""}><span className="chip">Tutte</span></Link>
-        {comps.map((c) => (
-          <Link key={c} href={`/?comp=${encodeURIComponent(c)}`} className={comp === c ? "on" : ""}>
-            <span className="chip">{c}</span>
-          </Link>
-        ))}
-      </nav>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Quando</th><th>Partita</th><th>Competizione</th>
-              <th className="num">1</th><th className="num">X</th><th className="num">2</th>
-              <th className="num">Over 2.5</th><th className="num">Goal</th><th>Formazioni</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((f) => (
-              <tr key={f.fixture_id}>
-                <td>{dt(f.kickoff)}</td>
-                <td>{f.home} - {f.away}</td>
-                <td className="muted">{f.competition}</td>
-                {[f.p_home, f.p_draw, f.p_away, f.p_over25, f.p_btts].map((p, i) => (
-                  <td className="num" key={i} title={p == null ? "" : `quota equa ${fair(p)}`}>{pct(p)}</td>
-                ))}
-                <td className="muted">{f.lineup_state === "confirmed" ? "ufficiali" : f.lineup_state === "probable" ? "probabili" : ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          <section className="card">
+            <div className="card-head"><h2>Budget richieste API</h2></div>
+            <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Calendario, risultati, formazioni, statistiche" />
+              <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint="Quote Sisal e Pinnacle, solo nelle 24h prima" />
+              <div className="kv" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                <span>Ultima raccolta</span>
+                <span>{ago(tick)}</span>
+              </div>
+            </div>
+          </section>
+        </aside>
       </div>
-      <p className="note muted">
-        Passa il mouse su una probabilità per la quota equa. Probabilità alte non significano valore: conta il confronto con la quota
-        (EV). Ultima raccolta dati: {d.lastTick ? dt(d.lastTick) : "–"}.
-      </p>
-      {notes.length > 0 && <p className="note muted">{notes.join(" · ")}</p>}
-    </main>
+    </>
+  );
+}
+
+function Kpi({ icon: Icon, label, value }: { icon: typeof Layers; label: string; value: number }) {
+  return (
+    <div className="card kpi">
+      <span className="kpi-icon"><Icon size={18} aria-hidden="true" /></span>
+      <span>
+        <small>{label}</small>
+        <b className="num">{value.toLocaleString("it-IT")}</b>
+      </span>
+    </div>
+  );
+}
+
+function Mini({ label, value, tone }: { label: string; value: string; tone?: "pos" | "neg" }) {
+  return (
+    <div>
+      <span className="note">{label}</span>
+      <b className={`num ${tone ?? ""}`} style={{ display: "block", fontSize: 18 }}>{value}</b>
+    </div>
+  );
+}
+
+function pickFeatured(fx: FixtureRow[], best?: { legList: Leg[] }) {
+  if (best) {
+    const [h, a] = best.legList[0].match.split(" - ");
+    const f = fx.find((x) => x.home === h && x.away === a);
+    if (f) return f;
+  }
+  return fx.find((f) => f.p_home != null) ?? null;
+}
+
+function DeepPreview({ f }: { f: FixtureRow }) {
+  const mk = parseJSON<ModelMarket[]>(f.markets, []);
+  const get = (g: string, l: string) => mk.find((m) => m.g === g && m.l === l)?.p;
+  const picks: [string, number | undefined][] = [
+    ["Over 2.5", get("Under/Over", "Over 2.5") ?? f.p_over25 ?? undefined],
+    ["Gol", get("Gol/NoGol", "Gol") ?? f.p_btts ?? undefined],
+    ["Multigol 2-4", get("Multigol", "Multigol 2-4")],
+    ["1X", get("Doppia chance", "1X")],
+    ["1 + Over 2.5", get("Combo", "1 + Over 2.5")],
+  ];
+  return (
+    <section className="card" aria-labelledby="deep-title">
+      <div className="card-head">
+        <h2 id="deep-title">Analisi approfondita · {f.home} vs {f.away}</h2>
+        <Link href={`/partita/${encodeURIComponent(f.fixture_id)}`} className="btn btn-ghost btn-sm">
+          Apri analisi completa <ChevronRight size={15} aria-hidden="true" />
+        </Link>
+      </div>
+      <div className="split card-pad" style={{ gap: 24 }}>
+        <div>
+          <h3 className="note" style={{ margin: "0 0 10px" }}>Probabilità 1X2 (modello)</h3>
+          <div className="rings">
+            <Ring value={f.p_home} label={f.home} sub={`quota equa ${fairOdds(f.p_home)}`} color="var(--s1)" />
+            <Ring value={f.p_draw} label="Pareggio" sub={`quota equa ${fairOdds(f.p_draw)}`} color="var(--s2)" />
+            <Ring value={f.p_away} label={f.away} sub={`quota equa ${fairOdds(f.p_away)}`} color="var(--s3)" />
+          </div>
+          {f.xg_home != null && f.xg_away != null && (
+            <p className="note" style={{ textAlign: "center", marginTop: 12 }}>
+              Gol attesi: <span className="num">{f.xg_home.toFixed(2)}</span> – <span className="num">{f.xg_away.toFixed(2)}</span>
+            </p>
+          )}
+        </div>
+        <div>
+          <h3 className="note" style={{ margin: "0 0 10px" }}>Mercati principali (probabilità del modello)</h3>
+          {picks.filter(([, p]) => p != null).map(([l, p]) => <HBar key={l} label={l} p={p!} />)}
+          <div style={{ marginTop: 10 }}><Split1X2 h={f.p_home} d={f.p_draw} a={f.p_away} /></div>
+        </div>
+      </div>
+    </section>
   );
 }

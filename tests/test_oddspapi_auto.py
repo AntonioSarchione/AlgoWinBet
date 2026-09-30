@@ -306,6 +306,23 @@ def test_publish_writes_dashboard_tables_and_prunes():
     run = s.db.execute("SELECT no_bet, n_fixtures FROM pub_runs WHERE id=?", (rid,)).fetchone()
     assert run[1] == len(res.fixtures) and last_publication(s) is not None
     assert s.db.execute("SELECT COUNT(*) FROM pub_slips WHERE run_id=?", (rid,)).fetchone()[0] == len(res.optimizer.slips)
+    xg_h, raw = s.db.execute("SELECT xg_home, markets FROM pub_fixtures WHERE run_id=? LIMIT 1", (rid,)).fetchone()
+    mk = {(m["g"], m["l"]): m["p"] for m in json.loads(raw)}
+    assert xg_h > 0 and abs(mk[("1X2", "1")] + mk[("1X2", "X")] + mk[("1X2", "2")] - 1) < 0.01
+    assert mk[("Combo", "1 + Over 2.5")] <= min(mk[("1X2", "1")], mk[("Under/Over", "Over 2.5")])
+    assert mk[("Multigol", "Multigol 1-3")] >= mk[("Multigol", "Multigol 2-3")]
+
+
+def test_publish_adds_new_columns_to_an_existing_database():
+    from algowinbet.publish import _migrate
+    s = SnapshotStore(":memory:")
+    s.db.execute("CREATE TABLE pub_fixtures(run_id INTEGER, fixture_id TEXT, kickoff TEXT, competition TEXT, home TEXT, away TEXT, "
+                 "p_home REAL, p_draw REAL, p_away REAL, p_over25 REAL, p_btts REAL, lineup_state TEXT, n_quotes INTEGER, "
+                 "PRIMARY KEY(run_id, fixture_id))")
+    _migrate(s)
+    _migrate(s)  # idempotent
+    cols = {r[1] for r in s.db.execute("PRAGMA table_info(pub_fixtures)").fetchall()}
+    assert {"xg_home", "xg_away", "markets"} <= cols
 
 
 def test_should_publish_on_fresh_data_or_stale_publication():
