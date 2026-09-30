@@ -11,6 +11,7 @@ from .providers.oddspapi import SOURCE, OddsPapiClient, OddsPapiError, OddsPapiM
 from .snapshots import BudgetExceeded, SnapshotProvider, SnapshotStore
 
 HIST_SOURCE = "oddspapi-hist"
+MAX_TOURNAMENTS = 5  # /odds-by-tournaments rejects more (400 "Please provide a maximum of 5 tournament IDs"), and that 400 is billed
 
 LINKS_SCHEMA = """CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TEXT, linked_at TEXT,
   PRIMARY KEY(source, ext_id));"""
@@ -56,12 +57,16 @@ class OddsCollector:
                                     (SOURCE,)).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
+    def _chunks(self) -> list[list[str]]:
+        ids = list(map(str, self.tournaments))
+        return [ids[i:i + MAX_TOURNAMENTS] for i in range(0, len(ids), MAX_TOURNAMENTS)]
+
     def snapshot_cost(self) -> int:
-        return len(self.wanted_books)
+        return len(self.wanted_books) * len(self._chunks())
 
     def sync_odds(self) -> CollectStats:
-        """One billable request PER BOOKMAKER, each covering every tracked tournament (the endpoint takes exactly one
-        `bookmaker`: verified live, a list is rejected with 400 INVALID_PARAMETER)."""
+        """One billable request per bookmaker and per block of at most 5 tournaments (the endpoint takes exactly one
+        `bookmaker` and at most 5 `tournamentIds`: both verified live, anything else is a billed 400 INVALID_PARAMETER)."""
         st = CollectStats("odds")
 
         def work():
@@ -70,15 +75,16 @@ class OddsCollector:
             t = self.now()
             calendar = self.provider.list_fixtures(None, t - timedelta(hours=3), t + timedelta(days=10))
             for book in books:
-                env = self.client.get("/odds-by-tournaments", {"tournamentIds": ",".join(map(str, self.tournaments)), "bookmaker": book})
-                raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
-                rows = env["data"] if isinstance(env["data"], list) else [env["data"]]
-                for row in rows:
-                    fx = m.match_fixture(row, calendar)
-                    if fx is None:
-                        continue
-                    self._link(str(row.get("fixtureId")), fx.id)
-                    st.add("quotes", self.store.save_quotes(SOURCE, m.odds(row, fx, env["_fetched_at"]), raw_id))
+                for chunk in self._chunks():
+                    env = self.client.get("/odds-by-tournaments", {"tournamentIds": ",".join(chunk), "bookmaker": book})
+                    raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
+                    rows = env["data"] if isinstance(env["data"], list) else [env["data"]]
+                    for row in rows:
+                        fx = m.match_fixture(row, calendar)
+                        if fx is None:
+                            continue
+                        self._link(str(row.get("fixtureId")), fx.id)
+                        st.add("quotes", self.store.save_quotes(SOURCE, m.odds(row, fx, env["_fetched_at"]), raw_id))
         self._run(st, work)
         return st
 

@@ -217,6 +217,17 @@ def test_prematch_history_saves_price_paths_when_free_and_stops_when_billed():
 
 
 # ------------------------------------------------------------------ tick
+def test_snapshot_splits_tournaments_in_blocks_of_five():
+    store = SnapshotStore(":memory:")
+    routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/participants": (200, PARTICIPANTS), "/odds-by-tournaments": (200, [])}
+    c, t = mk_client(routes, store)
+    col = OddsCollector(c, store, [str(i) for i in range(1, 11)] + ["99"], ["sisal", "pinnacle"], NAMES, now=lambda: NOW)
+    assert col.snapshot_cost() == 6
+    col.sync_odds()
+    sent = [u.split("tournamentIds=")[1].split("&")[0] for u in t.calls if "odds-by-tournaments" in u]
+    assert len(sent) == 6 and max(s.count("%2C") + 1 for s in sent) == 5
+
+
 def test_manual_run_forces_the_snapshot_and_adds_history():
     store = SnapshotStore(":memory:")
     seed_calendar(store)
