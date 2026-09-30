@@ -330,6 +330,29 @@ def cmd_odds_tournaments(a) -> None:
     store.close()
 
 
+def cmd_odds_markets(a) -> None:
+    """Soccer market catalogue, compact (1 request, then cached 7 days and reused by the collector)."""
+    store = SnapshotStore(a.db)
+    c = _odds_client(store)
+    try:
+        rows = c.get("/markets")["data"]
+    except (OddsPapiError, BudgetExceeded) as e:
+        sys.exit(f"errore: {e}")
+    rows = [m for m in rows if str(m.get("sportId", 10)) == "10" and not m.get("playerProp")]
+    print(f"{len(rows)} mercati calcio (senza player props); chiavi: {sorted(rows[0]) if rows else []}")
+    by_type: dict[str, int] = {}
+    for m in rows:
+        by_type[str(m.get("marketType"))] = by_type.get(str(m.get("marketType")), 0) + 1
+    print("per tipo: " + ", ".join(f"{k} {v}" for k, v in sorted(by_type.items(), key=lambda kv: -kv[1])))
+    s = (a.search or "").lower()
+    for m in rows:
+        line = (f"{m.get('marketId')}|{m.get('marketType')}|{m.get('marketName')}|{m.get('period')}|{m.get('handicap')}|"
+                + ";".join(f"{o.get('outcomeId')}={o.get('outcomeName')}" for o in m.get("outcomes") or []))
+        if s in line.lower():
+            print(line)
+    store.close()
+
+
 def _print_stats(st, budget=None) -> None:
     print(f"{st.mode}: {st.requests} richieste, salvati {st.saved or '{}'}" + (f"; budget {budget.remaining()}" if budget else ""))
     for x in st.skipped[:10]:
@@ -637,6 +660,10 @@ def build_parser() -> argparse.ArgumentParser:
     ocommon(ot)
     ot.add_argument("search")
     ot.set_defaults(fn=cmd_odds_tournaments)
+    om = os_.add_parser("markets", help="catalogo mercati calcio (1 richiesta, poi cache 7 giorni)")
+    ocommon(om)
+    om.add_argument("search", nargs="?", default="")
+    om.set_defaults(fn=cmd_odds_markets)
     oc = os_.add_parser("collect", help="quote correnti (1 richiesta per tutti i campionati) o chiusure gratuite")
     ocommon(oc)
     oc.add_argument("--mode", required=True, choices=["odds", "closing"])

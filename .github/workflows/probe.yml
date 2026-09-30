@@ -11,9 +11,9 @@ on:
         options: [odds, goal]
         default: odds
       command:
-        description: "odds: account | tournaments | probe   -   goal: leagues | probe"
+        description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, leagues, probe]
+        options: [account, tournaments, markets, leagues, probe]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
