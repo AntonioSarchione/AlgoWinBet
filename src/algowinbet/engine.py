@@ -16,7 +16,7 @@ from .models import DixonColes
 from .opportunity import FixtureAnalysis, analyze_fixture
 from .optimizer import OptimizerResult, optimize
 from .risk import assign_stakes
-from .state import _dedupe, build_state, history_at
+from .state import _dedupe, build_state, history_at, season_start
 
 
 @dataclass
@@ -50,6 +50,16 @@ class TimelineEntry:
     stale_quotes: bool
     rows: dict[str, dict]  # ref.key -> {p_struct, p_blind, p_final, odds, ev, status}
     notes: list[str]
+
+
+def newcomer_prior(hist, cutoff: datetime, value: float) -> dict[str, tuple[float, float]]:
+    """Clubs with no match before the current season in the stored history (promoted sides, cup-only opponents) start
+    below average instead of at the league average. Only applies when the history does reach back before this season."""
+    start = season_start(cutoff)
+    before = {t for r in hist if r.kickoff < start for t in (r.home, r.away)}
+    if not before or not value:
+        return {}
+    return {t: (value, value) for r in hist if r.kickoff >= start for t in (r.home, r.away) if t not in before}
 
 
 class Engine:
@@ -93,7 +103,7 @@ class Engine:
         if len(hist) < m.min_history:
             return None
         kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2, comp_mu=comp_mu)
-        model = DixonColes(**kw).fit(hist, cutoff)
+        model = DixonColes(**kw).fit(hist, cutoff, prior=newcomer_prior(hist, cutoff, m.newcomer_prior))
         boots = DixonColes.bootstrap(hist, cutoff, m.n_bootstrap, seed=1, **kw) if m.n_bootstrap else []
         return model, boots
 

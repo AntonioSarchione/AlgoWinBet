@@ -13,6 +13,7 @@ class ModelCfg(BaseModel):
     n_bootstrap: int = 0  # >0 = parametric uncertainty by bootstrap (slow); 0 = analytic proxy
     min_history: int = 40
     pooled: bool = True  # one model over all competitions (needed for European cups); False = one model per competition
+    newcomer_prior: float = -0.2  # log-strength prior (attack and defence) for clubs with no match before this season
     history_seasons: int = 2  # results used by the model: current season + this many previous seasons (seasons start 1 July)
     version: str = "dc-poisson-v1"
 

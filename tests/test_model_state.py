@@ -70,3 +70,19 @@ def test_pooled_model_puts_clubs_from_different_leagues_on_one_scale():
     solo_a = DixonColes().fit([r for r in res if r.competition == "League A"], t0 + timedelta(days=400))
     solo_b = DixonColes().fit([r for r in res if r.competition == "League B"], t0 + timedelta(days=400))
     assert abs(np.mean(solo_a.attack) - np.mean(solo_b.attack)) < 0.1  # per-league models see two equal leagues
+
+
+def test_newcomers_start_below_average_not_at_league_average():
+    from datetime import timedelta
+    from algowinbet.domain import MatchResult, utc
+    from algowinbet.engine import newcomer_prior
+    from algowinbet.models.dixon_coles import DixonColes
+    old = [MatchResult(fixture_id=f"o{k}", competition="L", home=f"T{k % 6}", away=f"T{(k + 1) % 6}", kickoff=utc(2025, 9, 1) + timedelta(days=k),
+                       home_goals=1, away_goals=1) for k in range(60)]
+    new = [MatchResult(fixture_id="n1", competition="L", home="Promoted", away="T0", kickoff=utc(2026, 8, 20), home_goals=1, away_goals=1)]
+    cutoff = utc(2026, 9, 30)
+    prior = newcomer_prior(old + new, cutoff, -0.2)
+    assert prior == {"Promoted": (-0.2, -0.2)}
+    with_p = DixonColes().fit(old + new, cutoff, prior=prior)
+    without = DixonColes().fit(old + new, cutoff)
+    assert with_p.expected_goals("T1", "Promoted")[0] > without.expected_goals("T1", "Promoted")[0]

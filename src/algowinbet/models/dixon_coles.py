@@ -44,7 +44,9 @@ class DixonColes:
         self.fitted = False
 
     # ------------------------------------------------------------------ fit
-    def fit(self, results: list[MatchResult], as_of: datetime) -> "DixonColes":
+    def fit(self, results: list[MatchResult], as_of: datetime, prior: dict[str, tuple[float, float]] | None = None) -> "DixonColes":
+        """prior: team -> (attack, defence) centre of the ridge penalty (default 0 = league average). Used for newcomers
+        such as promoted clubs, which would otherwise be shrunk towards an average top-flight side."""
         if len(results) < 10:
             raise ValueError("need at least 10 results to fit")
         names = sorted({r.home for r in results} | {r.away for r in results})
@@ -61,6 +63,11 @@ class DixonColes:
         C = len(comps)
         ci = np.array([cidx[r.competition] if self.comp_mu else 0 for r in results])
 
+        a0, d0 = np.zeros(T), np.zeros(T)
+        for team, (pa, pd) in (prior or {}).items():
+            if team in self.teams:
+                a0[self.teams[team]], d0[self.teams[team]] = pa, pd
+
         def unpack(th):
             return th[:T], th[T : 2 * T], th[2 * T], th[2 * T + 1 :]
 
@@ -75,10 +82,10 @@ class DixonColes:
             ga = np.bincount(hi, rh, T) + np.bincount(ai, ra, T)
             gd = -np.bincount(ai, rh, T) - np.bincount(hi, ra, T)
             gmu = np.bincount(ci, rh + ra, C)
-            grad = np.concatenate([-ga + 2 * self.l2 * a, -gd + 2 * self.l2 * d, [-rh.sum()], -gmu])
-            return -ll + self.l2 * (a @ a + d @ d), grad
+            grad = np.concatenate([-ga + 2 * self.l2 * (a - a0), -gd + 2 * self.l2 * (d - d0), [-rh.sum()], -gmu])
+            return -ll + self.l2 * ((a - a0) @ (a - a0) + (d - d0) @ (d - d0)), grad
 
-        th0 = np.zeros(2 * T + 1 + C)
+        th0 = np.concatenate([a0, d0, np.zeros(1 + C)])
         th0[2 * T] = 0.25
         th0[2 * T + 1 :] = math.log(max((x.mean() + y.mean()) / 2, 0.5))
         res = minimize(nll, th0, jac=True, method="L-BFGS-B")
