@@ -86,6 +86,10 @@ def model_markets(m: np.ndarray) -> list[dict]:
                         ("X2 + Under 3.5", (i <= j) & (tot < 3.5)), ("1X + Over 1.5", (i >= j) & (tot > 1.5)),
                         ("X2 + Over 1.5", (i <= j) & (tot > 1.5)), ("NoGol + Under 2.5", ~gg & (tot < 2.5))):
         out.append({"g": "Combo", "l": label, "p": p(mask)})
+    for h in (-1, 1):
+        adj = i + h
+        out += [{"g": f"Handicap europeo {h:+d}", "l": lab, "p": p(msk)} for lab, msk in (("1", adj > j), ("X", adj == j), ("2", adj < j))]
+    out += [{"g": "Pari/Dispari", "l": "Dispari", "p": p(tot % 2 == 1)}, {"g": "Pari/Dispari", "l": "Pari", "p": p(tot % 2 == 0)}]
     flat = sorted(((float(m[a, b]), a, b) for a in range(min(n, 7)) for b in range(min(n, 7))), reverse=True)[:8]
     out += [{"g": "Risultato esatto", "l": f"{a}-{b}", "p": round(v, 4)} for v, a, b in flat]
     return out

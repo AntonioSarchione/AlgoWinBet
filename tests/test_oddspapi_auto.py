@@ -24,7 +24,7 @@ MARKETS = [{"marketId": 101, "marketName": "1X2", "marketType": "1x2", "period":
             "outcomes": [{"outcomeId": 1010, "outcomeName": "Over"}, {"outcomeId": 1011, "outcomeName": "Under"}]},
            {"marketId": 104, "marketName": "Both Teams To Score", "marketType": "btts", "period": "fulltime", "sportId": 10,
             "outcomes": [{"outcomeId": 104, "outcomeName": "Yes"}, {"outcomeId": 105, "outcomeName": "No"}]},
-           {"marketId": 1200, "marketName": "Corners Over/Under", "marketType": "totals", "handicap": 9.5, "period": "fulltime",
+           {"marketId": 1200, "marketName": "Corners Over/Under", "marketType": "totals-corners", "handicap": 9.5, "period": "fulltime",
             "sportId": 10, "outcomes": [{"outcomeId": 1200, "outcomeName": "Over"}]}]
 BOOKS = [{"slug": "sisal.it", "bookmakerName": "Sisal"}, {"slug": "pinnacle", "bookmakerName": "Pinnacle"},
          {"slug": "snai.it", "bookmakerName": "Snai"}, {"slug": "bet365", "bookmakerName": "bet365"}]
@@ -333,3 +333,52 @@ def test_should_publish_on_fresh_data_or_stale_publication():
     assert should_publish([q], NOW, NOW) and should_publish([], None, NOW)
     assert not should_publish([CollectStats("lineups")], NOW - timedelta(hours=1), NOW)
     assert should_publish([], NOW - timedelta(hours=7), NOW)
+
+
+# Rows copied from the real /markets catalogue (2026-09-30): ids, marketType, outcome names as OddsPapi returns them.
+REAL_MARKETS = [
+    {"marketId": 101902, "marketType": "doublechance", "marketName": "Double Chance Full Time", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 101902, "outcomeName": "1X"}, {"outcomeId": 101903, "outcomeName": "12"}, {"outcomeId": 101904, "outcomeName": "2X"}]},
+    {"marketId": 1060, "marketType": "spreads", "marketName": "Asian Handicap", "period": "fulltime", "handicap": -0.5,
+     "outcomes": [{"outcomeId": 1060, "outcomeName": "1"}, {"outcomeId": 1061, "outcomeName": "2"}]},
+    {"marketId": 1062, "marketType": "spreads", "marketName": "Asian Handicap", "period": "fulltime", "handicap": -0.25,
+     "outcomes": [{"outcomeId": 1062, "outcomeName": "1"}, {"outcomeId": 1063, "outcomeName": "2"}]},
+    {"marketId": 10140, "marketType": "spreads-european", "marketName": "European Handicap", "period": "fulltime", "handicap": -1.0,
+     "outcomes": [{"outcomeId": 10140, "outcomeName": "1"}, {"outcomeId": 10141, "outcomeName": "X"}, {"outcomeId": 10142, "outcomeName": "2"}]},
+    {"marketId": 10284, "marketType": "toscore-team1", "marketName": "Team 1 To Score", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10284, "outcomeName": "Yes"}, {"outcomeId": 10285, "outcomeName": "No"}]},
+    {"marketId": 10312, "marketType": "cleansheet-team1", "marketName": "Team 1 Clean Sheet", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10312, "outcomeName": "Yes"}, {"outcomeId": 10313, "outcomeName": "No"}]},
+    {"marketId": 10336, "marketType": "correctscore", "marketName": "Correct Score Full Time", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10354, "outcomeName": "2:2"}, {"outcomeId": 10347, "outcomeName": "3:1"}]},
+    {"marketId": 101936, "marketType": "winningmargin", "marketName": "Winning Margin Full Time", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 101938, "outcomeName": "Draw"}, {"outcomeId": 101936, "outcomeName": "No Goal"},
+                  {"outcomeId": 101941, "outcomeName": "1 By 3"}, {"outcomeId": 101963, "outcomeName": "1 By 5+"}]},
+    {"marketId": 102053, "marketType": "exactscore", "marketName": "Exact Score Full Time", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 102056, "outcomeName": "3"}, {"outcomeId": 102066, "outcomeName": "3+"}]},
+    {"marketId": 10222, "marketType": "oddeven", "marketName": "Odd Even Full Time", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10222, "outcomeName": "Odd"}, {"outcomeId": 10223, "outcomeName": "Even"}]},
+    {"marketId": 10316, "marketType": "wintonil-team1", "marketName": "Team 1 Win To Nil", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10316, "outcomeName": "Yes"}, {"outcomeId": 10317, "outcomeName": "No"}]},
+    {"marketId": 10208, "marketType": "1x2", "marketName": "First Half Result", "period": "p1", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10208, "outcomeName": "1"}, {"outcomeId": 10209, "outcomeName": "X"}, {"outcomeId": 10210, "outcomeName": "2"}]},
+]
+
+
+def test_mapper_covers_the_real_goal_market_catalogue():
+    from algowinbet.markets import is_supported
+    m = OddsPapiMapper(NAMES, REAL_MARKETS, PARTICIPANTS)
+    fx = Fixture(id="goal:g1", competition="Serie A", home="Genoa", away="Fiorentina", kickoff=utc(2026, 10, 10, 13))
+    mk = {str(r["marketId"]): {"outcomes": {str(o["outcomeId"]): {"players": p(2.0)} for o in r["outcomes"]}} for r in REAL_MARKETS}
+    qs = {(q.market_code, q.selection, q.line) for q in m.odds({"bookmakerOdds": {"sisal.it": {"markets": mk}}}, fx, NOW)}
+    assert {("DOUBLE_CHANCE", "X2", None), ("DOUBLE_CHANCE", "1X", None), ("DOUBLE_CHANCE", "12", None)} <= qs  # "2X" is X2
+    assert ("ASIAN_HANDICAP", "HOME", -0.5) in qs and not any(l == -0.25 for _, _, l in qs)  # quarter lines refund: skipped
+    assert {("EURO_HANDICAP", s, -1.0) for s in ("HOME", "DRAW", "AWAY")} <= qs
+    assert {("TEAM_TOTAL_HOME", "OVER", 0.5), ("TEAM_TOTAL_HOME", "UNDER", 0.5)} <= qs  # to score yes/no
+    assert {("TEAM_TOTAL_AWAY", "UNDER", 0.5), ("TEAM_TOTAL_AWAY", "OVER", 0.5)} <= qs  # home clean sheet yes/no
+    assert {("CORRECT_SCORE", "2-2", None), ("WINNING_MARGIN", "D", None), ("WINNING_MARGIN", "NG", None),
+            ("WINNING_MARGIN", "H3", None), ("WINNING_MARGIN", "H5+", None), ("TOTAL_EXACT", "3+", None),
+            ("ODD_EVEN", "ODD", None), ("WIN_TO_NIL_HOME", "YES", None)} <= qs
+    assert not any(c == "MATCH_1X2" for c, *_ in qs)  # first-half 1X2 is not a full-time market
+    from algowinbet.domain import SelectionRef
+    assert all(is_supported(SelectionRef(market_code=c, selection=s, line=l)) for c, s, l in qs)

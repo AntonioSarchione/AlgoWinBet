@@ -21,7 +21,8 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from ..domain import Fixture, OddsQuote
+from ..domain import Fixture, OddsQuote, SelectionRef
+from ..markets import is_supported
 from ..names import TeamNames, normalize
 from ..snapshots import BudgetGuard, SnapshotStore
 from .goalapi import MappingReport, Transport, parse_dt, urllib_transport
@@ -197,6 +198,19 @@ class OddsPapiMapper:
         return None
 
     # -- markets
+    # OddsPapi v4 marketType -> our market code (full time only). Verified on the real /markets catalogue (2026-09-30).
+    # A fixed line means the market is a special case of a line market (team to score = team over 0.5).
+    TYPE_MAP: dict[str, tuple[str, float | None] | str] = {
+        "1x2": "MATCH_1X2", "bothteamsscore": "BTTS", "doublechance": "DOUBLE_CHANCE", "totals": "TOTAL_GOALS",
+        "teamtotals-team1": "TEAM_TOTAL_HOME", "teamtotals-team2": "TEAM_TOTAL_AWAY", "spreads": "ASIAN_HANDICAP",
+        "spreads-european": "EURO_HANDICAP", "oddeven": "ODD_EVEN", "correctscore": "CORRECT_SCORE",
+        "winningmargin": "WINNING_MARGIN", "exactscore": "TOTAL_EXACT", "exactscore-team1": "TEAM_EXACT_HOME",
+        "exactscore-team2": "TEAM_EXACT_AWAY", "wintonil-team1": "WIN_TO_NIL_HOME", "wintonil-team2": "WIN_TO_NIL_AWAY",
+        "toscore-team1": ("TEAM_TOTAL_HOME", 0.5), "toscore-team2": ("TEAM_TOTAL_AWAY", 0.5),
+        "cleansheet-team1": ("TEAM_TOTAL_AWAY", 0.5), "cleansheet-team2": ("TEAM_TOTAL_HOME", 0.5),
+    }
+    LINE_CODES = {"TOTAL_GOALS", "TEAM_TOTAL_HOME", "TEAM_TOTAL_AWAY", "ASIAN_HANDICAP", "EURO_HANDICAP"}
+
     def _market(self, mid: int) -> tuple[str, float | None] | None:
         """(market_code, line) for full-time goal markets; None for anything else (counted as unmapped)."""
         if mid == 101:
@@ -206,6 +220,18 @@ class OddsPapiMapper:
         m = self.markets.get(mid)
         if not m:
             return None
+        mapped = self.TYPE_MAP.get(str(m.get("marketType") or "").lower())
+        if mapped is not None:
+            if str(m.get("period") or "").lower() not in ("fulltime", "full time", "ft", ""):
+                return None  # halves, corners and cards need models we do not have
+            if isinstance(mapped, tuple):
+                return mapped
+            if mapped in self.LINE_CODES:
+                try:
+                    return mapped, float(m.get("handicap"))
+                except (TypeError, ValueError):
+                    return None
+            return mapped, None
         name = str(m.get("marketName") or "").lower()
         mtype = str(m.get("marketType") or "").lower()
         period = str(m.get("period") or "").lower()
@@ -253,8 +279,40 @@ class OddsPapiMapper:
             if t in ("no", "ng", "nogoal", "no goal"):
                 return "NO"
         elif code == "DOUBLE_CHANCE":
-            return {"1x": "1X", "12": "12", "x2": "X2", "home/draw": "1X", "home/away": "12", "draw/away": "X2"}.get(t)
+            return {"1x": "1X", "12": "12", "x2": "X2", "2x": "X2", "home/draw": "1X", "home/away": "12", "draw/away": "X2"}.get(t)
+        elif code in ("TEAM_TOTAL_HOME", "TEAM_TOTAL_AWAY"):
+            mtype = str(self.markets.get(mid, {}).get("marketType") or "").lower()
+            if mtype.startswith("toscore"):
+                return {"yes": "OVER", "no": "UNDER"}.get(t)
+            if mtype.startswith("cleansheet"):
+                return {"yes": "UNDER", "no": "OVER"}.get(t)
+            return "OVER" if t.startswith("over") else "UNDER" if t.startswith("under") else None
+        elif code in ("EURO_HANDICAP", "ASIAN_HANDICAP"):
+            return {"1": "HOME", "x": "DRAW", "2": "AWAY"}.get(t)
+        elif code == "ODD_EVEN":
+            return {"odd": "ODD", "even": "EVEN"}.get(t)
+        elif code in ("WIN_TO_NIL_HOME", "WIN_TO_NIL_AWAY"):
+            return {"yes": "YES", "no": "NO"}.get(t)
+        elif code == "CORRECT_SCORE":
+            mm = re.fullmatch(r"(\d+)\s*[:-]\s*(\d+)", t)
+            return f"{mm.group(1)}-{mm.group(2)}" if mm else None
+        elif code in ("TOTAL_EXACT", "TEAM_EXACT_HOME", "TEAM_EXACT_AWAY"):
+            return t if re.fullmatch(r"\d+\+?", t) else None
+        elif code == "WINNING_MARGIN":
+            if t in ("draw", "no goal", "draw (incl 0:0)"):
+                return {"draw": "D", "no goal": "NG", "draw (incl 0:0)": "DI"}[t]
+            mm = re.fullmatch(r"([12]) by (\d+\+?)", t)
+            return f"{'H' if mm.group(1) == '1' else 'A'}{mm.group(2)}" if mm else None
         return None
+
+    @staticmethod
+    def _priceable(mk: tuple[str, float | None]) -> bool:
+        """Line markets: only lines the score grid prices without refunds (x.5 totals/Asian, whole European)."""
+        code, line = mk
+        if line is None or code not in OddsPapiMapper.LINE_CODES:
+            return True
+        probe = {"EURO_HANDICAP": "HOME", "ASIAN_HANDICAP": "HOME"}.get(code, "OVER")
+        return is_supported(SelectionRef(market_code=code, selection=probe, line=line))
 
     def odds(self, payload: dict, fixture: Fixture, observed_at: datetime, kind: str = "current") -> list[OddsQuote]:
         """payload: one fixture object with bookmakerOdds{slug:{markets{mid:{outcomes{oid:{players{'0':{price,active,...}}}}}}}}."""
@@ -272,6 +330,9 @@ class OddsPapiMapper:
                     self.report.market(str(self.markets.get(mid, {}).get("marketName") or f"market {mid}"))
                     continue
                 if mdata.get("marketActive") is False:
+                    continue
+                if not self._priceable(mk):
+                    self.report.gap(f"linea non supportata: {mk[0]} {mk[1]}")
                     continue
                 for oid_s, odata in (mdata.get("outcomes") or {}).items():
                     sel = self._selection(mk[0], mid, int(oid_s), fixture)
@@ -296,6 +357,8 @@ class OddsPapiMapper:
                 mk = self._market(int(mid_s))
                 if mk is None:
                     self.report.market(f"market {mid_s}")
+                    continue
+                if not self._priceable(mk):
                     continue
                 for oid_s, odata in (mdata.get("outcomes") or {}).items():
                     sel = self._selection(mk[0], int(mid_s), int(oid_s), fixture)
