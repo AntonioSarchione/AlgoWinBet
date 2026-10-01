@@ -31,6 +31,8 @@ VARIANTS: dict[str, dict] = {
     "campionati": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0},
     "elo-club": {"club_elo_per_100": 0.10},
     "elo-nazionali": {"nation_elo_per_100": 0.15},
+    "elo-nazionali-0.08": {"nation_elo_per_100": 0.08},
+    "elo-nazionali-0.25": {"nation_elo_per_100": 0.25},
     "emivita-180": {"xi_half_life_days": 180.0},
     "emivita-540": {"xi_half_life_days": 540.0},
     "tutto": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0, "club_elo_per_100": 0.10, "nation_elo_per_100": 0.15},
