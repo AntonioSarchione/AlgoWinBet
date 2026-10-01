@@ -11,7 +11,7 @@ import numpy as np
 
 from .config import OptimizerCfg
 from .domain import Opportunity, SelectionRef
-from .markets import joint_probability, probability
+from .markets import UnsupportedMarket, joint_probability, probability
 
 
 def phi(matrix: np.ndarray, a: SelectionRef, b: SelectionRef) -> float:
@@ -26,7 +26,10 @@ def pair_dependence(a: Opportunity, b: Opportunity, matrices: dict[str, np.ndarr
     if a is b:
         return 0.0
     if a.fixture_id == b.fixture_id:
-        return abs(phi(matrices[a.fixture_id], a.ref, b.ref))
+        try:
+            return abs(phi(matrices[a.fixture_id], a.ref, b.ref))
+        except UnsupportedMarket:
+            return 1.0  # no exact joint for this pair (draw no bet, first/last goal): treat it as fully dependent
     if a.competition == b.competition:
         return cfg.same_competition_rho
     return cfg.cross_match_rho

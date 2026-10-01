@@ -116,3 +116,12 @@ def test_draw_no_bet_ev_counts_the_refund():
         assert o.ev == pytest.approx(o.p_final * o.odds - 1)
         assert o.p_final == pytest.approx((1 - void) / o.fair_odds + void / o.odds)  # win given no refund, then refund
         assert o.p_struct == pytest.approx((1 - void) * probability(matrix, o.ref) + void / o.odds)
+
+
+def test_pairs_without_an_exact_joint_count_as_fully_dependent(analysis):
+    from algowinbet.correlation import pair_dependence
+    a = next(iter(analysis.analyses.values()))
+    o = analysis.opportunities[0]
+    dnb = o.model_copy(update={"ref": SelectionRef(market_code="DRAW_NO_BET", selection="HOME"), "fixture_id": a.state.fixture.id})
+    other = o.model_copy(update={"ref": SelectionRef(market_code="MATCH_1X2", selection="AWAY"), "fixture_id": a.state.fixture.id})
+    assert pair_dependence(dnb, other, {a.state.fixture.id: a.matrix}, Config().optimizer) == 1.0
