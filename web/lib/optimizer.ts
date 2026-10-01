@@ -38,6 +38,9 @@ export type OptimizerCfg = {
   cross_match_rho: number;
   same_competition_rho: number;
   include_watch: boolean;
+  include_fair: boolean;
+  multi_bonus: number[];
+  multi_bonus_min_odds: number;
   w_ev: number;
   w_prob: number;
   w_div: number;
@@ -72,6 +75,7 @@ export type Slip<T extends OptOpp = OptOpp> = {
   model_disagreement: number;
   objective: number;
   stake: number;
+  bonus: number; // Sisal multiple bonus on the net winnings (0.04 = +4%), already inside ev / ev_lower
   riskNotes: string[];
 };
 
@@ -86,6 +90,14 @@ function pairDependence(a: OptOpp, b: OptOpp, o: OptimizerCfg): number {
   if (a.fixture_id === b.fixture_id) return 0; // never combined: max_legs_per_fixture = 1 (see header)
   if (a.competition === b.competition) return o.same_competition_rho;
   return o.cross_match_rho;
+}
+
+// Sisal multiple bonus for these legs: share added to the net winnings (0 below 5 legs or with a leg under the minimum odds)
+export function multiBonus(legs: { odds: number }[], o: OptimizerCfg): number {
+  const n = legs.length;
+  const table = o.multi_bonus ?? [];
+  if (n < 5 || !table.length || legs.some((l) => l.odds < o.multi_bonus_min_odds)) return 0;
+  return table[Math.min(n, 4 + table.length) - 5];
 }
 
 function makeSlip<T extends OptOpp>(legs: T[], s: OptSettings, C: Map<string, number>, idx: number[]): Slip<T> {
@@ -110,8 +122,10 @@ function makeSlip<T extends OptOpp>(legs: T[], s: OptSettings, C: Map<string, nu
   for (const l of legs) rel2 += (l.uncertainty / Math.max(l.p_final, 1e-9)) ** 2;
   const rel = Math.sqrt(rel2);
   const pLo = joint * Math.exp(-s.z * rel);
-  const ev = joint * odds - 1;
-  const evLo = pLo * odds - 1;
+  const bonus = multiBonus(legs, o);
+  const payout = 1 + (odds - 1) * (1 + bonus); // what a winning unit returns, bonus on the net winnings included
+  const ev = joint * payout - 1;
+  const evLo = pLo * payout - 1;
   let dis = 0;
   for (const l of legs) dis += l.disagreement;
   dis /= legs.length;
@@ -119,7 +133,7 @@ function makeSlip<T extends OptOpp>(legs: T[], s: OptSettings, C: Map<string, nu
   const obj = o.w_ev * ev + o.w_prob * joint + o.w_div * div - o.w_unc * Math.min(1, rel) - o.w_corr * pen - o.w_disagree * dis;
   return {
     legs: [...legs], total_odds: odds, joint_probability: joint, fair_odds: joint > 0 ? 1 / joint : Infinity, ev, ev_lower: evLo,
-    uncertainty: joint * rel, correlation_penalty: pen, model_disagreement: dis, objective: obj, stake: 0, riskNotes: [],
+    uncertainty: joint * rel, correlation_penalty: pen, model_disagreement: dis, objective: obj, stake: 0, bonus, riskNotes: [],
   };
 }
 
@@ -144,11 +158,11 @@ function overlap(a: Slip, b: Slip): number {
 export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult<T> {
   const o = s.optimizer;
   if (o.max_legs_per_fixture !== 1) throw new Error("optimizer.ts supporta solo una leg per partita (max_legs_per_fixture = 1)");
-  const ok = new Set(["STRONG", "CANDIDATE", ...(o.include_watch ? ["WATCH"] : [])]);
+  const ok = new Set(["STRONG", "CANDIDATE", ...(o.include_watch ? ["WATCH"] : []), ...(o.include_fair ? ["FAIR"] : [])]);
   let elig = opps.filter((x) => ok.has(x.status));
   const reasons: string[] = [];
   if (!elig.length) {
-    reasons.push(`Nessuna opportunità idonea (alta o media) su ${opps.length} con i filtri scelti.`);
+    reasons.push(`Nessuna selezione idonea (con valore${o.include_fair ? " o a quota equa" : ""}) su ${opps.length} con i filtri scelti.`);
     return { slips: [], noBet: true, reasons, eligible: 0 };
   }
   elig = elig.filter((x) => x.p_final >= o.min_leg_probability);
@@ -234,9 +248,8 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
 function rawStake(sl: Slip, r: RiskCfg): number {
   if (r.stake_method === "flat") return r.flat_stake;
   if (r.stake_method === "pct") return r.bankroll * r.pct;
-  const pLow = (sl.ev_lower + 1) / sl.total_odds;
-  const b = sl.total_odds - 1;
-  const f = b > 0 ? (pLow * sl.total_odds - 1) / b : 0;
+  const b = (sl.total_odds - 1) * (1 + sl.bonus); // net winnings per unit, Sisal multiple bonus included
+  const f = b > 0 ? sl.ev_lower / b : 0; // Kelly at the conservative joint probability
   return Math.max(0, f) * r.kelly_fraction * r.bankroll;
 }
 
@@ -268,11 +281,14 @@ export function assignStakes(slips: Slip[], r: RiskCfg): void {
 }
 
 // explain.py explain_slip (the parts the dashboard shows)
-export function explainSlip(sl: Slip, z: number) {
+export function explainSlip(sl: Slip, z: number, minBonusOdds = 1.25) {
   const pos: string[] = [];
   const neg: string[] = [];
   const strong = sl.legs.filter((l) => l.status === "STRONG").length;
   if (sl.ev > 0) pos.push(`EV schedina ${signedPct(sl.ev)} con probabilità congiunta ${pct(sl.joint_probability, 1)}`);
+  if (sl.bonus) pos.push(`bonus multipla Sisal +${pct(sl.bonus)} sulla vincita netta (${sl.legs.length} eventi a quota ≥ ${minBonusOdds.toFixed(2)})`);
+  const fair = sl.legs.filter((l) => l.status === "FAIR").length;
+  if (fair) pos.push(`${fair}/${sl.legs.length} eventi a quota equa: Sisal non trattiene margine su di loro`);
   if (sl.ev_lower > 0) pos.push(`EV positivo anche stimando la probabilità al limite inferiore (${signedPct(sl.ev_lower)})`);
   if (strong) pos.push(`${strong}/${sl.legs.length} eventi con valore alto`);
   if (sl.correlation_penalty < 0.05) pos.push("dipendenza tra gli eventi bassa");
@@ -288,7 +304,7 @@ export function explainSlip(sl: Slip, z: number) {
     positive_factors: pos,
     negative_factors: neg,
     what_would_change_it: [
-      `quota totale di pareggio (EV=0): ${sl.fair_odds.toFixed(2)} (quota attuale ${sl.total_odds.toFixed(2)})`,
+      `quota totale di pareggio (EV=0): ${(1 + (sl.fair_odds - 1) / (1 + sl.bonus)).toFixed(2)} (quota attuale ${sl.total_odds.toFixed(2)}${sl.bonus ? `, bonus +${pct(sl.bonus)} incluso` : ""})`,
       "formazione ufficiale diversa dall'attesa / nuovi infortuni su giocatori chiave (ricalcolo automatico)",
       "movimento di quota > 3% su uno qualsiasi degli eventi",
     ],

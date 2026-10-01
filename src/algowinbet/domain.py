@@ -25,6 +25,7 @@ class OpportunityStatus(str, Enum):
     STRONG = "STRONG"
     CANDIDATE = "CANDIDATE"
     WATCH = "WATCH"
+    FAIR = "FAIR"  # Sisal pays about the fair price (EV near 0) of a likely outcome: a building block for slips
     NEUTRAL = "NEUTRAL"
     AVOID = "AVOID"
     INVALID = "INVALID"
@@ -216,6 +217,7 @@ class Slip(BaseModel):
     model_disagreement: float
     objective: float
     stake: float = 0.0
+    bonus: float = 0.0  # Sisal multiple bonus on the net winnings (0.04 = +4%), already inside ev / ev_lower
     explanation: dict[str, Any] = Field(default_factory=dict)
 
     @property

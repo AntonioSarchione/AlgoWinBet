@@ -59,6 +59,11 @@ def explain_slip(s: Slip, cfg: Config) -> dict[str, Any]:
     strong = sum(1 for l in s.legs if l.status.value == "STRONG")
     if s.ev > 0:
         pos.append(f"EV schedina {s.ev:+.1%} con probabilità congiunta {s.joint_probability:.1%}")
+    if s.bonus:
+        pos.append(f"bonus multipla Sisal +{s.bonus:.0%} sulla vincita netta ({len(s.legs)} eventi a quota ≥ {cfg.optimizer.multi_bonus_min_odds:.2f})")
+    fair = sum(1 for l in s.legs if l.status.value == "FAIR")
+    if fair:
+        pos.append(f"{fair}/{len(s.legs)} eventi a quota equa: Sisal non trattiene margine su di loro")
     if s.ev_lower > 0:
         pos.append(f"EV positivo anche stimando la probabilità al limite inferiore ({s.ev_lower:+.1%})")
     if strong:
@@ -83,12 +88,13 @@ def explain_slip(s: Slip, cfg: Config) -> dict[str, Any]:
         "positive_factors": pos,
         "negative_factors": neg,
         "what_would_change_it": [
-            f"quota totale di pareggio (EV=0): {s.fair_odds:.2f} (quota attuale {s.total_odds:.2f})",
+            f"quota totale di pareggio (EV=0): {1 + (s.fair_odds - 1) / (1 + s.bonus):.2f} (quota attuale {s.total_odds:.2f}"
+            + (f", bonus +{s.bonus:.0%} incluso)" if s.bonus else ")"),
             "formazione ufficiale diversa dall'attesa / nuovi infortuni su giocatori chiave (ricalcolo automatico)",
             "movimento di quota > 3% su una qualsiasi leg",
         ],
         "counterfactual": {
-            "ev_struct_model_only": struct_joint * s.total_odds - 1,
+            "ev_struct_model_only": struct_joint * (1 + (s.total_odds - 1) * (1 + s.bonus)) - 1,
             "joint_probability_low": s.joint_probability * math.exp(-cfg.thresholds.z * (s.uncertainty / max(s.joint_probability, 1e-9))),
         },
         "legs": [explain_leg(l) for l in s.legs],

@@ -22,6 +22,14 @@ class OptimizerResult:
     stats: dict[str, int] = field(default_factory=dict)
 
 
+def multi_bonus(legs: list[Opportunity], o) -> float:
+    """Sisal multiple bonus for these legs: share added to the net winnings (0 below 5 legs or with a leg under the minimum odds)."""
+    n = len(legs)
+    if n < 5 or not o.multi_bonus or any(l.odds < o.multi_bonus_min_odds for l in legs):
+        return 0.0
+    return o.multi_bonus[min(n, 4 + len(o.multi_bonus)) - 5]
+
+
 def make_slip(legs: list[Opportunity], matrices, cfg: Config, C=None, idx=None) -> Slip:
     o = cfg.optimizer
     odds = float(np.prod([l.odds for l in legs]))
@@ -29,13 +37,15 @@ def make_slip(legs: list[Opportunity], matrices, cfg: Config, C=None, idx=None) 
     rel = math.sqrt(sum((l.uncertainty / max(l.p_final, 1e-9)) ** 2 for l in legs))
     unc_abs = joint * rel
     p_lo = joint * math.exp(-cfg.thresholds.z * rel)
-    ev = joint * odds - 1
-    ev_lo = p_lo * odds - 1
+    bonus = multi_bonus(legs, o)
+    payout = 1 + (odds - 1) * (1 + bonus)  # what a winning unit returns, bonus on the net winnings included
+    ev = joint * payout - 1
+    ev_lo = p_lo * payout - 1
     dis = float(np.mean([l.model_disagreement for l in legs]))
     div = len({l.competition for l in legs}) / len(legs)
     obj = (o.w_ev * ev + o.w_prob * joint + o.w_div * div - o.w_unc * min(1.0, rel) - o.w_corr * pen - o.w_disagree * dis)
     return Slip(legs=list(legs), total_odds=odds, joint_probability=joint, fair_odds=1 / joint if joint > 0 else math.inf,
-                ev=ev, ev_lower=ev_lo, uncertainty=unc_abs, correlation_penalty=pen, model_disagreement=dis, objective=obj)
+                ev=ev, ev_lower=ev_lo, uncertainty=unc_abs, correlation_penalty=pen, model_disagreement=dis, objective=obj, bonus=bonus)
 
 
 def violations(s: Slip, cfg: Config) -> list[str]:
@@ -64,14 +74,16 @@ def optimize(opps: list[Opportunity], analyses: dict[str, FixtureAnalysis], cfg:
     ok_status = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE}
     if o.include_watch:
         ok_status.add(OpportunityStatus.WATCH)
+    if o.include_fair:
+        ok_status.add(OpportunityStatus.FAIR)
     stats = {"opportunities": len(opps), "eligible_status": 0, "eligible_leg_probability": 0, "slips_evaluated": 0}
     elig = [x for x in opps if x.status in ok_status]
     stats["eligible_status"] = len(elig)
     reasons: list[str] = []
     if not elig:
         reasons.append(
-            f"Nessuna opportunità con EV ≥ {t.min_ev:.0%}, incertezza ≤ {t.max_uncertainty:.2f} e qualità dati ≥ {t.min_dq_candidate:.2f} "
-            f"su {len(opps)} valutate: quote già coerenti col modello o dati/stime troppo incerti."
+            f"Nessuna selezione con valore o a quota equa (EV ≥ {t.fair_ev:+.0%} contro un prezzo di riferimento, probabilità ≥ "
+            f"{t.min_probability:.0%}, qualità dati ≥ {t.min_dq_candidate:.2f}) su {len(opps)} valutate."
         )
         return OptimizerResult([], True, reasons, stats=stats)
     elig = [x for x in elig if x.p_final >= o.min_leg_probability]

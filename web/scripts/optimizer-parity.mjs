@@ -11,6 +11,8 @@ for (const c of golden.cases) {
   s.optimizer.max_legs = c.max_legs;
   if (c.odds_min) s.optimizer.odds_min = c.odds_min;
   if (c.odds_max) s.optimizer.odds_max = c.odds_max;
+  if (c.min_slip_ev != null) s.optimizer.min_slip_ev = c.min_slip_ev;
+  if (c.multi_bonus_min_odds != null) s.optimizer.multi_bonus_min_odds = c.multi_bonus_min_odds;
   const r = optimize(golden.opportunities, s);
   const problems = [];
   if (r.noBet !== c.no_bet) problems.push(`no_bet ${r.noBet} != ${c.no_bet}`);
@@ -20,7 +22,7 @@ for (const c of golden.cases) {
     if (!g) return;
     const keys = (legs) => legs.map((l) => l.join("|")).sort().join(" + ");
     if (keys(g.legs.map((l) => [l.fixture_id, l.sel_key])) !== keys(e.legs)) problems.push(`schedina ${k + 1}: eventi diversi`);
-    for (const f of ["total_odds", "joint_probability", "ev", "ev_lower", "objective"]) {
+    for (const f of ["total_odds", "joint_probability", "ev", "ev_lower", "objective", "bonus"]) {
       if (!close(g[f], e[f])) problems.push(`schedina ${k + 1}: ${f} ${g[f]} != ${e[f]}`);
     }
     if (Math.abs(g.stake - e.stake) > 0.011) problems.push(`schedina ${k + 1}: stake ${g.stake} != ${e.stake}`);

@@ -9,7 +9,7 @@ import { MatchCell } from "./ui";
 type Key = "match" | "market" | "odds" | "fair_odds" | "p_final" | "p_market" | "ev" | "status";
 type Sort = { key: Key; dir: "asc" | "desc" } | null;
 
-const STATUS_RANK: Record<string, number> = { STRONG: 0, CANDIDATE: 1, WATCH: 2 };
+const STATUS_RANK: Record<string, number> = { STRONG: 0, CANDIDATE: 1, FAIR: 2, WATCH: 3 };
 
 const COLS: { key: Key; label: string; num?: boolean; first: "asc" | "desc" }[] = [
   { key: "match", label: "Partita", first: "asc" },

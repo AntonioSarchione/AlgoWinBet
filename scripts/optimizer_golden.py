@@ -27,6 +27,9 @@ CASES = [
     {"name": "singles", "odds_min": 1.2, "odds_max": 3.0, "max_legs": 1},
     {"name": "narrow-odds", "odds_min": 3.0, "odds_max": 6.0, "max_legs": 4},
     {"name": "long", "odds_min": 8.0, "odds_max": 40.0, "max_legs": 6},
+    # 5+ legs at odds >= 1.25: the Sisal multiple bonus enters ev, ev_lower and the stake
+    {"name": "bonus", "odds_min": 8.0, "odds_max": 60.0, "max_legs": 8, "min_slip_ev": -0.6,
+     "multi_bonus_min_odds": 1.0},
 ]
 
 
@@ -48,7 +51,8 @@ def build() -> dict:
     cfg = Config()
     cfg.ensemble.quote_window_hours = 72
     t = cfg.thresholds
-    t.min_ev, t.max_uncertainty, t.min_dq_candidate, t.min_dq_strong, t.min_edge = -0.05, 0.5, 0.0, 0.0, -1.0
+    t.min_ev, t.max_uncertainty, t.min_dq_candidate, t.min_dq_strong, t.min_edge = 0.0, 0.5, 0.0, 0.0, -1.0
+    t.fair_ev = -0.05  # a mix of value (CANDIDATE/STRONG) and fair-price (FAIR) selections
     cfg.optimizer.min_slip_ev = -0.2
     res = Engine(SnapshotProvider(s), cfg).analyze(None, mock.as_of, mock.as_of + timedelta(days=3), mock.as_of)
     out = {"settings": optimizer_settings(cfg), "opportunities": [opp_record(o) for o in res.opportunities], "cases": []}
@@ -57,11 +61,13 @@ def build() -> dict:
         c.optimizer.max_legs = case["max_legs"]
         c.optimizer.odds_min = case["odds_min"] or c.optimizer.odds_min
         c.optimizer.odds_max = case["odds_max"] or c.optimizer.odds_max
+        c.optimizer.min_slip_ev = case.get("min_slip_ev", c.optimizer.min_slip_ev)
+        c.optimizer.multi_bonus_min_odds = case.get("multi_bonus_min_odds", c.optimizer.multi_bonus_min_odds)
         r = optimize(res.opportunities, res.analyses, c)
         assign_stakes(r.slips, c.risk)
         out["cases"].append({**case, "no_bet": r.no_bet, "slips": [
             {"legs": [[l.fixture_id, l.ref.key] for l in sl.legs], "total_odds": sl.total_odds, "joint_probability": sl.joint_probability,
-             "ev": sl.ev, "ev_lower": sl.ev_lower, "objective": sl.objective, "stake": sl.stake} for sl in r.slips]})
+             "ev": sl.ev, "ev_lower": sl.ev_lower, "objective": sl.objective, "stake": sl.stake, "bonus": sl.bonus} for sl in r.slips]})
     return out
 
 

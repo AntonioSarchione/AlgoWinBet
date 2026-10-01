@@ -55,7 +55,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const settings = parseJSON<OptSettings | null>(run.optimizer, null);
   const iso = (t: number) => new Date(t).toISOString().slice(0, 16); // minute precision: equal filters share the data cache
   const filter = { from: iso(now), until: iso(now + hours * 3600_000), comps: [...picked], lmin: lMin, lmax: lMax };
-  const statuses = ["STRONG", "CANDIDATE", ...(settings?.optimizer.include_watch ? ["WATCH"] : [])];
+  const statuses = ["STRONG", "CANDIDATE", ...(settings?.optimizer.include_watch ? ["WATCH"] : []), ...(settings?.optimizer.include_fair ? ["FAIR"] : [])];
   const [fixtures, summary, cands] = await Promise.all([
     runFixtures(run.id),
     oppSummary(run.id, filter),
@@ -81,7 +81,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const statusCounts = parseJSON<Record<string, number>>(run.status_counts, {});
   const nMarkets = Object.values(statusCounts).reduce((a, b) => a + b, 0);
   const reasons = result.reasons;
-  const expl = best && settings ? explainSlip(best, settings.z) : null;
+  const expl = best && settings ? explainSlip(best, settings.z, settings.optimizer.multi_bonus_min_odds ?? 1.25) : null;
   const op = summary.top;
   const nOpp = summary.count;
   const upcoming = fx.slice(0, 6);
@@ -207,7 +207,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                   <div className="hero-stat">
                     <small>Probabilità complessiva</small>
                     <b className="num">{pct(best.joint_probability, 1)}</b>
-                    <span className="note">EV prudente {signed(best.ev_lower)}</span>
+                    <span className="note">EV prudente {signed(best.ev_lower)}{best.bonus ? ` · bonus multipla +${pct(best.bonus)}` : ""}</span>
                   </div>
                 </>
               ) : (

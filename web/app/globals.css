@@ -257,6 +257,7 @@ th.num .th-sort { justify-content: flex-end; }
 .status-STRONG { background: var(--good-soft); color: var(--good); }
 .status-CANDIDATE { background: var(--accent-soft); color: var(--accent); }
 .status-WATCH { background: var(--warn-soft); color: var(--warn); }
+.status-FAIR { background: color-mix(in srgb, var(--s1) 14%, transparent); color: var(--s1); }
 
 /* ---------- lists ---------- */
 .checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

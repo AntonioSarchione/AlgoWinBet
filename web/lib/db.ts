@@ -171,9 +171,9 @@ export const oppSummary = persist(async (runId: number, f: OppFilter, limit = 8)
   const w = oppWhere(runId, f);
   const [n, top] = await Promise.all([
     all<{ n: number }>(`SELECT COUNT(*) AS n FROM pub_opportunities WHERE ${w.where}`, w.args),
-    // best first: status (Alta, Media, Da osservare), then the prudent EV (the EV at the low end of the probability range)
+    // best first: status (Alta, Media, Equa, Da osservare), then the prudent EV (the EV at the low end of the probability range)
     all<OppRow>(
-      `SELECT ${OPP_COLS} FROM pub_opportunities WHERE ${w.where} ORDER BY CASE status WHEN 'STRONG' THEN 0 WHEN 'CANDIDATE' THEN 1 ELSE 2 END, ev_lower DESC LIMIT ${limit}`,
+      `SELECT ${OPP_COLS} FROM pub_opportunities WHERE ${w.where} ORDER BY CASE status WHEN 'STRONG' THEN 0 WHEN 'CANDIDATE' THEN 1 WHEN 'FAIR' THEN 2 ELSE 3 END, ev_lower DESC LIMIT ${limit}`,
       w.args,
     ).then(withMatch),
   ]);

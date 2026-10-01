@@ -17,6 +17,36 @@
    "cross_match_rho": 0.005,
    "same_competition_rho": 0.02,
    "include_watch": false,
+   "include_fair": true,
+   "multi_bonus": [
+    0.04,
+    0.08,
+    0.12,
+    0.17,
+    0.22,
+    0.27,
+    0.32,
+    0.37,
+    0.42,
+    0.48,
+    0.54,
+    0.6,
+    0.67,
+    0.73,
+    0.8,
+    0.87,
+    0.95,
+    1.03,
+    1.11,
+    1.19,
+    1.28,
+    1.37,
+    1.46,
+    1.56,
+    1.67,
+    1.77
+   ],
+   "multi_bonus_min_odds": 1.25,
    "w_ev": 1.0,
    "w_prob": 0.5,
    "w_div": 0.1,
@@ -84,7 +114,7 @@
    "uncertainty": 0.02438494140802365,
    "disagreement": 0.10909737621780502,
    "score": 0.05022942285843254,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -100,7 +130,7 @@
    "uncertainty": 0.02435868758814323,
    "disagreement": 0.04843596593991617,
    "score": 0.11852341803487343,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -132,7 +162,7 @@
    "uncertainty": 0.023960223338636243,
    "disagreement": 0.0318251827704884,
    "score": 0.1513909122584179,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -180,7 +210,7 @@
    "uncertainty": 0.024374827381084825,
    "disagreement": 0.054516169478377785,
    "score": 0.13085718071655578,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -196,7 +226,7 @@
    "uncertainty": 0.024350300550034572,
    "disagreement": 0.018999100707936978,
    "score": 0.14489892316620595,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -276,7 +306,7 @@
    "uncertainty": 0.024370149829655647,
    "disagreement": 0.08403962117300257,
    "score": 0.10826774333759759,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -308,7 +338,7 @@
    "uncertainty": 0.024011914573616844,
    "disagreement": 0.05483582677443222,
    "score": 0.15401498925813026,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -356,7 +386,7 @@
    "uncertainty": 0.02436375189265468,
    "disagreement": 0.08210236061225185,
    "score": 0.07079242695993451,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -372,7 +402,7 @@
    "uncertainty": 0.024359671803099156,
    "disagreement": 0.062475305426967775,
    "score": 0.11702861203587403,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -404,7 +434,7 @@
    "uncertainty": 0.024395753629014763,
    "disagreement": 0.10943620801535026,
    "score": 0.06137163850640476,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -484,7 +514,7 @@
    "uncertainty": 0.02428530557880093,
    "disagreement": 0.15813994808503118,
    "score": 0.057319530281343595,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -532,7 +562,7 @@
    "uncertainty": 0.02416993573100207,
    "disagreement": 0.22262671940429657,
    "score": 0.1189358587372322,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -628,7 +658,7 @@
    "uncertainty": 0.02388668076193648,
    "disagreement": 0.030195456552180366,
    "score": 0.16212637033113284,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -660,7 +690,7 @@
    "uncertainty": 0.022388511897974663,
    "disagreement": 0.013914117675717375,
    "score": 0.1885324298334807,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -692,7 +722,7 @@
    "uncertainty": 0.024305002235572984,
    "disagreement": 0.044831636701666455,
    "score": 0.12684050854969428,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -788,7 +818,7 @@
    "uncertainty": 0.024357717867819,
    "disagreement": 0.16523786926850398,
    "score": 0.041764542930182245,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -836,7 +866,7 @@
    "uncertainty": 0.024296712608855072,
    "disagreement": 0.07244631245807742,
    "score": 0.08495791837090502,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -884,7 +914,7 @@
    "uncertainty": 0.024148555031612787,
    "disagreement": 0.07815197338738933,
    "score": 0.10926183387129632,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -980,7 +1010,7 @@
    "uncertainty": 0.023986563662119178,
    "disagreement": 0.00912891571903307,
    "score": 0.1678930098495029,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1012,7 +1042,7 @@
    "uncertainty": 0.0227073478838284,
    "disagreement": 0.004801761867957333,
    "score": 0.1858510591158089,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1044,7 +1074,7 @@
    "uncertainty": 0.024336501993307925,
    "disagreement": 0.011492873492745859,
    "score": 0.15616155186733677,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1076,7 +1106,7 @@
    "uncertainty": 0.024297369903259414,
    "disagreement": 0.10542218981078055,
    "score": 0.053887124578180755,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1156,7 +1186,7 @@
    "uncertainty": 0.024383067597469783,
    "disagreement": 0.09905715561231765,
    "score": 0.05490616065284369,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1188,7 +1218,7 @@
    "uncertainty": 0.024078472402984757,
    "disagreement": 0.06282094754132439,
    "score": 0.11419039060175251,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1236,7 +1266,7 @@
    "uncertainty": 0.024343412900288533,
    "disagreement": 0.10596636734300291,
    "score": 0.09205068660574098,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1252,7 +1282,7 @@
    "uncertainty": 0.02437244411624615,
    "disagreement": 0.07854835413808581,
    "score": 0.07678621567870124,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1284,7 +1314,7 @@
    "uncertainty": 0.024238742752334983,
    "disagreement": 0.08102371177217027,
    "score": 0.11874191334860451,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1332,7 +1362,7 @@
    "uncertainty": 0.024308977456193145,
    "disagreement": 0.026066582545671513,
    "score": 0.13719269054330874,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1364,7 +1394,7 @@
    "uncertainty": 0.023763276606723158,
    "disagreement": 0.014583547461823776,
    "score": 0.16424615930368447,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1460,7 +1490,7 @@
    "uncertainty": 0.0243046426958718,
    "disagreement": 0.01725395856359785,
    "score": 0.1533945010710953,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1492,7 +1522,7 @@
    "uncertainty": 0.024391024569368553,
    "disagreement": 0.019945851910448287,
    "score": 0.16432805467207048,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1540,7 +1570,7 @@
    "uncertainty": 0.024107317802796787,
    "disagreement": 0.015352977446043692,
    "score": 0.15935067963266628,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1588,7 +1618,7 @@
    "uncertainty": 0.024331675972967655,
    "disagreement": 0.02212429895197965,
    "score": 0.1475298782607501,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1636,7 +1666,7 @@
    "uncertainty": 0.02436538302075226,
    "disagreement": 0.07424909878329189,
    "score": 0.10378413539024052,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1684,7 +1714,7 @@
    "uncertainty": 0.02428028690971724,
    "disagreement": 0.11589455960779615,
    "score": 0.07897843797845519,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1716,7 +1746,7 @@
    "uncertainty": 0.02366233085804477,
    "disagreement": 0.06794812203929346,
    "score": 0.13237204936657823,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1780,7 +1810,7 @@
    "uncertainty": 0.02433689292343851,
    "disagreement": 0.06853320138431174,
    "score": 0.09546707434902288,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1812,7 +1842,7 @@
    "uncertainty": 0.02439549840306627,
    "disagreement": 0.04083546939979238,
    "score": 0.13409471761031394,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1876,7 +1906,7 @@
    "uncertainty": 0.024302960828091486,
    "disagreement": 0.002527686937016993,
    "score": 0.1586865899337556,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1940,7 +1970,7 @@
    "uncertainty": 0.023765700375864333,
    "disagreement": 0.0020066163589713693,
    "score": 0.1793514473555573,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -1988,7 +2018,7 @@
    "uncertainty": 0.024386444171012635,
    "disagreement": 0.12510110182587525,
    "score": 0.08222818057768759,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -2068,7 +2098,7 @@
    "uncertainty": 0.02416010866940412,
    "disagreement": 0.04955313329808464,
    "score": 0.1264363900913832,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -2116,7 +2146,7 @@
    "uncertainty": 0.024303507559546727,
    "disagreement": 0.061731283007556925,
    "score": 0.10055851572200711,
-   "status": "CANDIDATE",
+   "status": "FAIR",
    "dq_lineup": 0.5
   },
   {
@@ -2172,7 +2202,8 @@
      "ev": -0.011084556731546624,
      "ev_lower": -0.09259022752141255,
      "objective": 0.2337444401460818,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2190,7 +2221,8 @@
      "ev": -0.03474655448315711,
      "ev_lower": -0.11427294620941308,
      "objective": 0.20265113192924564,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2208,7 +2240,8 @@
      "ev": -0.034667979623242084,
      "ev_lower": -0.1145684034547485,
      "objective": 0.2013377676527788,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     }
    ]
   },
@@ -2231,7 +2264,8 @@
      "ev": -0.011084556731546624,
      "ev_lower": -0.09259022752141255,
      "objective": 0.2337444401460818,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2249,7 +2283,8 @@
      "ev": -0.03474655448315711,
      "ev_lower": -0.11427294620941308,
      "objective": 0.20265113192924564,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2267,7 +2302,8 @@
      "ev": -0.034667979623242084,
      "ev_lower": -0.1145684034547485,
      "objective": 0.2013377676527788,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     }
    ]
   },
@@ -2290,7 +2326,8 @@
      "ev": -0.01102277427702425,
      "ev_lower": -0.05744324184995253,
      "objective": 0.4387102356824792,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2304,7 +2341,8 @@
      "ev": -0.01839651915803009,
      "ev_lower": -0.06560455124184283,
      "objective": 0.4312803108288557,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2318,7 +2356,8 @@
      "ev": -0.011919022258387368,
      "ev_lower": -0.05791281137448201,
      "objective": 0.41893964829707026,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     }
    ]
   },
@@ -2345,7 +2384,8 @@
      "ev": -0.0376896249732801,
      "ev_lower": -0.13358576619693563,
      "objective": 0.1081243573092997,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2363,7 +2403,8 @@
      "ev": -0.0392766669596194,
      "ev_lower": -0.13549011101184683,
      "objective": 0.10183578399330445,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     },
     {
      "legs": [
@@ -2377,7 +2418,8 @@
      "ev": -0.02085961951680959,
      "ev_lower": -0.14394485446077254,
      "objective": 0.09682024242890246,
-     "stake": 0.0
+     "stake": 0.0,
+     "bonus": 0.0
     }
    ]
   },
@@ -2388,6 +2430,134 @@
    "max_legs": 6,
    "no_bet": true,
    "slips": []
+  },
+  {
+   "name": "bonus",
+   "odds_min": 8.0,
+   "odds_max": 60.0,
+   "max_legs": 8,
+   "min_slip_ev": -0.6,
+   "multi_bonus_min_odds": 1.0,
+   "no_bet": false,
+   "slips": [
+    {
+     "legs": [
+      [
+       "mock-0-20-05",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-04",
+       "TOTAL_GOALS|UNDER|3.5"
+      ],
+      [
+       "mock-0-20-03",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-0-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-0-20-00",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-03",
+       "TOTAL_GOALS|OVER|1.5"
+      ]
+     ],
+     "total_odds": 8.334939908294999,
+     "joint_probability": 0.08765838314264411,
+     "ev": -0.19221636731061076,
+     "ev_lower": -0.32208195457589095,
+     "objective": -0.30763994693349334,
+     "stake": 0.0,
+     "bonus": 0.12
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-04",
+       "TOTAL_GOALS|UNDER|3.5"
+      ],
+      [
+       "mock-0-20-03",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-0-20-05",
+       "TOTAL_GOALS|OVER|2.5"
+      ],
+      [
+       "mock-1-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-0-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-1-20-00",
+       "TOTAL_GOALS|OVER|1.5"
+      ]
+     ],
+     "total_odds": 8.670174405984,
+     "joint_probability": 0.08321986262094,
+     "ev": -0.20187197379306487,
+     "ev_lower": -0.33096517765524835,
+     "objective": -0.31928849842426327,
+     "stake": 0.0,
+     "bonus": 0.12
+    },
+    {
+     "legs": [
+      [
+       "mock-0-20-03",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-0-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-0-20-00",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-03",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-00",
+       "TOTAL_GOALS|OVER|1.5"
+      ]
+     ],
+     "total_odds": 8.12538951224,
+     "joint_probability": 0.08882082422537621,
+     "ev": -0.20235025004213458,
+     "ev_lower": -0.3306205514067978,
+     "objective": -0.31946057129487176,
+     "stake": 0.0,
+     "bonus": 0.12
+    }
+   ]
   }
  ]
 }

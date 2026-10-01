@@ -56,6 +56,9 @@ class Thresholds(BaseModel):
     # below this probability a selection is never proposed, whatever its EV: long shots (exact scores, 7+ goals) carry the
     # model's largest errors exactly where no sharp price can check it, and the tool is after the slip most likely to win
     min_probability: float = 0.25
+    # "Equa": a likely selection (>= min_probability) priced against a sharp reference whose EV at Sisal is at least fair_ev:
+    # not a bet on its own, but in a slip it costs (almost) no margin, and the Sisal multiple bonus can turn the slip positive
+    fair_ev: float = -0.02
 
 
 class OptimizerCfg(BaseModel):
@@ -75,6 +78,13 @@ class OptimizerCfg(BaseModel):
     cross_match_rho: float = 0.005
     same_competition_rho: float = 0.02
     include_watch: bool = False
+    include_fair: bool = True  # "Equa" selections may enter slips (the slip itself must still clear min_slip_ev)
+    # Sisal "Bonus Multipla": +x% on the net winnings of a multiple with >= 5 selections, each at odds >= 1.25
+    # (5 -> 4%, 6 -> 8%, ... 30 -> 177%), index 0 = 5 selections
+    multi_bonus: list[float] = Field(default_factory=lambda: [
+        0.04, 0.08, 0.12, 0.17, 0.22, 0.27, 0.32, 0.37, 0.42, 0.48, 0.54, 0.60, 0.67, 0.73, 0.80, 0.87, 0.95, 1.03, 1.11, 1.19,
+        1.28, 1.37, 1.46, 1.56, 1.67, 1.77])
+    multi_bonus_min_odds: float = 1.25
     w_ev: float = 1.0
     w_prob: float = 0.5
     w_div: float = 0.1

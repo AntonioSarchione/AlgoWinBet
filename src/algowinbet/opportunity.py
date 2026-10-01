@@ -56,7 +56,12 @@ def classify(ev: float, ev_lower: float, edge: float | None, unc: float, dq: flo
         return S.INVALID
     if ev <= t.avoid_ev:
         return S.AVOID
-    if ev < t.min_ev or (p is not None and p < t.min_probability):
+    if p is not None and p < t.min_probability:
+        return S.NEUTRAL
+    if ev < t.min_ev:
+        # no edge, but a likely outcome Sisal prices at (about) the fair odds of a sharp reference is still useful in a slip
+        if has_market and ev >= t.fair_ev and dq >= t.min_dq_candidate and unc <= t.max_uncertainty:
+            return S.FAIR
         return S.NEUTRAL
     # ev >= min_ev from here
     if not has_market or dq < t.min_dq_candidate or unc > t.max_uncertainty:

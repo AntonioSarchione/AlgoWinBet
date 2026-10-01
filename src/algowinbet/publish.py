@@ -45,7 +45,7 @@ EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets
                                        "disagreement": "REAL", "dq_lineup": "REAL"},
                  "pub_slips": {"horizon_h": "INTEGER", "max_legs": "INTEGER"},
                  "pub_runs": {"optimizer": "TEXT"}}
-SHOWN = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.WATCH}
+SHOWN = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.FAIR, OpportunityStatus.WATCH}
 
 
 def live_config(cfg: Config | None = None) -> Config:

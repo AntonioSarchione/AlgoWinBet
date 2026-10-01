@@ -12,9 +12,14 @@ from algowinbet.risk import assign_stakes
 
 
 def test_efficient_market_yields_no_bet_by_default(analysis):
-    # mock books price from the true rates: nothing to find, so the engine must abstain
-    assert analysis.optimizer.no_bet
-    assert analysis.optimizer.reasons
+    # mock books price from the true rates: no single edge to find, so on value bets alone the engine abstains. With
+    # "Equa" selections (about the fair price) and the Sisal multiple bonus, slips may appear, but never below EV 0.
+    cfg = Config()
+    cfg.optimizer.multi_bonus, cfg.optimizer.include_fair = [], False
+    res = optimize(analysis.opportunities, analysis.analyses, cfg)
+    assert res.no_bet and res.reasons
+    for s in analysis.optimizer.slips:
+        assert s.ev >= cfg.optimizer.min_slip_ev and all(l.status.value in ("FAIR", "STRONG", "CANDIDATE") for l in s.legs)
 
 
 def test_opportunity_fields_are_consistent(analysis):

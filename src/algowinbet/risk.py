@@ -11,9 +11,8 @@ def raw_stake(s: Slip, r: RiskCfg) -> float:
         return r.flat_stake
     if r.stake_method == "pct":
         return r.bankroll * r.pct
-    p_low = (s.ev_lower + 1) / s.total_odds  # conservative joint probability
-    b = s.total_odds - 1
-    f = (p_low * s.total_odds - 1) / b if b > 0 else 0.0
+    b = (s.total_odds - 1) * (1 + s.bonus)  # net winnings per unit, Sisal multiple bonus included
+    f = s.ev_lower / b if b > 0 else 0.0  # Kelly at the conservative joint probability: (p_low * (1 + b) - 1) / b
     return max(0.0, f) * r.kelly_fraction * r.bankroll
 
 

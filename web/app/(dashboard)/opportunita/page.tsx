@@ -12,6 +12,7 @@ const STATUSES = [
   { v: "", l: "Tutte" },
   { v: "STRONG", l: "Alta" },
   { v: "CANDIDATE", l: "Media" },
+  { v: "FAIR", l: "Equa" },
   { v: "WATCH", l: "Da osservare" },
 ];
 
