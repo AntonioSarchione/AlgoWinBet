@@ -29,7 +29,7 @@ from .config import Config
 from .domain import SelectionRef
 from .engine import Engine
 from .markets import probability
-from .meta import FAMILY_SELECTIONS, MIN_N, Pool, describe, fit_all, fit_pool
+from .meta import FAMILY_SELECTIONS, MIN_N, OWN_ONLY, Pool, describe, fit_all, fit_pool
 from .modeleval import _Frozen, group_of
 from .pricing import devig
 
@@ -138,7 +138,7 @@ def _nested_meta(samples: list[dict], min_n: int = MIN_N) -> None:
             for kind in ("pool", "calib"):
                 for g in sorted({s["group"] for s in fn}):
                     rows = [s for s in fp if s["group"] == g and (kind == "calib" or "market" in s)]
-                    if len(rows) < min_n:
+                    if len(rows) < min_n and g not in OWN_ONLY:
                         rows = [s for s in fp if kind == "calib" or "market" in s]
                     if len(rows) < min_n:
                         continue

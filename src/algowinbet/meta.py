@@ -6,7 +6,9 @@ For a market family (1X2, Over/Under 2.5, Gol/NoGol) the final probabilities are
 
   a, b ... the weight of the model and of the market price (sharp reference, margin removed). a + b above 1 sharpens the
            forecast, below 1 flattens it: the pool is also the calibration step.
-  c_i .... a fixed lean per outcome (e.g. draws the Poisson model underrates).
+  c_i .... a fixed lean per outcome (e.g. draws the Poisson model underrates). Only without a market price: with one,
+           the lean learned against results (draws +12% on the leagues) did not survive the out-of-sample value test
+           (negative CLV on 277 bets), so the pool with the market keeps c = 0.
 
 Without a market price the same form with b = 0 calibrates the model alone. Parameters are fitted by maximum likelihood
 on the walk-forward replay of finished matches (quality.py), with a weak pull toward a prior (mostly market), per group
@@ -30,6 +32,9 @@ FAMILY_SELECTIONS = {
     "U/O 2.5": [("TOTAL_GOALS", "OVER", 2.5), ("TOTAL_GOALS", "UNDER", 2.5)],
     "Gol/NoGol": [("BTTS", "YES", None), ("BTTS", "NO", None)],
 }
+# national teams are priced by a different model (Elo prior, international history): the club fit made them worse in the
+# replay (1X2 log loss 0.876 -> 0.886 on 34 matches), so they use only a fit of their own
+OWN_ONLY = {"nazionali"}
 MIN_N = 300  # matches needed to fit a group of its own (else the fit on every group is used)
 PRIOR = {"pool": (0.25, 0.75), "calib": (1.0, 0.0)}  # (a, b) the fit is pulled toward: mostly market / the model as is
 STRENGTH = 4.0  # prior weight, in matches: negligible with hundreds of matches, decisive with a handful
@@ -90,6 +95,7 @@ def fit_pool(pm: np.ndarray, pk: np.ndarray | None, y: np.ndarray, kind: str = "
     lk = np.log(np.clip(pk, EPS, 1.0)) if pk is not None else np.zeros_like(lm)
     a0, b0 = PRIOR[kind]
     use_b = kind == "pool"
+    use_c = kind != "pool"  # see the module docstring: no per-outcome lean on top of the market price
     use_d = x is not None
     xx = x if use_d else np.zeros_like(lm)
     nb = 2 if use_b else 1
@@ -97,7 +103,7 @@ def fit_pool(pm: np.ndarray, pk: np.ndarray | None, y: np.ndarray, kind: str = "
     def unpack(t):
         a = t[0]
         b = t[1] if use_b else 0.0
-        c = np.concatenate([[0.0], t[nb:nb + k - 1]])
+        c = np.concatenate([[0.0], t[nb:nb + k - 1]]) if use_c else np.zeros(k)
         d = t[-1] if use_d else 0.0
         return a, b, c, d
 
@@ -109,7 +115,7 @@ def fit_pool(pm: np.ndarray, pk: np.ndarray | None, y: np.ndarray, kind: str = "
         pen = (a - a0) ** 2 + ((b - b0) ** 2 if use_b else 0.0) + float(np.sum(c ** 2)) + d ** 2
         return float(-logp[np.arange(n), y].sum() + STRENGTH * pen)
 
-    t0 = np.array([a0] + ([b0] if use_b else []) + [0.0] * (k - 1) + ([0.0] if use_d else []))
+    t0 = np.array([a0] + ([b0] if use_b else []) + [0.0] * ((k - 1) if use_c else 0) + ([0.0] if use_d else []))
     r = minimize(nll, t0, method="BFGS")
     a, b, c, d = unpack(r.x)
     return Pool(a=float(a), b=float(b), c=[float(v) for v in c], n=int(n), kind=kind, d=float(d))
@@ -152,7 +158,10 @@ class MetaSet:
         return bool(self.params)
 
     def pick(self, group: str, fam: str, kind: str) -> Pool | None:
-        return self.params.get(f"{group}|{fam}|{kind}") or self.params.get(f"tutte|{fam}|{kind}")
+        own = self.params.get(f"{group}|{fam}|{kind}")
+        if own is not None or group in OWN_ONLY:
+            return own
+        return self.params.get(f"tutte|{fam}|{kind}")
 
 
 def save_meta(store, params: dict[str, dict], start: datetime, end: datetime, model_version: str) -> int:

@@ -23,9 +23,9 @@ def _synthetic(n, a, b, c, seed=1):
 
 
 def test_pool_fit_recovers_the_true_blend():
-    pm, pk, y = _synthetic(20000, 0.3, 0.9, [0.0, 0.15, 0.0])
+    pm, pk, y = _synthetic(20000, 0.3, 0.9, [0.0, 0.0, 0.0])
     p = fit_pool(pm, pk, y, "pool")
-    assert abs(p.a - 0.3) < 0.15 and abs(p.b - 0.9) < 0.15 and abs(p.c[1] - 0.15) < 0.06
+    assert abs(p.a - 0.3) < 0.15 and abs(p.b - 0.9) < 0.15 and p.c == [0.0, 0.0, 0.0]  # no lean on top of the market
     out = p.apply(pm[0], pk[0])
     assert abs(sum(out) - 1) < 1e-9 and min(out) > 0
 
@@ -41,6 +41,14 @@ def test_calibration_only_pool_ignores_the_market():
     p = fit_pool(pm, None, y, "calib")
     assert p.kind == "calib" and p.b == 0.0 and p.a > 1.15
     assert p.apply([0.5, 0.3, 0.2])[0] > 0.5
+    pm, _, y = _synthetic(5000, 1.0, 0.0, [0.0, 0.3, 0.0])  # model-only fit keeps a lean: draws underrated
+    assert fit_pool(pm, None, y, "calib").c[1] > 0.15
+
+
+def test_national_teams_never_borrow_the_club_fit():
+    calib = {"a": 0.5, "b": 0.0, "c": [0.0, 0.0, 0.0], "n": 900, "kind": "calib", "d": 0.0}
+    m = MetaSet({"tutte|1X2|calib": calib})
+    assert m.pick("coppe", "1X2", "calib") is not None and m.pick("nazionali", "1X2", "calib") is None
 
 
 def test_family_key_and_group():
