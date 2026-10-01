@@ -12,7 +12,11 @@
     {"name": "UEFA Europa League", "goal": "cmr77dw3900f6rx06tuqwft2d", "oddspapi": 679},
     {"name": "UEFA Nations League", "goal": "cmr77dw4800fgrx06rwmig2h8", "oddspapi": 23755}
   ],
-  "bookmakers": ["sisal", "pinnacle"],
+  "_plan": "Fotografie solo Sisal (2 richieste conteggiate ciascuna): giornaliera, prima degli slot affollati, refresh nei giorni pieni; obiettivo 200 al mese + 5 aggiornamenti manuali. Storico Sisal+Pinnacle con richieste libere.",
+  "bookmakers": ["sisal"],
+  "history_bookmakers": ["sisal", "pinnacle"],
+  "oddspapi_plan_monthly": 200,
+  "manual_monthly": 5,
   "goal_daily_limit": 1000,
   "goal_reserve": 50,
   "oddspapi_monthly_limit": 250,

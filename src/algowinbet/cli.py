@@ -456,14 +456,14 @@ def cmd_collect_auto(a) -> None:
         goal = GoalCollector(gc, store, cfg.goal_leagues, names)
     if cfg.oddspapi_tournaments and (os.environ.get("ODDSPAPI_API_KEY") or os.environ.get("ODDSPAPI_KEY")):
         oc = OddsPapiClient(store=store, budget=BudgetGuard(store, "oddspapi", monthly=cfg.oddspapi_monthly_limit, reserve=cfg.oddspapi_reserve))
-        odds = OddsCollector(oc, store, cfg.oddspapi_tournaments, cfg.bookmakers, names)
+        odds = OddsCollector(oc, store, cfg.oddspapi_tournaments, cfg.bookmakers, names, history_books=cfg.history_bookmakers)
     t0 = time.monotonic()
 
     def show(st):
         _print_stats(st)
         print(f"  ({time.monotonic() - t0:.0f}s dall'inizio)", flush=True)
     try:
-        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, force_odds=a.force_odds, history=a.history)
+        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history)
         if not results:
             print("tick: niente da fare")
         from .autorun import should_publish
@@ -757,8 +757,9 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--max-seconds", type=float, default=360, help="nessun nuovo passo dopo N secondi (il job CI ha un timeout)")
     ca.add_argument("--no-publish", dest="publish", action="store_false", help="non rifare l'analisi per la dashboard")
     ca.add_argument("--force-publish", action="store_true", help="rifai l'analisi per la dashboard anche senza dati nuovi")
-    ca.add_argument("--force-odds", action="store_true", help="fotografia quote adesso (1 richiesta per bookmaker, sempre entro il budget)")
-    ca.add_argument("--history", action="store_true", help="storico prezzi /historical-odds delle partite future (verifica che sia gratuito)")
+    ca.add_argument("--manual", action="store_true",
+                    help="aggiornamento manuale: fotografia Sisal adesso (richieste conteggiate, massimo manual_monthly al mese) + storico gratuito")
+    ca.add_argument("--history", action="store_true", help="storico prezzi gratuito /historical-odds di tutte le partite future")
     ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")

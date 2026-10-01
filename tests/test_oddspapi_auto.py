@@ -205,6 +205,8 @@ def test_prematch_history_saves_thinned_price_paths_and_syncs_the_budget():
     assert sum("historical-odds" in u for u in t.calls) == 2 and st.saved["quotes"] == 4 and not st.skipped
     assert {r[0] for r in store.db.execute("SELECT kind FROM quotes WHERE observed_at < '2026-10-10T09'").fetchall()} == {"current"}
     assert "/account" in t.calls[-1] and c.budget.used()[1] == 7  # provider counter synced after the free calls
+    col.sync_prematch_history()  # a newer path replaces the older payload of the same fixture
+    assert store.db.execute("SELECT COUNT(*) FROM raw_requests WHERE endpoint='/historical-odds'").fetchone()[0] == 2
 
 
 def test_thin_history_keeps_opening_checkpoints_and_latest():
@@ -230,39 +232,92 @@ def test_snapshot_splits_tournaments_in_blocks_of_five():
     assert len(sent) == 6 and max(s.count("%2C") + 1 for s in sent) == 5
 
 
-def test_manual_run_forces_the_snapshot_and_adds_history():
+def test_manual_refresh_is_capped_per_month_and_never_repeated_within_minutes():
+    from algowinbet.autorun import MANUAL_REFRESHES
     store = SnapshotStore(":memory:")
     seed_calendar(store)
     cfg = AutoConfig(oddspapi_tournaments=["17"])
     t = utc(2026, 10, 10, 9)
-    assert plan_tick(store, cfg, t, t - timedelta(hours=1)) == ["closing"]
-    assert plan_tick(store, cfg, t, t - timedelta(hours=1), force_odds=True, history=True) == ["odds", "history", "closing"]
+    assert plan_tick(store, cfg, t, t - timedelta(hours=1)) == ["closing"]  # daily snapshot already taken today
+    assert plan_tick(store, cfg, t, t - timedelta(hours=1), manual=True) == ["odds", "history", "closing"]
+    assert plan_tick(store, cfg, t, t - timedelta(minutes=5), manual=True) == ["history", "closing"]  # double click
+    store.add_usage(MANUAL_REFRESHES, "M2026-10", 5)
+    assert plan_tick(store, cfg, t, t - timedelta(hours=1), manual=True) == ["history", "closing"]  # 5/5 used: free history only
+    assert plan_tick(store, cfg, t, t - timedelta(hours=1), history=True) == ["history", "closing"]
 
 
-def test_plan_tick_schedules_by_staleness_and_kickoff_slots():
+def test_manual_refresh_is_counted_apart_from_the_automatic_plan():
+    from algowinbet.autorun import MANUAL_REQUESTS, manual_used, odds_allowed_today
     store = SnapshotStore(":memory:")
     seed_calendar(store)
+    routes = {"/markets": (200, MARKETS), "/bookmakers": (200, BOOKS), "/participants": (200, PARTICIPANTS),
+              "/odds-by-tournaments": lambda q: (200, [fixture_odds(only=q["bookmaker"])]), "/account": _counter_account([0]),
+              "/historical-odds": (200, {"bookmakers": {}})}
+    t = utc(2026, 10, 10, 9)
+    c, sent = mk_client(routes, store, now=t)
+    cfg = AutoConfig(oddspapi_tournaments=["17"])
+    col = OddsCollector(c, store, ["17"], ["sisal"], NAMES, now=lambda: t, history_books=["sisal", "pinnacle"])
+    res = run_tick(store, cfg, None, col, now=lambda: t, manual=True)
+    assert [r.mode for r in res] == ["odds", "history", "closing"]
+    assert sum("odds-by-tournaments" in u for u in sent.calls) == 1  # Sisal only
+    assert all("bookmakers=sisal.it%2Cpinnacle" in u for u in sent.calls if "historical-odds" in u)
+    assert manual_used(store, t) == 1 and store.usage(MANUAL_REQUESTS, "M2026-10") == res[0].requests > 0
+    store.add_usage("oddspapi", "M2026-10", 150)
+    store.add_usage(MANUAL_REQUESTS, "M2026-10", 150)
+    assert odds_allowed_today(store, cfg, t, 2)  # manual requests do not eat the automatic plan
+
+
+def test_plan_tick_schedules_daily_crowded_slots_and_busy_day_refreshes():
+    store = SnapshotStore(":memory:")
+    seed_calendar(store)  # Genoa-Fiorentina 13:00, Inter-Parma 16:00 on 10/10
     cfg = AutoConfig(goal_leagues=["L"], oddspapi_tournaments=["17"])
     assert plan_tick(store, cfg, NOW, None) == ["fixtures", "results", "stats", "lineups", "backfill", "odds", "closing"]
     store.mark_job("backfill:goal:L", NOW)
     store.put_raw("goal-api", "/leagues/L/fixtures", {"from": "x"}, 200, b"{}", NOW - timedelta(hours=2))
     store.put_raw("goal-api", "/leagues/L/results", {"from": "x"}, 200, b"{}", NOW - timedelta(hours=2))
-    t = utc(2026, 10, 10, 12, 10)  # 50 min before Genoa-Fiorentina: pre-kickoff slot
-    assert plan_tick(store, cfg, t, t - timedelta(hours=3)) == ["lineups", "odds", "closing"]
-    assert plan_tick(store, cfg, t, t - timedelta(minutes=20)) == ["lineups", "closing"]  # slot already covered
-    assert plan_tick(store, cfg, utc(2026, 10, 10, 9), utc(2026, 10, 10, 1)) == ["lineups", "closing"]  # daily done, no slot
+    t = utc(2026, 10, 10, 12, 10)  # 50 min before Genoa-Fiorentina, alone in its slot
+    assert plan_tick(store, cfg, t, t - timedelta(hours=3)) == ["lineups", "closing"]  # daily done, slot not crowded
+    crowded = AutoConfig(goal_leagues=["L"], oddspapi_tournaments=["17"], crowded_slot=1)
+    assert plan_tick(store, crowded, t, t - timedelta(hours=3)) == ["lineups", "odds", "closing"]
+    assert plan_tick(store, crowded, t, t - timedelta(minutes=20)) == ["lineups", "closing"]  # slot already covered
+    assert plan_tick(store, cfg, utc(2026, 10, 10, 9), utc(2026, 10, 9, 22)) == ["lineups", "odds", "closing"]  # first of the day
+    busy = AutoConfig(goal_leagues=["L"], oddspapi_tournaments=["17"], busy_day=2)
+    nine = utc(2026, 10, 10, 9)
+    assert plan_tick(store, busy, nine, utc(2026, 10, 10, 3)) == ["lineups", "odds", "closing"]  # refresh 6h after the daily one
+    assert plan_tick(store, busy, nine, utc(2026, 10, 10, 6)) == ["lineups", "closing"]  # too soon
+    store.add_usage("oddspapi", "M2026-10", 70)  # ahead of the month's share (200 * 10/31): optional refreshes stop
+    assert plan_tick(store, busy, nine, utc(2026, 10, 10, 3)) == ["lineups", "closing"]
+
+
+def test_free_history_is_due_at_checkpoints_daily_and_after_the_lineup():
+    from algowinbet.autorun import history_due
+    from algowinbet.oddscollector import LINKS_SCHEMA
+    store = SnapshotStore(":memory:")
+    seed_calendar(store)
+    cfg = AutoConfig(oddspapi_tournaments=["17"])
+    assert history_due(store, cfg, NOW) == []  # nothing linked yet
+    store.db.executescript(LINKS_SCHEMA)
+    store.db.executemany("INSERT INTO fixture_links VALUES('oddspapi', ?, ?, '')", [("op-1", "goal:g1"), ("op-2", "goal:g2")])
+    assert history_due(store, cfg, NOW) == ["goal:g1", "goal:g2"]  # never fetched
+    for ext in ("op-1", "op-2"):
+        store.put_raw("oddspapi", "/historical-odds", {"fixtureId": ext, "bookmakers": "sisal.it,pinnacle"}, 200, b"{}", utc(2026, 10, 10, 11))
+    # g1 (13:00): the 1.5h checkpoint (11:30) passed after the fetch; g2 (16:00): last checkpoint 6h (10:00) already covered
+    assert history_due(store, cfg, NOW) == ["goal:g1"]
+    store.db.execute("INSERT INTO lineups(fixture_id, team, status, observed_at) VALUES('goal:g2', 'Inter', 'confirmed', ?)",
+                     ("2026-10-10T11:20:00+00:00",))
+    assert history_due(store, cfg, NOW) == ["goal:g1", "goal:g2"]  # confirmed XI after the last fetch
 
 
 def test_odds_budget_is_paced_over_the_month():
     from algowinbet.autorun import odds_allowed_today
     store = SnapshotStore(":memory:")
     cfg = AutoConfig(oddspapi_tournaments=["17"], oddspapi_monthly_limit=250, oddspapi_reserve=20)
-    day = utc(2026, 10, 1, 9)  # 31 days left, 230 usable: today may spend up to ~14
+    day = utc(2026, 10, 1, 9)  # 31 days left, plan of 200: today may spend up to ~12
     assert odds_allowed_today(store, cfg, day, 2)
-    store.add_usage("oddspapi", "D2026-10-01", 14)
-    store.add_usage("oddspapi", "M2026-10", 14)
+    store.add_usage("oddspapi", "D2026-10-01", 12)
+    store.add_usage("oddspapi", "M2026-10", 12)
     assert not odds_allowed_today(store, cfg, day, 2)
-    store.add_usage("oddspapi", "M2026-10", 215)  # month almost gone: the reserve is never touched
+    store.add_usage("oddspapi", "M2026-10", 188)  # plan spent: nothing more automatic this month
     assert not odds_allowed_today(store, cfg, utc(2026, 10, 2, 9), 2)
 
 
@@ -282,6 +337,7 @@ def test_tick_with_nothing_due_sends_nothing():
 def test_auto_config_file_loads_saved_ids():
     cfg = AutoConfig.load("configs/collect.json")
     assert cfg.goal_leagues and cfg.oddspapi_monthly_limit == 250 and cfg.prekick_min == (30, 75)
+    assert cfg.bookmakers == ["sisal"] and cfg.history_bookmakers == ["sisal", "pinnacle"] and cfg.manual_monthly == 5
     assert cfg.oddspapi_tournaments == ["23", "17", "35", "34", "8", "238", "37", "7", "679", "23755"] and len(cfg.leagues) == 10
 
 

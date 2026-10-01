@@ -7,8 +7,15 @@ Plan per tick (UTC):
   - GOAL results + stats . if the last successful sync is older than 20h            (~1 + 1 per finished match)
   - GOAL lineups ......... fixtures kicking off within the lineup window, until both XI are confirmed
   - GOAL backfill ........ once per league, one league per tick: multi-season results history (no manual CSV)
-  - OddsPapi snapshot .... daily (next 72h has fixtures, last snapshot >20h ago) and once per kickoff slot
-                           30-75 min before kickoff, i.e. after the official XI: the moment stale prices exist
+  - OddsPapi snapshot .... Sisal only, 1 counted request per block of 5 tournaments (2 for the 10 leagues). Automatic
+                           snapshots aim at `oddspapi_plan_monthly` (200) counted requests a month, paced day by day:
+                             daily ..... first tick of the UTC day with fixtures in the next 7 days (links new fixtures)
+                             pre-kick .. 30-75 min before a crowded kickoff slot (>= crowded_slot matches), after the XI
+                             refresh ... busy days (>= busy_day kickoffs in the next 12h): every refresh_every_h hours, only
+                                         while the month is on track (midday and late afternoon in practice)
+  - OddsPapi manual ...... the dashboard button: snapshot + history now, at most manual_monthly a month, on top of the plan
+  - OddsPapi history ..... free /historical-odds (Sisal + Pinnacle) for linked fixtures: once a day up to 7 days ahead,
+                           then at 24/12/6/3/1.5h before kickoff and right after a confirmed XI. Pinnacle comes only from here
   - OddsPapi closing ..... free /historical-odds after kickoff (closing line for CLV)
 """
 from __future__ import annotations
@@ -22,7 +29,8 @@ from pathlib import Path
 from typing import Callable
 
 from .collector import CollectStats, GoalCollector
-from .oddscollector import OddsCollector
+from .oddscollector import LINKS_SCHEMA, OddsCollector
+from .providers.oddspapi import SOURCE
 from .snapshots import SnapshotProvider, SnapshotStore
 
 
@@ -37,7 +45,8 @@ class League:
 class AutoConfig:
     goal_leagues: list[str] = field(default_factory=list)
     oddspapi_tournaments: list[str] = field(default_factory=list)
-    bookmakers: list[str] = field(default_factory=lambda: ["sisal", "pinnacle"])
+    bookmakers: list[str] = field(default_factory=lambda: ["sisal"])  # counted snapshots
+    history_bookmakers: list[str] = field(default_factory=lambda: ["sisal", "pinnacle"])  # free /historical-odds
     leagues: list[League] = field(default_factory=list)
     goal_daily_limit: int = 1000
     goal_reserve: int = 50
@@ -47,12 +56,21 @@ class AutoConfig:
     fixtures_days: int = 14
     history_seasons: int = 2  # backfill: current season + 2 previous, never more
     prekick_min: tuple[int, int] = (30, 75)
+    oddspapi_plan_monthly: int = 200  # counted requests the automatic snapshots aim at (manual ones come on top)
+    manual_monthly: int = 5           # manual refreshes from the dashboard per month
+    crowded_slot: int = 3             # matches in one kickoff slot that justify a pre-kick snapshot
+    busy_day: int = 6                 # kickoffs in the next 12h that make a busy day
+    refresh_every_h: float = 5
+    history_checkpoints_h: tuple[float, ...] = (24, 12, 6, 3, 1.5)
+    history_days: int = 7             # daily free price path for fixtures up to this far ahead
+    history_per_tick: int = 20
 
     @classmethod
     def load(cls, path: str | Path) -> "AutoConfig":
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        if "prekick_min" in raw:
-            raw["prekick_min"] = tuple(raw["prekick_min"])
+        for k in ("prekick_min", "history_checkpoints_h"):
+            if k in raw:
+                raw[k] = tuple(raw[k])
         cfg = cls(**{k: v for k, v in raw.items() if not k.startswith("_") and k != "leagues"})
         cfg.leagues = [League(**{k: v for k, v in l.items() if not k.startswith("_")}) for l in raw.get("leagues", [])]
         # ids saved once in the config: no lookup request is ever needed at run time
@@ -61,14 +79,88 @@ class AutoConfig:
         return cfg
 
 
+MANUAL_REFRESHES = "manual-refresh"  # api_usage source: refreshes started from the dashboard (a count, not requests)
+MANUAL_REQUESTS = "oddspapi-manual"  # api_usage source: counted OddsPapi requests spent by those refreshes
+
+
+def manual_used(store: SnapshotStore, now: datetime) -> int:
+    return store.usage(MANUAL_REFRESHES, f"M{now:%Y-%m}")
+
+
+def _auto_used(store: SnapshotStore, period: str) -> int:
+    return store.usage("oddspapi", period) - store.usage(MANUAL_REQUESTS, period)
+
+
 def odds_allowed_today(store: SnapshotStore, cfg: AutoConfig, now: datetime, cost: int) -> bool:
-    """Pace the monthly OddsPapi budget: today may spend at most twice the fair share of what is left (match days need more
-    than empty days, and empty days spend nothing because no snapshot is planned without upcoming fixtures)."""
-    used_today = store.usage("oddspapi", f"D{now:%Y-%m-%d}")
-    left = cfg.oddspapi_monthly_limit - cfg.oddspapi_reserve - store.usage("oddspapi", f"M{now:%Y-%m}")
+    """Pace the automatic plan (oddspapi_plan_monthly): today may spend at most twice the fair share of what is left (match
+    days need more than empty days, and empty days spend nothing because no snapshot is planned without fixtures). The hard
+    limit minus the reserve is never crossed, manual refreshes included."""
+    day, month = f"D{now:%Y-%m-%d}", f"M{now:%Y-%m}"
+    used_today = _auto_used(store, day)
+    left = min(cfg.oddspapi_plan_monthly - _auto_used(store, month),
+               cfg.oddspapi_monthly_limit - cfg.oddspapi_reserve - store.usage("oddspapi", month))
     days_left = calendar.monthrange(now.year, now.month)[1] - now.day + 1
     allowance = 2 * (left + used_today) / days_left
     return left >= cost and used_today + cost <= max(allowance, cost)
+
+
+def _on_track(store: SnapshotStore, cfg: AutoConfig, now: datetime, cost: int) -> bool:
+    """Optional snapshots (busy-day refreshes) only while the month has spent no more than its share up to today."""
+    share = cfg.oddspapi_plan_monthly * now.day / calendar.monthrange(now.year, now.month)[1]
+    return _auto_used(store, f"M{now:%Y-%m}") + cost <= share
+
+
+def snapshot_reason(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: datetime | None, cost: int) -> str | None:
+    """Why an automatic snapshot is due now (None = not due). Pre-kick first: it is the moment stale prices exist."""
+    prov = SnapshotProvider(store)
+    lo, hi = cfg.prekick_min
+    day = prov.list_fixtures(None, now, now + timedelta(hours=12))
+    slots: dict[datetime, int] = {}
+    for f in day:
+        k = f.kickoff.replace(minute=f.kickoff.minute // 15 * 15, second=0, microsecond=0)
+        slots[k] = slots.get(k, 0) + 1
+    crowded = [k for k, n in slots.items() if n >= cfg.crowded_slot and timedelta(minutes=lo) <= k - now <= timedelta(minutes=hi)]
+    if crowded and _stale(last_odds, now, timedelta(minutes=hi - lo + 5)):
+        return "pre-kick"
+    if (last_odds is None or last_odds.date() < now.date()) and prov.list_fixtures(None, now, now + timedelta(days=cfg.history_days)):
+        return "daily"
+    if len(day) >= cfg.busy_day and _stale(last_odds, now, timedelta(hours=cfg.refresh_every_h)) and _on_track(store, cfg, now, cost):
+        return "refresh"
+    return None
+
+
+def _history_fetches(store: SnapshotStore) -> dict[str, datetime]:
+    """Last /historical-odds fetch per OddsPapi fixture id."""
+    out: dict[str, datetime] = {}
+    for params, at in store.db.execute("SELECT params, MAX(fetched_at) FROM raw_requests WHERE source='oddspapi' AND "
+                                       "endpoint='/historical-odds' AND status=200 GROUP BY params").fetchall():
+        ext = str(json.loads(params or "{}").get("fixtureId", ""))
+        t = datetime.fromisoformat(at)
+        if ext and (ext not in out or t > out[ext]):
+            out[ext] = t
+    return out
+
+
+def history_due(store: SnapshotStore, cfg: AutoConfig, now: datetime) -> list[str]:
+    """GOAL fixture ids whose free price path is due: never fetched or older than a day (up to history_days ahead), a
+    checkpoint passed since the last fetch, or a confirmed XI stored after it. Nearest kickoff first."""
+    store.db.executescript(LINKS_SCHEMA)
+    upcoming = {f.id: f for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=cfg.history_days))}
+    links = [(e, fid) for e, fid in store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall()
+             if fid in upcoming]
+    if not links:
+        return []
+    fetched = _history_fetches(store)
+    xi = dict(store.db.execute("SELECT fixture_id, MAX(observed_at) FROM lineups WHERE status='confirmed' GROUP BY fixture_id").fetchall())
+    due: list[str] = []
+    for ext, fid in links:
+        f, last = upcoming[fid], fetched.get(ext)
+        passed = [f.kickoff - timedelta(hours=h) for h in cfg.history_checkpoints_h if f.kickoff - timedelta(hours=h) <= now]
+        lineup = xi.get(fid)
+        if fid not in due and (last is None or now - last >= timedelta(hours=24) or (passed and last < max(passed))
+                               or (lineup and last < datetime.fromisoformat(lineup))):
+            due.append(fid)
+    return sorted(due, key=lambda fid: upcoming[fid].kickoff)[:cfg.history_per_tick]
 
 
 def _last_ok(store: SnapshotStore, source: str, endpoint_like: str) -> datetime | None:
@@ -83,9 +175,9 @@ def _stale(last: datetime | None, now: datetime, age: timedelta) -> bool:
 
 
 def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: datetime | None, odds_cost: int | None = None,
-              force_odds: bool = False, history: bool = False) -> list[str]:
-    """Pure decision (no network): which steps this tick should run. force_odds (manual run) takes a snapshot now, still
-    within the monthly BudgetGuard; history adds the /historical-odds price paths of the fixtures not played yet."""
+              manual: bool = False, history: bool = False) -> list[str]:
+    """Pure decision (no network): which steps this tick should run. manual (dashboard button) takes a snapshot now while the
+    month has manual refreshes left, plus the price paths of the next 3 days; history = every upcoming price path."""
     steps: list[str] = []
     if cfg.goal_leagues:
         stale = lambda kind: any(_stale(_last_ok(store, "goal-api", f"/leagues/{lid}/{kind}"), now, timedelta(hours=20)) for lid in cfg.goal_leagues)
@@ -97,14 +189,14 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
             steps.append("backfill")  # one league per tick until every league has its multi-season history
     if cfg.oddspapi_tournaments:
-        upcoming = SnapshotProvider(store).list_fixtures(None, now, now + timedelta(hours=24))  # analysis looks at the last 24h
-        lo, hi = cfg.prekick_min
-        prekick = [f for f in upcoming if timedelta(minutes=lo) <= f.kickoff - now <= timedelta(minutes=hi)]
         cost = odds_cost or len(cfg.bookmakers)
-        due = (upcoming and _stale(last_odds, now, timedelta(hours=20))) or (prekick and _stale(last_odds, now, timedelta(minutes=hi - lo + 5)))
-        if force_odds or (due and odds_allowed_today(store, cfg, now, cost)):
+        if manual:
+            # a second click right after a refresh would only buy the same prices again
+            if manual_used(store, now) < cfg.manual_monthly and _stale(last_odds, now, timedelta(minutes=10)):
+                steps.append("odds")
+        elif snapshot_reason(store, cfg, now, last_odds, cost) and odds_allowed_today(store, cfg, now, cost):
             steps.append("odds")
-        if history:
+        if manual or history or history_due(store, cfg, now):
             steps.append("history")
         steps.append("closing")
     return steps
@@ -113,14 +205,21 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
              max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
-             force_odds: bool = False, history: bool = False) -> list[CollectStats]:
+             manual: bool = False, history: bool = False) -> list[CollectStats]:
     """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
     whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
     t0 = clock()
     steps = plan_tick(store, cfg, t, odds.last_snapshot_at() if odds else None, odds.snapshot_cost() if odds else None,
-                      force_odds=force_odds, history=history)
+                      manual=manual, history=history)
     out: list[CollectStats] = []
+    if manual and odds is not None and "odds" not in steps:
+        st = CollectStats("odds")
+        st.skipped.append(f"aggiornamento manuale senza fotografia: {manual_used(store, t)}/{cfg.manual_monthly} usati questo mese "
+                          "oppure fotografia di meno di 10 minuti fa (lo storico gratuito si aggiorna comunque)")
+        out.append(st)
+        if on_step:
+            on_step(st)
     for s in steps:
         if max_seconds is not None and clock() - t0 > max_seconds:
             skipped = CollectStats(s)
@@ -147,9 +246,20 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
             if st:
                 out.append(st)
         elif s == "odds":
-            out.append(odds.sync_odds())
+            st = odds.sync_odds()
+            if manual and st.requests:
+                store.add_usage(MANUAL_REFRESHES, f"M{t:%Y-%m}", 1)
+                for period in (f"D{t:%Y-%m-%d}", f"M{t:%Y-%m}"):
+                    store.add_usage(MANUAL_REQUESTS, period, st.requests)
+            out.append(st)
         elif s == "history":
-            out.append(odds.sync_prematch_history())
+            left = 600.0 if max_seconds is None else max(30.0, max_seconds - (clock() - t0))
+            if history:
+                out.append(odds.sync_prematch_history(max_seconds=left))
+            elif manual:
+                out.append(odds.sync_prematch_history(days_ahead=3, max_fixtures=40, max_seconds=left))
+            else:
+                out.append(odds.sync_prematch_history(only=history_due(store, cfg, t), max_seconds=left))
         elif s == "closing":
             out.append(odds.sync_closing())
         if on_step and len(out) > before:

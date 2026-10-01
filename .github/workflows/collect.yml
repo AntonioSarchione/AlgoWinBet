@@ -17,12 +17,12 @@ on:
         description: "Ripubblica l'analisi sulla dashboard anche senza dati nuovi"
         type: boolean
         default: false
-      odds:
-        description: "Fotografia quote adesso (2 richieste OddsPapi su 250)"
+      refresh:
+        description: "Aggiornamento manuale: fotografia Sisal (2 richieste conteggiate, massimo 5 al mese) + storico gratuito"
         type: boolean
         default: false
       history:
-        description: "Storico prezzi delle partite future da /historical-odds (verifica che sia gratuito)"
+        description: "Storico prezzi gratuito di tutte le partite future (richieste libere)"
         type: boolean
         default: false
 
@@ -52,6 +52,6 @@ jobs:
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
           FORCE_PUBLISH: ${{ inputs.publish && '--force-publish' || '' }}
-          FORCE_ODDS: ${{ inputs.odds && '--force-odds' || '' }}
+          MANUAL: ${{ inputs.refresh && '--manual' || '' }}
           HISTORY: ${{ inputs.history && '--history --max-seconds 900' || '' }}
-        run: algowinbet collect-auto --config configs/collect.json --db turso $FORCE_PUBLISH $FORCE_ODDS $HISTORY
+        run: algowinbet collect-auto --config configs/collect.json --db turso $FORCE_PUBLISH $MANUAL $HISTORY

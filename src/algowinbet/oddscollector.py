@@ -45,8 +45,11 @@ def thin_history(quotes: list[OddsQuote], kickoff: datetime, now: datetime) -> l
 
 class OddsCollector:
     def __init__(self, client: OddsPapiClient, store: SnapshotStore, tournament_ids: list[str], bookmakers: list[str],
-                 names: TeamNames | None = None, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 names: TeamNames | None = None, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 history_books: list[str] | None = None):
+        """bookmakers: counted snapshots (one request each per block of tournaments); history_books: free /historical-odds."""
         self.client, self.store, self.tournaments, self.wanted_books, self.now = client, store, tournament_ids, bookmakers, now
+        self.history_books = history_books or bookmakers
         self.names = names or TeamNames()
         self.provider = SnapshotProvider(store)
         store.db.executescript(LINKS_SCHEMA)
@@ -114,22 +117,39 @@ class OddsCollector:
         self._run(st, work)
         return st
 
+    def _drop_older_paths(self, raw_id: int) -> None:
+        """A newer pre-kickoff price path contains every point of the older ones for the same fixture: keep only the newest
+        raw payload (they are the biggest blobs in the database). Closing paths, fetched after kickoff, are never touched."""
+        db = self.store.db
+        params, fetched = db.execute("SELECT params, fetched_at FROM raw_requests WHERE id=?", (raw_id,)).fetchone()
+        old = db.execute("SELECT id, hash FROM raw_requests WHERE source=? AND endpoint='/historical-odds' AND params=? AND id < ? "
+                         "AND fetched_at <= ?", (SOURCE, params, raw_id, fetched)).fetchall()
+        if not old:
+            return
+        db.executemany("DELETE FROM raw_requests WHERE id=?", [(i,) for i, _ in old])
+        db.executemany("DELETE FROM blobs WHERE hash=? AND NOT EXISTS (SELECT 1 FROM raw_requests WHERE hash=?)", [(h, h) for _, h in old])
+        db.commit()
+
     def sync_prematch_history(self, days_ahead: int = 10, max_fixtures: int = 80, max_seconds: float = 600,
-                              clock: Callable[[], float] = time.monotonic) -> CollectStats:
+                              clock: Callable[[], float] = time.monotonic, only: list[str] | None = None) -> CollectStats:
         """Free /historical-odds (verified live on 2026-09-30: the provider's request counter did not move) for linked fixtures
-        NOT played yet, nearest kickoff first: the price path up to now, thinned to CHECKPOINTS. Afterwards one free /account
-        read syncs the local budget with the provider's counter, so a future change in billing cannot drain the reserve."""
+        NOT played yet, nearest kickoff first (or just the GOAL fixture ids in `only`): the price path up to now, thinned to
+        CHECKPOINTS. Afterwards one free /account read syncs the local budget with the provider's counter, so a future change
+        in billing cannot drain the reserve."""
         st = CollectStats("history")
 
         def work():
             t, t0 = self.now(), clock()
             upcoming = {f.id: f for f in self.provider.list_fixtures(None, t, t + timedelta(days=days_ahead))}
             links = self.store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall()
-            rows = sorted(((e, fid) for e, fid in links if fid in upcoming), key=lambda r: upcoming[r[1]].kickoff)
+            wanted = set(only) if only is not None else None
+            rows = sorted(((e, fid) for e, fid in links if fid in upcoming and (wanted is None or fid in wanted)),
+                          key=lambda r: upcoming[r[1]].kickoff)
             if not rows:
-                st.skipped.append("nessuna partita futura collegata a OddsPapi (serve prima una fotografia)")
+                if wanted is None:
+                    st.skipped.append("nessuna partita futura collegata a OddsPapi (serve prima una fotografia)")
                 return
-            books = self.client.resolve_bookmakers(self.wanted_books)[:3]
+            books = self.client.resolve_bookmakers(self.history_books)[:3]
             m = self.mapper()
             for i, (ext_id, fid) in enumerate(rows):
                 if i >= max_fixtures or clock() - t0 > max_seconds:
@@ -140,6 +160,7 @@ class OddsCollector:
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
                 quotes = thin_history(m.history(env["data"], fx, closing=False), fx.kickoff, t)
                 st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
+                self._drop_older_paths(raw_id)
                 if quotes:
                     first, last = min(q.observed_at for q in quotes), max(q.observed_at for q in quotes)
                     print(f"  storico {fx.home}-{fx.away} ({fx.kickoff:%d/%m %H:%M} UTC): {len(quotes)} prezzi, dal {first:%d/%m %H:%M} "
@@ -163,7 +184,7 @@ class OddsCollector:
             eligible = {f.id: f for f in self.provider.list_fixtures(None, t - timedelta(days=days_back), t - timedelta(hours=2))}
             if not any(fid in eligible for _, fid in rows):
                 return  # nothing to close: no metadata lookups either
-            books = self.client.resolve_bookmakers(self.wanted_books)[:3]
+            books = self.client.resolve_bookmakers(self.history_books)[:3]
             m = self.mapper()
             done = 0
             for ext_id, fid in rows:
