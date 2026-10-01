@@ -430,8 +430,54 @@ def cmd_dataset_report(a) -> None:
                                          f"%{home[:5]}%", f"%{home[:5]}%", f"%{away[:5]}%", f"%{away[:5]}%")).fetchall()
                 n_day = store.db.execute("SELECT COUNT(*) FROM results WHERE substr(kickoff, 1, 10) = ?", (f"{when:%Y-%m-%d}",)).fetchone()[0]
                 print(f"  - {u}: nostre partite quel giorno {n_day}; vicine: " + ("; ".join(f"{h}-{w} {k[:16]}" for h, w, k in near) or "nessuna"))
+        _duplicate_report(store, a.examples)
     finally:
         store.close()
+
+
+def _duplicate_report(store: SnapshotStore, examples: int) -> None:
+    """Results stored twice (same clubs, kickoff within 3h, different ids): count, and for a few pairs the raw GOAL rows of
+    both ids with the request that returned them, to see where the second id comes from."""
+    rows = store.db.execute(
+        "SELECT a.fixture_id, b.fixture_id FROM results a JOIN results b ON a.home=b.home AND a.away=b.away AND a.fixture_id<b.fixture_id "
+        "AND abs(julianday(a.kickoff)-julianday(b.kickoff)) <= 0.125 ORDER BY a.kickoff").fetchall()
+    n_rows = store.db.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+    n_read = len(SnapshotProvider(store).list_history(None, datetime(2100, 1, 1, tzinfo=timezone.utc)))
+    print(f"results duplicati: {len(rows)} coppie; righe {n_rows}, partite lette dal modello {n_read}")
+    pairs = rows[:examples]
+    want = {fid.split(":", 1)[-1]: fid for p in pairs for fid in p}
+    seen: dict[str, list[str]] = {}
+    first: dict[str, tuple] = {}  # one read per distinct payload (pages fetched again unchanged share a blob)
+    for rid, ep, params, fetched, h in store.db.execute(
+            "SELECT id, endpoint, params, fetched_at, hash FROM raw_requests WHERE source='goal-api' AND endpoint LIKE '/leagues/%' "
+            "AND status=200 ORDER BY id").fetchall():
+        first.setdefault(h, (rid, ep, params, fetched))
+    for h, (rid, ep, params, fetched) in first.items():
+        try:
+            data = json.loads(store.raw_body(rid)).get("data") or []
+        except (ValueError, AttributeError):
+            continue
+        for row in data if isinstance(data, list) else [data]:
+            key = next((str(row[k]) for k in ("fixtureId", "id", "matchId", "matchApiId") if isinstance(row, dict) and row.get(k) is not None), None)
+            if key in want:
+                hits = seen.setdefault(want[key], [])
+                if len(hits) < 3:
+                    hits.append(f"raw {rid} {ep} {params} {fetched[:16]}: {json.dumps(row, ensure_ascii=False, sort_keys=True)[:900]}")
+    for pair in pairs:
+        print("==")
+        for fid in pair:
+            r = store.db.execute("SELECT competition, home, away, kickoff, home_goals, away_goals, observed_at FROM results WHERE fixture_id=?",
+                                 (fid,)).fetchone()
+            n_fx = store.db.execute("SELECT COUNT(*), MIN(observed_at), MAX(status) FROM fixtures WHERE fixture_id=?", (fid,)).fetchone()
+            n_q = store.db.execute("SELECT COUNT(*) FROM quotes WHERE fixture_id=?", (fid,)).fetchone()[0]
+            n_l = store.db.execute("SELECT COUNT(*) FROM fixture_links WHERE fixture_id=?", (fid,)).fetchone()[0] if _has_table(store, "fixture_links") else "-"
+            print(f"  {fid}: {r} | fixtures {n_fx} | quotes {n_q} | links {n_l}")
+            for h in seen.get(fid, ["nessun grezzo trovato"]):
+                print(f"    {h}")
+
+
+def _has_table(store: SnapshotStore, name: str) -> bool:
+    return store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
 def cmd_market_coverage(a) -> None:
