@@ -431,6 +431,7 @@ def cmd_dataset_report(a) -> None:
                 n_day = store.db.execute("SELECT COUNT(*) FROM results WHERE substr(kickoff, 1, 10) = ?", (f"{when:%Y-%m-%d}",)).fetchone()[0]
                 print(f"  - {u}: nostre partite quel giorno {n_day}; vicine: " + ("; ".join(f"{h}-{w} {k[:16]}" for h, w, k in near) or "nessuna"))
         _duplicate_report(store, a.examples)
+        _national_names_report(store)
     finally:
         store.close()
 
@@ -474,6 +475,21 @@ def _duplicate_report(store: SnapshotStore, examples: int) -> None:
             print(f"  {fid}: {r} | fixtures {n_fx} | quotes {n_q} | links {n_l}")
             for h in seen.get(fid, ["nessun grezzo trovato"]):
                 print(f"    {h}")
+
+
+def _national_names_report(store: SnapshotStore) -> None:
+    """National teams of our competitions that the international results do not know (they get no Elo prior): add an alias."""
+    from .elo import latest_international, national_timeline
+    from .modeleval import group_of
+    body = latest_international(store)
+    if not body:
+        print("risultati internazionali: non ancora scaricati")
+        return
+    known = national_timeline(body, TeamNames.load("configs/team_aliases.json")).teams()
+    teams = {t for c, h, w in store.db.execute("SELECT competition, home, away FROM results UNION SELECT competition, home, away FROM fixtures")
+             .fetchall() if group_of(c) == "nazionali" for t in (h, w)}
+    missing = sorted(teams - known)
+    print(f"nazionali: {len(teams) - len(missing)}/{len(teams)} con Elo" + (f"; senza: {', '.join(missing)}" if missing else ""))
 
 
 def _has_table(store: SnapshotStore, name: str) -> bool:

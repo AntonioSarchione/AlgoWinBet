@@ -18,13 +18,13 @@ class ModelCfg(BaseModel):
     # Elo prior (0 = off): log-goal strength per 100 Elo above the average of the teams of the same kind, used as the centre
     # of the ridge penalty instead of 0. Clubs: Elo from our results; national teams: Elo from the international results.
     club_elo_per_100: float = 0.0
-    nation_elo_per_100: float = 0.0
+    nation_elo_per_100: float = 0.15  # model-eval 2026-10-01: national matches 1X2 log loss 1.0095 -> 0.9850 (n=259)
     # league effects (pooled model): home advantage per competition shrunk to the shared one (None = shared only), goal
     # level per competition shrunk to the overall one (0 = free)
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
-    version: str = "dc-poisson-v1"
+    version: str = "dc-poisson-v2"  # v2: national-team Elo prior
 
 
 class EnsembleCfg(BaseModel):
