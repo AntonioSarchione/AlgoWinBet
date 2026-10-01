@@ -11,6 +11,7 @@ from .calibration import CalibrationSet
 from .config import Config
 from .domain import Opportunity, OpportunityStatus, Player, SelectionRef
 from .markets import UnsupportedMarket, family_of, probability, void_probability
+from .meta import FAMILY_SELECTIONS, MetaSet, family_key, group_of
 from .information import Adjustment, PlayerImpactModel, TeamAvailability, build_availability
 from .models import DixonColes
 from .pricing import MarketView, SOURCE_LEVEL_SCORE, build_market_views
@@ -96,6 +97,7 @@ def analyze_fixture(
     calib: CalibrationSet | None = None,
     impact: PlayerImpactModel | None = None,
     roster: list[Player] | None = None,
+    meta: MetaSet | None = None,
 ) -> FixtureAnalysis:
     calib = calib or CalibrationSet()
     f = state.fixture
@@ -122,6 +124,28 @@ def analyze_fixture(
     notes = _lineup_notes(adj, avail)
     out: list[Opportunity] = []
     skipped: dict[str, int] = {}
+    by_sel = {(v.ref.market_code, v.ref.line, v.ref.selection): v for v in views}
+    group = group_of(f.competition)
+    pooled: dict[tuple[str, bool], list[float] | None] = {}
+
+    def meta_probs(fam: str, with_market: bool) -> list[float] | None:
+        """Meta-model probabilities of a whole family (None when not fitted or a market price of the family is missing)."""
+        if (fam, with_market) not in pooled:
+            sels = FAMILY_SELECTIONS[fam]
+            pool = meta.pick(group, fam, "pool" if with_market else "calib") if meta else None
+            out_p = None
+            if pool is not None:
+                refs = [SelectionRef(market_code=c, selection=s, line=l) for c, s, l in sels]
+                pm = [float(probability(matrix, r)) for r in refs]
+                if with_market:
+                    vs = [by_sel.get((c, l, s)) for c, s, l in sels]
+                    if all(x is not None and x.p_market is not None for x in vs):
+                        out_p = pool.apply(pm, [x.p_market for x in vs])
+                else:
+                    out_p = pool.apply(pm)
+            pooled[(fam, with_market)] = out_p
+        return pooled[(fam, with_market)]
+
     for v in views:
         if v.best_odds < cfg.thresholds.min_odds:
             continue
@@ -159,7 +183,16 @@ def analyze_fixture(
         else:
             p_raw, w_eff, post_sd, disagreement = p_s, 1.0, std_s, 0.05
         fam = family_of(v.ref.market_code)
-        p_fin = float(np.clip(calib.transform(fam, p_raw), 1e-4, 1 - 1e-4))
+        calib_version = calib.version(fam)
+        fk = family_key(v.ref)
+        mp = meta_probs(fk[0], has_mkt) if fk and not stale else None
+        if mp is not None:
+            # learned blend of model and market, calibration included (meta.py): replaces the fixed adaptive weight
+            p_raw = mp[fk[1]]
+            p_fin = float(np.clip(p_raw, 1e-4, 1 - 1e-4))
+            calib_version = meta.version
+        else:
+            p_fin = float(np.clip(calib.transform(fam, p_raw), 1e-4, 1 - 1e-4))
         unc = post_sd
         if not known:
             unc = max(unc, 0.15)  # unseen team: model is guessing
@@ -190,8 +223,8 @@ def analyze_fixture(
             p_ensemble_raw=p_raw, p_final=p_fin, p_low=p_lo, p_high=p_hi, fair_odds=fair, edge=edge_v,
             ev=ev_v, ev_lower=ev_lo, uncertainty=unc, model_disagreement=disagreement,
             data_quality=dq["total"], data_quality_parts=dq, status=status,
-            score=opportunity_score(ev_v, edge_v, dq["total"], disagreement, unc, calib.version(fam) != "identity-v1"),
-            model_version=cfg.model.version, calibration_version=calib.version(fam), cutoff=state.cutoff,
+            score=opportunity_score(ev_v, edge_v, dq["total"], disagreement, unc, calib_version != "identity-v1"),
+            model_version=cfg.model.version, calibration_version=calib_version, cutoff=state.cutoff,
             p_struct_blind=p_blind, lineup_delta_p=p_s - p_blind, lineup_state=state.lineup_state, odds_stale=stale,
             lineup_notes=notes,
         ))

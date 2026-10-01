@@ -29,6 +29,7 @@ from .config import Config
 from .domain import SelectionRef
 from .engine import Engine
 from .markets import probability
+from .meta import FAMILY_SELECTIONS, MIN_N, Pool, describe, fit_all, fit_pool
 from .modeleval import _Frozen, group_of
 from .pricing import devig
 
@@ -113,7 +114,52 @@ def _price(qs: list[tuple], family: list[tuple], books: tuple[str, ...], until: 
     return None
 
 
-def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
+MOVE = timedelta(hours=24)  # price movement: reference price at the decision time against the same book 24 hours earlier
+
+
+def _monday(t: datetime) -> datetime:
+    return (t - timedelta(days=t.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _nested_meta(samples: list[dict], min_n: int = MIN_N) -> None:
+    """Walk-forward meta-model: each week is predicted by pools fitted on the earlier weeks only (row["meta"]; the same
+    with the price movement, row["meta_mov"]). Weeks before MIN_N earlier matches get no meta probability."""
+    weeks = sorted({_monday(s["kickoff"]) for s in samples})
+    for w in weeks:
+        past = [s for s in samples if s["kickoff"] < w]
+        now = [s for s in samples if _monday(s["kickoff"]) == w]
+        if len(past) < min_n:
+            continue
+        for fam in FAMILY_SELECTIONS:
+            fp = [s for s in past if s["fam"] == fam]
+            fn = [s for s in now if s["fam"] == fam]
+            if not fn:
+                continue
+            for kind in ("pool", "calib"):
+                for g in sorted({s["group"] for s in fn}):
+                    rows = [s for s in fp if s["group"] == g and (kind == "calib" or "market" in s)]
+                    if len(rows) < min_n:
+                        rows = [s for s in fp if kind == "calib" or "market" in s]
+                    if len(rows) < min_n:
+                        continue
+                    pm = np.array([r["model"] for r in rows])
+                    pk = np.array([r["market"] for r in rows]) if kind == "pool" else None
+                    y = np.array([r["k"] for r in rows])
+                    pool = fit_pool(pm, pk, y, kind)
+                    mov = None
+                    if kind == "pool":
+                        mov = fit_pool(pm, pk, y, kind, np.array([r.get("mov", [0.0] * pm.shape[1]) for r in rows]))
+                    for s in fn:
+                        if s["group"] != g:
+                            continue
+                        if kind == "pool" and "market" in s:
+                            s["meta"] = pool.apply(s["model"], s["market"])
+                            s["meta_mov"] = mov.apply(s["model"], s["market"], s.get("mov"))
+                        elif kind == "calib" and "market" not in s:
+                            s["meta"] = pool.apply(s["model"])
+
+
+def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: int = MIN_N) -> dict:
     t_start = time.monotonic()
     frozen = _Frozen(provider, end)
     finished = [r for r in frozen.rows if start <= r.kickoff < end]
@@ -127,9 +173,7 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
         engines[name] = Engine(frozen, c, use_lineups=False)
     tau2 = cfg.ensemble.market_prior_sd ** 2
     t = cfg.thresholds
-    acc: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    bets: dict[str, list[dict]] = defaultdict(list)
-    monthly: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    samples: list[dict] = []
     for r in sorted(finished, key=lambda r: r.kickoff):
         day = r.kickoff.replace(hour=0, minute=0, second=0, microsecond=0)
         mats = {}
@@ -151,7 +195,8 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
             avg_close = _price(qs, sels, ("market-avg",), None, closing=True, fair=True)
             mkt = _price(qs, sels, REFERENCE, r.kickoff - DECISION, closing=False, fair=True, anchor=avg_now[0] if avg_now else None)
             close = _price(qs, sels, REFERENCE, None, closing=True, fair=True, anchor=avg_close[0] if avg_close else None)
-            row = {"k": k, "model": p["attuale"], "v1": p["v1"]}
+            row = {"k": k, "model": p["attuale"], "v1": p["v1"], "kickoff": r.kickoff, "group": group, "fam": fam,
+                   "match": f"{r.home}-{r.away} {r.kickoff:%d/%m/%y}"}
             if mkt:
                 pm = mkt[0]
                 ens = []
@@ -161,44 +206,67 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
                     ens.append(w * ps + (1 - w) * pq)
                 tot = sum(ens)
                 row["market"], row["ens"] = pm, [x / tot for x in ens]
-            if close:
-                row["close"] = close[0]
-            for g in (group, "tutte"):
-                acc[(g, fam)].append(row)
-            if fam == "1X2" and group == "campionati" and close:
-                monthly[f"{r.kickoff:%Y-%m}"]["model"].append(_ll(p["attuale"], k))
-                monthly[f"{r.kickoff:%Y-%m}"]["close"].append(_ll(close[0], k))
-            # value test on the ensemble (the probability the live analysis bets on)
-            if "ens" in row:
+                early = _price(qs, sels, (mkt[1],), r.kickoff - DECISION - MOVE, closing=False, fair=True)
+                row["mov"] = [math.log(max(a, 1e-6) / max(b, 1e-6)) for a, b in zip(pm, early[0])] if early else [0.0] * len(pm)
                 bet_odds = _price(qs, sels, PLAYABLE, r.kickoff - DECISION, closing=False, fair=False)
                 if bet_odds:
-                    for i, (pe, o) in enumerate(zip(row["ens"], bet_odds[0])):
-                        if pe < t.min_probability or pe * o - 1 < t.min_ev:
-                            continue
-                        won = i == k
-                        bets[fam].append({"ev": pe * o - 1, "pnl": (o - 1) if won else -1.0, "won": won, "book": bet_odds[1],
-                                          "clv": close[0][i] * o - 1 if close else None,
-                                          "label": f"{r.home}-{r.away} {r.kickoff:%d/%m/%y} {sels[i][1]} @{o:.2f} p={pe:.3f} "
-                                                   f"mkt={row['market'][i]:.3f} mod={p['attuale'][i]:.3f} prezzi {bet_odds[0]} ref={mkt[1]}"})
+                    row["odds"], row["book"] = bet_odds
+            if close:
+                row["close"] = close[0]
+            samples.append(row)
+    _nested_meta(samples, min_n)
+
+    acc: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    bets: dict[str, list[dict]] = defaultdict(list)
+    monthly: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for row in samples:
+        fam, group, k = row["fam"], row["group"], row["k"]
+        for g in (group, "tutte"):
+            acc[(g, fam)].append(row)
+        if fam == "1X2" and group == "campionati" and "close" in row:
+            mk = f"{row['kickoff']:%Y-%m}"
+            monthly[mk]["model"].append(_ll(row["model"], k))
+            monthly[mk]["close"].append(_ll(row["close"], k))
+            if "meta" in row:
+                monthly[mk]["meta"].append(_ll(row["meta"], k))
+        # value test on the probability the live analysis bets on: the meta-model when fitted, else the adaptive ensemble
+        live = row.get("meta") if "market" in row and "meta" in row else row.get("ens")
+        if live is None or "odds" not in row:
+            continue
+        sels = FAMILIES[fam]
+        for i, (pe, o) in enumerate(zip(live, row["odds"])):
+            if pe < t.min_probability or pe * o - 1 < t.min_ev:
+                continue
+            won = i == k
+            close = row.get("close")
+            bets[fam].append({"ev": pe * o - 1, "pnl": (o - 1) if won else -1.0, "won": won, "book": row["book"],
+                              "clv": close[i] * o - 1 if close else None, "meta": "meta" in row,
+                              "label": f"{row['match']} {sels[i][1]} @{o:.2f} p={pe:.3f} mkt={row['market'][i]:.3f} "
+                                       f"mod={row['model'][i]:.3f} prezzi {row['odds']}"})
     report = {"groups": {}, "calibration": {}, "value": {}, "monthly": []}
     for (g, fam), rows in sorted(acc.items()):
         out = {"n": len(rows)}
-        for key in ("model", "v1", "ens", "market", "close"):
+        for key in ("model", "v1", "ens", "meta", "meta_mov", "market", "close"):
             sub = [x for x in rows if key in x]
             if not sub:
                 continue
             out[f"n_{key}"] = len(sub)
             out[f"ll_{key}"] = float(np.mean([_ll(x[key], x["k"]) for x in sub]))
             out[f"brier_{key}"] = float(np.mean([_brier(x[key], x["k"]) for x in sub]))
-        both = [x for x in rows if "close" in x and "ens" in x]  # like for like: the matches with every price
+        both = [x for x in rows if "close" in x and "ens" in x and "meta" in x]  # like for like: the matches with every price
         if both:
             out["n_same"] = len(both)
-            for key in ("model", "ens", "close"):
+            for key in ("model", "ens", "meta", "meta_mov", "close"):
                 out[f"ll_{key}_same"] = float(np.mean([_ll(x[key], x["k"]) for x in both]))
+        alone = [x for x in rows if "market" not in x and "meta" in x]  # model only: calibration without a market price
+        if alone:
+            out["n_alone"] = len(alone)
+            out["ll_model_alone"] = float(np.mean([_ll(x["model"], x["k"]) for x in alone]))
+            out["ll_meta_alone"] = float(np.mean([_ll(x["meta"], x["k"]) for x in alone]))
         report["groups"].setdefault(g, {})[fam] = out
         if g == "tutte":
             cal = {}
-            for key in ("model", "ens", "close"):
+            for key in ("model", "ens", "meta", "close"):
                 ps, ys = [], []
                 for x in rows:
                     if key in x:
@@ -212,14 +280,19 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
         report["value"][fam] = {
             "n": len(bs), "hits": sum(b["won"] for b in bs), "roi": float(np.mean([b["pnl"] for b in bs])),
             "mean_ev": float(np.mean([b["ev"] for b in bs])), "n_clv": len(clv), "mean_clv": float(np.mean(clv)) if clv else None,
+            "n_meta": sum(b["meta"] for b in bs),
             "books": {k: sum(b["book"] == k for b in bs) for k in PLAYABLE},
             "examples": [b["label"] for b in sorted(bs, key=lambda b: -b["ev"])[:8]],
         }
-    report["monthly"] = [{"month": m, "n": len(v["model"]), "ll_model": float(np.mean(v["model"])), "ll_close": float(np.mean(v["close"]))}
+    report["monthly"] = [{"month": m, "n": len(v["model"]), "ll_model": float(np.mean(v["model"])), "ll_close": float(np.mean(v["close"])),
+                          **({"ll_meta": float(np.mean(v["meta"])), "n_meta": len(v["meta"])} if v.get("meta") else {})}
                          for m, v in sorted(monthly.items())]
+    params = fit_all(samples, min_n)  # what the live analysis will use: fitted on every match of the window
+    report["meta"] = {key: {**v, "text": describe(Pool(**v), key.split("|")[1])} for key, v in params.items()}
     report["thresholds"] = {"min_ev": t.min_ev, "min_probability": t.min_probability, "market_prior_sd": cfg.ensemble.market_prior_sd}
     report["n_matches"] = sum(1 for _ in acc.get(("tutte", "1X2"), []))
     report["seconds"] = time.monotonic() - t_start
+    report["_params"] = params
     return report
 
 
@@ -228,7 +301,7 @@ def save_quality(store, report: dict, start: datetime, end: datetime, model_vers
     cur = store.db.execute(
         "INSERT INTO quality_runs(created_at,window_start,window_end,model_version,n_matches,seconds,report) VALUES(?,?,?,?,?,?,?) RETURNING id",
         (datetime.now(timezone.utc).isoformat(), start.isoformat(), end.isoformat(), model_version, report["n_matches"],
-         round(report["seconds"], 1), json.dumps(report, separators=(",", ":"))))
+         round(report["seconds"], 1), json.dumps({k: v for k, v in report.items() if not k.startswith("_")}, separators=(",", ":"))))
     rid = int(cur.fetchone()[0])
     store.db.execute("DELETE FROM quality_runs WHERE id NOT IN (SELECT id FROM quality_runs ORDER BY id DESC LIMIT 12)")
     store.db.commit()
@@ -241,8 +314,13 @@ def print_quality(report: dict) -> None:
         print(f"\n[{g}]")
         for fam, m in fams.items():
             same = (f" | stesse partite n={m['n_same']}: modello {m['ll_model_same']:.4f} ensemble {m['ll_ens_same']:.4f} "
-                    f"chiusura {m['ll_close_same']:.4f}") if m.get("n_same") else ""
-            print(f"  {fam:<10} n={m['n']:<5} LL modello {m['ll_model']:.4f} (v1 {m['ll_v1']:.4f})" + same)
+                    f"meta {m['ll_meta_same']:.4f} meta+movimento {m['ll_meta_mov_same']:.4f} chiusura {m['ll_close_same']:.4f}") if m.get("n_same") else ""
+            alone = (f" | senza quote n={m['n_alone']}: modello {m['ll_model_alone']:.4f} calibrato {m['ll_meta_alone']:.4f}"
+                     if m.get("n_alone") else "")
+            print(f"  {fam:<10} n={m['n']:<5} LL modello {m['ll_model']:.4f} (v1 {m['ll_v1']:.4f})" + same + alone)
+    print("\nMeta-modello (adattato su tutta la finestra, usato dall'analisi live):")
+    for key, v in report.get("meta", {}).items():
+        print(f"  {key:<32} {v['text']}")
     print("\nTest del valore (1 unità per giocata, soglie live):")
     for fam, v in report["value"].items():
         clv = f"{v['mean_clv']:+.1%}" if v["mean_clv"] is not None else "—"

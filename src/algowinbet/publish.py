@@ -119,7 +119,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     cfg = live_config(cfg)
     t = now or datetime.now(timezone.utc)
     prov = SnapshotProvider(store)
-    eng = Engine(prov, cfg, use_lineups=True)
+    from .meta import load_meta
+    eng = Engine(prov, cfg, use_lineups=True, meta=load_meta(store, cfg.model.version) if cfg.ensemble.use_meta else None)
     res = eng.analyze(None, t, t + timedelta(days=horizon_days), t)
     _migrate(store)
 

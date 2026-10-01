@@ -18,6 +18,7 @@ import numpy as np
 from .config import Config
 from .domain import SelectionRef
 from .engine import Engine
+from .meta import group_of  # noqa: F401 - re-exported for quality.py and the tests
 from .markets import probability
 
 REFS = {k: SelectionRef(market_code=c, selection=s, line=l) for k, (c, s, l) in {
@@ -40,15 +41,6 @@ VARIANTS: dict[str, dict] = {
     "emivita-540": {"xi_half_life_days": 540.0},
     "tutto": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0, "club_elo_per_100": 0.10},
 }
-
-
-def group_of(competition: str) -> str:
-    c = competition.lower()
-    if any(k in c for k in ("champions", "europa league", "conference")):  # club cups, qualifying rounds included
-        return "coppe"
-    if any(k in c for k in ("nations league", "world cup", "uefa euro", "qualif", "friendl")):
-        return "nazionali"
-    return "campionati"
 
 
 @dataclass

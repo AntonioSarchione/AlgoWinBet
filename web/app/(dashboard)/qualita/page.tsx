@@ -12,7 +12,8 @@ const FAMILIES = ["1X2", "U/O 2.5", "Gol/NoGol"];
 // one colour and one marker shape per series, so identity never relies on colour alone
 const SERIES = [
   { key: "model", label: "Modello", color: "var(--s1)", shape: "circle" },
-  { key: "ens", label: "Modello + mercato", color: "var(--s3)", shape: "square" },
+  { key: "ens", label: "Modello + mercato (peso fisso)", color: "var(--s3)", shape: "square" },
+  { key: "meta", label: "Meta-modello", color: "var(--s4)", shape: "diamond" },
   { key: "close", label: "Quota di chiusura", color: "var(--s2)", shape: "triangle" },
 ] as const;
 
@@ -21,6 +22,7 @@ const gap = (a?: number, b?: number) => (a == null || b == null ? null : a - b);
 
 function Marker({ shape, x, y, color }: { shape: string; x: number; y: number; color: string }) {
   if (shape === "square") return <rect x={x - 4} y={y - 4} width={8} height={8} fill={color} stroke="var(--card)" strokeWidth={2} />;
+  if (shape === "diamond") return <path d={`M${x},${y - 5.5} L${x + 5.5},${y} L${x},${y + 5.5} L${x - 5.5},${y} Z`} fill={color} stroke="var(--card)" strokeWidth={2} />;
   if (shape === "triangle") return <path d={`M${x},${y - 5} L${x + 5},${y + 4} L${x - 5},${y + 4} Z`} fill={color} stroke="var(--card)" strokeWidth={2} />;
   return <circle cx={x} cy={y} r={4.5} fill={color} stroke="var(--card)" strokeWidth={2} />;
 }
@@ -112,6 +114,9 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
   const v1x2 = rep.value["1X2"];
   const dModel = gap(league?.ll_model_same, league?.ll_close_same);
   const dEns = gap(league?.ll_ens_same, league?.ll_close_same);
+  const dMeta = gap(league?.ll_meta_same, league?.ll_close_same);
+  const metas = Object.entries(rep.meta ?? {});
+  const GROUP_OF_KEY = (k: string) => GROUPS[k.split("|")[0]] ?? k.split("|")[0];
   const rows: { g: string; fam: string; m: QualityFamily }[] = [];
   for (const g of Object.keys(GROUPS)) for (const fm of FAMILIES) if (rep.groups[g]?.[fm]) rows.push({ g, fam: fm, m: rep.groups[g][fm] });
 
@@ -138,7 +143,11 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
         </div>
         <div className="card kpi">
           <span className="kpi-icon"><LineChart size={18} aria-hidden="true" /></span>
-          <span><small>Modello + mercato vs chiusura</small><b className="num">{dEns == null ? "–" : `${dEns >= 0 ? "+" : ""}${dEns.toFixed(3)}`}</b></span>
+          <span>
+            <small>{dMeta == null ? "Modello + mercato vs chiusura" : "Meta-modello vs chiusura"}</small>
+            <b className="num">{(dMeta ?? dEns) == null ? "–" : `${(dMeta ?? dEns)! >= 0 ? "+" : ""}${(dMeta ?? dEns)!.toFixed(3)}`}</b>
+            {dMeta != null && dEns != null && <span className="note">peso fisso {dEns >= 0 ? "+" : ""}{dEns.toFixed(3)}</span>}
+          </span>
         </div>
         <div className="card kpi">
           <span className="kpi-icon"><Target size={18} aria-hidden="true" /></span>
@@ -156,7 +165,8 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             <thead>
               <tr>
                 <th>Gruppo</th><th>Mercato</th><th className="num">Partite</th><th className="num">LL modello</th><th className="num">LL prima della Fase 2</th>
-                <th className="num">LL modello*</th><th className="num">LL modello + mercato*</th><th className="num">LL chiusura*</th><th className="num">Brier modello</th>
+                <th className="num">LL modello*</th><th className="num">LL peso fisso*</th><th className="num">LL meta-modello*</th><th className="num">LL chiusura*</th>
+                <th className="num">Senza quote: modello → calibrato</th>
               </tr>
             </thead>
             <tbody>
@@ -164,15 +174,46 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
                 <tr key={`${g}-${fm}`}>
                   <td>{GROUPS[g]}</td><td>{fm}</td><td className="num">{m.n}</td>
                   <td className="num">{f4(m.ll_model)}</td><td className="num muted">{f4(m.ll_v1)}</td>
-                  <td className="num">{f4(m.ll_model_same)}</td><td className="num">{f4(m.ll_ens_same)}</td><td className="num">{f4(m.ll_close_same)}</td>
-                  <td className="num muted">{f4(m.brier_model)}</td>
+                  <td className="num">{f4(m.ll_model_same)}</td><td className="num">{f4(m.ll_ens_same)}</td><td className="num">{f4(m.ll_meta_same)}</td>
+                  <td className="num">{f4(m.ll_close_same)}</td>
+                  <td className="num">{m.n_alone ? `${f4(m.ll_model_alone)} → ${f4(m.ll_meta_alone)}` : "–"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="note card-pad">* sulle partite che hanno sia il prezzo di 2 ore prima sia la quota di chiusura (stesse partite per le tre colonne).</p>
+        <p className="note card-pad">
+          * stesse partite per le quattro colonne: quelle con il prezzo di 2 ore prima, la quota di chiusura e un meta-modello già adattato. Il meta-modello di ogni
+          settimana è adattato solo sulle settimane precedenti, quindi il confronto è onesto. Ultima colonna: partite senza quote di riferimento, dove la
+          calibrazione corregge il modello da solo.
+        </p>
       </section>
+
+      {metas.length > 0 && (
+        <section className="card">
+          <div className="card-head"><h2>Meta-modello in uso</h2><span className="count">adattato su tutta la finestra · usato dall&apos;analisi live</span></div>
+          <div className="table-wrap">
+            <table className="compact">
+              <thead>
+                <tr><th>Gruppo</th><th>Mercato</th><th>Con</th><th className="num">Peso modello</th><th className="num">Peso mercato</th><th className="num">Partite</th><th>Dettaglio</th></tr>
+              </thead>
+              <tbody>
+                {metas.map(([k, m]) => (
+                  <tr key={k}>
+                    <td>{GROUP_OF_KEY(k)}</td><td>{k.split("|")[1]}</td><td>{m.kind === "pool" ? "quote di riferimento" : "solo modello"}</td>
+                    <td className="num">{m.a.toFixed(2)}</td><td className="num">{m.kind === "pool" ? m.b.toFixed(2) : "–"}</td><td className="num">{m.n}</td>
+                    <td className="muted">{m.text}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="note card-pad">
+            Le probabilità finali sono una media pesata (in scala logaritmica) di modello e prezzo Pinnacle senza margine, più una piccola correzione per esito.
+            Pesi che sommano più di 1 rendono le previsioni più decise, meno di 1 più prudenti: è anche la calibrazione. Se un gruppo ha meno di 300 partite usa i pesi di tutti i gruppi.
+          </p>
+        </section>
+      )}
 
       <div className="split">
         <section className="card">

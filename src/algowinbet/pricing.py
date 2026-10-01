@@ -62,7 +62,7 @@ class MarketView:
     best_book: str
     best_observed_at: datetime
     n_books: int
-    p_market: float | None  # devigged consensus; None when the set is not complete/exclusive
+    p_market: float | None  # devigged reference price (Pinnacle, else the book average); None when the set is not complete
     dispersion: float  # std of per-book devigged p (0 if single book)
     overround: float | None
     source_level: str
@@ -77,6 +77,23 @@ def latest_quotes(quotes: list[OddsQuote]) -> list[OddsQuote]:
         if k not in best or q.observed_at > best[k].observed_at:
             best[k] = q
     return list(best.values())
+
+
+REFERENCE_BOOKS = ("pinnacle", "betfair-ex")  # sharp prices, in order of preference: the benchmark Sisal is measured against
+SANE = 0.12  # a reference price this far (in probability) from the other books is a feed error, not information
+
+
+def reference_price(per_book: dict[str, float]) -> float | None:
+    """Fair probability of a selection: the first reference book that prices it (and agrees with the other books within
+    SANE), else the average over the books."""
+    if not per_book:
+        return None
+    avg = float(np.mean(list(per_book.values())))
+    for ref in REFERENCE_BOOKS:
+        for book, p in per_book.items():
+            if ref in book.lower() and abs(p - avg) <= SANE:
+                return p
+    return avg
 
 
 def _bettable(book: str, bettable: list[str] | None) -> bool:
@@ -115,7 +132,7 @@ def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bet
             continue  # nobody we can bet with prices it: not an option at all
         top = max(playable, key=lambda q: q.odds)
         per_book = p_by_ref_book.get(key, {})
-        p_mkt = float(np.mean(list(per_book.values()))) if per_book else None
+        p_mkt = reference_price(per_book)
         disp = float(np.std(list(per_book.values()))) if len(per_book) > 1 else 0.0
         lvl = float(np.mean([SOURCE_LEVEL_SCORE.get(q.source_level, 0.5) for q in qs]))
         views.append(

@@ -340,7 +340,10 @@ export type QualityFamily = {
   ll_v1?: number; n_ens?: number; ll_ens?: number; brier_ens?: number;
   n_close?: number; ll_close?: number; brier_close?: number;
   n_same?: number; ll_model_same?: number; ll_ens_same?: number; ll_close_same?: number;
+  n_meta?: number; ll_meta?: number; ll_meta_same?: number; ll_meta_mov_same?: number;
+  n_alone?: number; ll_model_alone?: number; ll_meta_alone?: number;
 };
+export type QualityMeta = { a: number; b: number; c: number[]; n: number; kind: "pool" | "calib"; text: string };
 export type QualityValue = { n: number; hits: number; roi: number; mean_ev: number; n_clv: number; mean_clv: number | null; books: Record<string, number> };
 export type QualityReport = {
   groups: Record<string, Record<string, QualityFamily>>;
@@ -349,6 +352,7 @@ export type QualityReport = {
   monthly: { month: string; n: number; ll_model: number; ll_close: number }[];
   thresholds: { min_ev: number; min_probability: number; market_prior_sd: number };
   n_matches: number;
+  meta?: Record<string, QualityMeta>;
 };
 export type QualityRun = { id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: QualityReport };
 

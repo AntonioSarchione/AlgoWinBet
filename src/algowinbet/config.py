@@ -40,6 +40,7 @@ class EnsembleCfg(BaseModel):
     market_prior_sd: float = 0.025
     w_struct: float = 0.5  # used only in fixed mode
     devig_method: str = "power"
+    use_meta: bool = True  # live analysis: the meta-model fitted by the weekly quality run, when there is one
     quote_window_hours: float | None = None  # only prices observed in the last N hours before the cutoff (live: 24, set by the CLI)
 
 

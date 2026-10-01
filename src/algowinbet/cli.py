@@ -556,6 +556,9 @@ def cmd_quality(a) -> None:
         print_quality(rep)
         if a.save:
             print(f"salvato (quality run {save_quality(store, rep, start, end, cfg.model.version)})")
+            if rep["_params"]:
+                from .meta import save_meta
+                print(f"meta-modello salvato (id {save_meta(store, rep['_params'], start, end, cfg.model.version)})")
     finally:
         store.close()
 

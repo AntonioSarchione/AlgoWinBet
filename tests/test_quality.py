@@ -34,16 +34,19 @@ def test_price_reads_the_family_at_one_book_by_time():
 
 def test_quality_replay_scores_model_ensemble_and_closing_and_is_saved():
     st, res = _store()
-    rep = run_quality(SnapshotProvider(st), Config(), T0 + timedelta(days=40), T0 + timedelta(days=80))
+    rep = run_quality(SnapshotProvider(st), Config(), T0 + timedelta(days=40), T0 + timedelta(days=80), min_n=40)
     m = rep["groups"]["campionati"]["1X2"]
-    assert m["n"] > 150 and m["n_same"] == m["n"] and 0.8 < m["ll_model"] < 1.3
+    assert m["n"] > 150 and m["n_ens"] == m["n"] and 0.8 < m["ll_model"] < 1.3
+    # walk-forward meta-model: later weeks only (fitted on earlier ones), scored on the same matches as the rest
+    assert 0 < m["n_meta"] < m["n"] and m["n_same"] == m["n_meta"] and "ll_meta_same" in m
+    assert "campionati|1X2|pool" in rep["meta"] and "campionati|1X2|pool" in rep["_params"]
     assert {"model", "ens", "close"} <= set(rep["calibration"]["1X2"])
     v = rep["value"]["1X2"]
     assert v["n"] > 0 and v["books"]["market-avg"] == v["n"]  # bets placed at the average price (no Sisal stored)
     assert rep["monthly"] and rep["monthly"][0]["n"] > 0
     rid = save_quality(st, rep, T0, T0 + timedelta(days=80), "test")
     saved = json.loads(st.db.execute("SELECT report FROM quality_runs WHERE id=?", (rid,)).fetchone()[0])
-    assert saved["n_matches"] == rep["n_matches"]
+    assert saved["n_matches"] == rep["n_matches"] and "_params" not in saved
 
 
 def test_reference_price_far_from_the_market_average_is_skipped():

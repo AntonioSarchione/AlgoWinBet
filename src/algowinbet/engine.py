@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from .calibration import CalibrationSet
+from .meta import MetaSet
 from .elo import EloTimeline, club_timeline, elo_prior, national_timeline
 from .config import Config
 from .domain import Fixture, InformationEvent, Opportunity, OpportunityStatus, Player, SelectionRef
@@ -64,8 +65,10 @@ def newcomer_prior(hist, cutoff: datetime, value: float) -> dict[str, tuple[floa
 
 
 class Engine:
-    def __init__(self, provider, cfg: Config, calib: CalibrationSet | None = None, use_lineups: bool = True):
+    def __init__(self, provider, cfg: Config, calib: CalibrationSet | None = None, use_lineups: bool = True,
+                 meta: MetaSet | None = None):
         self.provider, self.cfg = provider, cfg.apply_profile()
+        self.meta = meta  # learned model/market blend (meta.py); None = the fixed adaptive weight
         self.calib = calib if calib is not None else CalibrationSet.load(cfg.calibration_path)
         self.use_lineups = use_lineups
         self._models: dict[tuple[str, datetime], tuple[DixonColes, list[DixonColes]] | None] = {}
@@ -206,7 +209,7 @@ class Engine:
             state = build_state(self.provider, f, cutoff, roster, quote_window_hours=self.cfg.ensemble.quote_window_hours)
             if extra_events:
                 state.events = _dedupe(state.events + [e for e in extra_events if e.observed_at <= cutoff])
-            a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster)
+            a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster, self.meta)
             if markets:
                 a.opportunities = [o for o in a.opportunities if o.ref.market_code in markets]
             if a.opportunities:
