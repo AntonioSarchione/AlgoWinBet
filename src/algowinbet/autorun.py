@@ -210,16 +210,43 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         if manual or history or history_due(store, cfg, now):
             steps.append("history")
         steps.append("closing")
-    backfilled = all(store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues)
-    if (cfg.divisions and backfilled and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days))             or (cfg.international and international_due(store, now)):
+    if datasets_due(store, cfg, now):
         steps.append("datasets")  # last: nothing time-critical; the files link to the backfilled results, so they wait for it
     return steps
+
+
+def datasets_due(store: SnapshotStore, cfg: AutoConfig, now: datetime) -> bool:
+    backfilled = all(store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues)
+    return bool((cfg.divisions and backfilled and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days))
+                or (cfg.international and international_due(store, now)))
+
+
+def run_datasets(store: SnapshotStore, cfg: AutoConfig, datasets: FootballDataCollector | None, now: datetime, budget: float,
+                 clock: Callable[[], float] = time.monotonic, on_step: Callable[[CollectStats], None] | None = None) -> list[CollectStats]:
+    """Season CSVs and the weekly international results, within `budget` seconds (no new file starts after it)."""
+    out: list[CollectStats] = []
+    if not datasets_due(store, cfg, now):
+        return out
+    if cfg.international:
+        st = sync_international(store, now)  # one small file a week: national-team Elo
+        if st:
+            out.append(st)
+            if on_step:
+                on_step(st)
+    if datasets is not None:
+        st = datasets.sync(cfg.history_seasons, cfg.dataset_refresh_days, max_seconds=budget, clock=clock)
+        if st.requests or st.errors or st.skipped:
+            out.append(st)
+            if on_step:
+                on_step(st)
+    return out
 
 
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
              max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
-             manual: bool = False, history: bool = False, datasets: FootballDataCollector | None = None) -> list[CollectStats]:
+             manual: bool = False, history: bool = False, datasets: FootballDataCollector | None = None,
+             skip: tuple[str, ...] = ()) -> list[CollectStats]:
     """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
     whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
@@ -235,6 +262,8 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if on_step:
             on_step(st)
     for s in steps:
+        if s in skip:
+            continue
         if max_seconds is not None and clock() - t0 > max_seconds:
             skipped = CollectStats(s)
             skipped.skipped.append("tempo del giro esaurito: rimandato al prossimo tick")
@@ -279,16 +308,12 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         elif s == "closing":
             out.append(odds.sync_closing())
         elif s == "datasets":
-            # capped so the analysis still gets published in the same tick; the first load spreads over a few ticks
+            # capped; the first load spreads over a few ticks. The CLI skips it here and runs it after the publication.
             left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
-            if cfg.international:
-                st = sync_international(store, t)  # one small file a week: national-team Elo
-                if st:
-                    out.append(st)
-                    if on_step and datasets is not None:  # the last stat of the step is shown below
-                        on_step(st)
-            if datasets is not None:
-                out.append(datasets.sync(cfg.history_seasons, cfg.dataset_refresh_days, max_seconds=left, clock=clock))
+            for st in run_datasets(store, cfg, datasets, t, left, clock):
+                out.append(st)
+                if on_step:
+                    on_step(st)
         if on_step and len(out) > before:
             on_step(out[-1])
     return out

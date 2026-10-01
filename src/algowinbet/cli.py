@@ -601,8 +601,9 @@ def cmd_collect_auto(a) -> None:
         _print_stats(st)
         print(f"  ({time.monotonic() - t0:.0f}s dall'inizio)", flush=True)
     try:
+        # season files and international results run after the publication: they are never worth a late analysis
         results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history,
-                           datasets=datasets)
+                           datasets=datasets, skip=("datasets",))
         if not results:
             print("tick: niente da fare")
         from .autorun import should_publish
@@ -615,6 +616,10 @@ def cmd_collect_auto(a) -> None:
                 print(f"analisi pubblicata (run {rid}): {len(res.fixtures)} partite, {len(res.opportunities)} mercati, "
                       f"{len(res.optimizer.slips)} schedine" + (" — NO BET" if res.optimizer.no_bet else "") +
                       f" ({time.monotonic() - t0:.0f}s dall'inizio)")
+        from .autorun import DATASETS_SECONDS, run_datasets
+        left = min(DATASETS_SECONDS, a.max_seconds + 300 - (time.monotonic() - t0))  # the job has 20 minutes
+        if left >= 60:
+            run_datasets(store, cfg, datasets, datetime.now(timezone.utc), left, on_step=show)
         now = datetime.now(timezone.utc)
         print("Riepilogo database: " + ", ".join(f"{k}={v}" for k, v in store.stats().items()))
         by_comp: dict[str, int] = {}
