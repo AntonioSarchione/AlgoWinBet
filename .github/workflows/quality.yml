@@ -1,0 +1,38 @@
+name: quality
+
+# Weekly replay of the model on the finished matches (no API request): log loss, calibration, value test and CLV, saved on
+# Turso for the "Qualità del modello" page.
+on:
+  schedule:
+    - cron: "30 4 * * 1"   # Monday 04:30 UTC, after the weekend's results
+  workflow_dispatch:
+    inputs:
+      weeks:
+        description: "settimane da rigiocare (fino a lunedì)"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[turso]"
+      - name: run
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+          WEEKS: ${{ inputs.weeks }}
+        run: algowinbet quality --db turso --weeks "${WEEKS:-60}" --save

@@ -544,6 +544,22 @@ def cmd_model_check(a) -> None:
         store.close()
 
 
+def cmd_quality(a) -> None:
+    """Weekly model quality replay (no API request); --save stores it for the "Qualità del modello" page."""
+    from .modeleval import default_window
+    from .quality import print_quality, run_quality, save_quality
+    store = SnapshotStore(a.db)
+    try:
+        start, end = default_window(weeks=a.weeks)
+        cfg = _cfg(a)
+        rep = run_quality(SnapshotProvider(store), cfg, start, end)
+        print_quality(rep)
+        if a.save:
+            print(f"salvato (quality run {save_quality(store, rep, start, end, cfg.model.version)})")
+    finally:
+        store.close()
+
+
 def cmd_model_eval(a) -> None:
     """Walk-forward comparison of model variants on the stored results (no API request)."""
     from .modeleval import VARIANTS, default_window, evaluate, print_report
@@ -943,6 +959,12 @@ def build_parser() -> argparse.ArgumentParser:
     mk.add_argument("--db", default="turso")
     mk.add_argument("--config")
     mk.set_defaults(fn=cmd_model_check)
+    qa = sub.add_parser("quality", help="replay settimanale della qualità del modello (nessuna richiesta API)")
+    qa.add_argument("--db", default="turso")
+    qa.add_argument("--weeks", type=int, default=60)
+    qa.add_argument("--save", action="store_true", help="salva il report per la pagina Qualità del modello")
+    qa.add_argument("--config")
+    qa.set_defaults(fn=cmd_quality)
     me = sub.add_parser("model-eval", help="confronto walk-forward delle varianti del modello sui risultati salvati (nessuna richiesta)")
     me.add_argument("--db", default="turso")
     me.add_argument("--weeks", type=int, default=52)

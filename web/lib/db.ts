@@ -322,3 +322,34 @@ export function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
     return fallback;
   }
 }
+
+// ---- model quality (weekly replay written by the `quality` workflow) ----
+export type QualityFamily = {
+  n: number;
+  n_model?: number; ll_model?: number; brier_model?: number;
+  ll_v1?: number; n_ens?: number; ll_ens?: number; brier_ens?: number;
+  n_close?: number; ll_close?: number; brier_close?: number;
+  n_same?: number; ll_model_same?: number; ll_ens_same?: number; ll_close_same?: number;
+};
+export type QualityValue = { n: number; hits: number; roi: number; mean_ev: number; n_clv: number; mean_clv: number | null; books: Record<string, number> };
+export type QualityReport = {
+  groups: Record<string, Record<string, QualityFamily>>;
+  calibration: Record<string, Record<string, [number, number, number][]>>;
+  value: Record<string, QualityValue>;
+  monthly: { month: string; n: number; ll_model: number; ll_close: number }[];
+  thresholds: { min_ev: number; min_probability: number; market_prior_sd: number };
+  n_matches: number;
+};
+export type QualityRun = { id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: QualityReport };
+
+export const latestQuality = persist(async (): Promise<QualityRun | null> => {
+  try {
+    const rows = await all<{ id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: string }>(
+      "SELECT id, created_at, window_start, window_end, model_version, report FROM quality_runs ORDER BY id DESC LIMIT 1",
+    );
+    const r = rows[0];
+    return r ? { ...r, report: parseJSON<QualityReport>(r.report, { groups: {}, calibration: {}, value: {}, monthly: [], thresholds: { min_ev: 0, min_probability: 0, market_prior_sd: 0 }, n_matches: 0 }) } : null;
+  } catch {
+    return null; // table created by the first weekly run
+  }
+}, "latestQuality", 600);
