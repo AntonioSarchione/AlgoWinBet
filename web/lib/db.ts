@@ -103,7 +103,14 @@ export type ResultRow = { fixture_id: string; kickoff: string; competition: stri
 // Rows become plain objects keyed by the column names the server reports (never the driver's Row objects, whose named
 // properties were missing in production for some columns).
 async function all<T>(sql: string, args: InValue[] = []): Promise<T[]> {
-  const r = await db().execute({ sql, args });
+  let r;
+  try {
+    r = await db().execute({ sql, args });
+  } catch {
+    // one retry: a dropped connection or a busy database must not reach the page (nor the data cache) as "no data"
+    await new Promise((ok) => setTimeout(ok, 400));
+    r = await db().execute({ sql, args });
+  }
   return r.rows.map((row) => Object.fromEntries(r.columns.map((c, i) => [c, row[i]]))) as T[];
 }
 
@@ -119,8 +126,11 @@ function persist<A extends unknown[], R>(fn: (...args: A) => Promise<R>, name: s
 export const latestRun = persist(async (): Promise<Run | null> => {
   try {
     return (await all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 1"))[0] ?? null;
-  } catch {
-    return null; // tables not created yet: nothing published
+  } catch (e) {
+    // tables not created yet: nothing published. Any other error is thrown, so the page shows an error with a retry
+    // instead of caching "Nessuna analisi pubblicata" for a minute.
+    if (/no such table/i.test(String(e))) return null;
+    throw e;
   }
 }, "latestRun", LIVE_TTL);
 
@@ -349,7 +359,8 @@ export const latestQuality = persist(async (): Promise<QualityRun | null> => {
     );
     const r = rows[0];
     return r ? { ...r, report: parseJSON<QualityReport>(r.report, { groups: {}, calibration: {}, value: {}, monthly: [], thresholds: { min_ev: 0, min_probability: 0, market_prior_sd: 0 }, n_matches: 0 }) } : null;
-  } catch {
-    return null; // table created by the first weekly run
+  } catch (e) {
+    if (/no such table/i.test(String(e))) return null; // table created by the first weekly run
+    throw e;
   }
 }, "latestQuality", 600);
