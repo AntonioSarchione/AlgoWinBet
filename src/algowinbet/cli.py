@@ -413,6 +413,27 @@ def cmd_inspect(a) -> None:
     store.close()
 
 
+def cmd_dataset_report(a) -> None:
+    """Season CSV link report: per file the link rate, and for each unlinked row our matches of those clubs within 3 days."""
+    store = SnapshotStore(a.db)
+    try:
+        for name, detail in store.db.execute("SELECT name, detail FROM jobs WHERE name LIKE 'dataset-report:%' ORDER BY name").fetchall():
+            d = json.loads(detail or "{}")
+            print(f"{name.split(':', 2)[2]}: {d.get('linked')}/{d.get('rows')} abbinate")
+            for u in d.get("unmatched", [])[:a.examples]:
+                teams, day = u.rsplit(" ", 1)
+                when = datetime.strptime(day, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+                home, away = teams.split("-", 1)
+                near = store.db.execute(
+                    "SELECT home, away, kickoff FROM results WHERE kickoff BETWEEN ? AND ? AND (home LIKE ? OR away LIKE ? OR home LIKE ? OR away LIKE ?) "
+                    "ORDER BY kickoff", ((when - timedelta(days=3)).isoformat(), (when + timedelta(days=4)).isoformat(),
+                                         f"%{home[:5]}%", f"%{home[:5]}%", f"%{away[:5]}%", f"%{away[:5]}%")).fetchall()
+                n_day = store.db.execute("SELECT COUNT(*) FROM results WHERE substr(kickoff, 1, 10) = ?", (f"{when:%Y-%m-%d}",)).fetchone()[0]
+                print(f"  - {u}: nostre partite quel giorno {n_day}; vicine: " + ("; ".join(f"{h}-{w} {k[:16]}" for h, w, k in near) or "nessuna"))
+    finally:
+        store.close()
+
+
 def cmd_market_coverage(a) -> None:
     """Every market a bookmaker prices in the stored snapshots (no API request): per catalogue marketType and period, how many
     fixtures and lines it covers and whether our mapper reads it (used) or skips it."""
@@ -785,6 +806,10 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("--db", default="algowinbet.db")
     rm.add_argument("--aliases", default="configs/team_aliases.json")
     rm.set_defaults(fn=cmd_remap_odds)
+    dr = sub.add_parser("dataset-report", help="abbinamento dei CSV stagionali football-data alle nostre partite (nessuna richiesta)")
+    dr.add_argument("--db", default="turso")
+    dr.add_argument("--examples", type=int, default=6)
+    dr.set_defaults(fn=cmd_dataset_report)
     mc = sub.add_parser("market-coverage", help="mercati quotati da un bookmaker nelle fotografie salvate (nessuna richiesta API)")
     mc.add_argument("--db", default="turso")
     mc.add_argument("--book", default="sisal")
