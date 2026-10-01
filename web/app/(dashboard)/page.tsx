@@ -9,6 +9,8 @@ import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } fr
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
+import { RefreshButton } from "@/app/_components/RefreshButton";
+import { MANUAL_MONTHLY } from "@/lib/refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -397,11 +399,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <div className="card-head"><h2>Budget richieste API</h2></div>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Calendario, risultati, formazioni, statistiche" />
-              <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint="Quote Sisal e Pinnacle, solo nelle 24h prima" />
+              <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint="Richieste conteggiate: solo fotografie Sisal. Storico Sisal e Pinnacle con richieste libere" />
               <div className="kv" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 <span>Ultima raccolta</span>
                 <span>{ago(tick)}</span>
               </div>
+              <RefreshButton used={use.manualMonth} limit={MANUAL_MONTHLY} configured={Boolean(process.env.GITHUB_DISPATCH_TOKEN)} />
             </div>
           </section>
         </aside>
@@ -434,16 +437,23 @@ function Mini({ label, value, tone }: { label: string; value: string; tone?: "po
 function explorerMatch(f: FixtureRow): ExplorerMatch {
   const mk = parseJSON<ModelMarket[]>(f.markets, []);
   const get = (g: string, l: string) => mk.find((m) => m.g === g && m.l === l)?.p;
-  const picks: [string, number | undefined][] = [
-    ["Over 2.5", get("Under/Over", "Over 2.5") ?? f.p_over25 ?? undefined],
-    ["Gol", get("Gol/NoGol", "Gol") ?? f.p_btts ?? undefined],
+  const book = parseJSON<ExplorerMatch["book"]>(f.book ?? null, {});
+  // where Sisal prices the selection, the bar shows the probability the slips use (model shrunk toward the market)
+  const picks: [string, number | undefined, ("p_over25" | "p_btts")?][] = [
+    ["Over 2.5", book.p_over25?.pf ?? get("Under/Over", "Over 2.5") ?? f.p_over25 ?? undefined, "p_over25"],
+    ["Gol", book.p_btts?.pf ?? get("Gol/NoGol", "Gol") ?? f.p_btts ?? undefined, "p_btts"],
     ["Multigol 2-4", get("Multigol", "Multigol 2-4")],
     ["1X", get("Doppia chance", "1X")],
     ["1 + Over 2.5", get("Combo", "1 + Over 2.5")],
   ];
   return {
     id: f.fixture_id, kickoff: f.kickoff, competition: f.competition, home: f.home, away: f.away,
-    p_home: f.p_home, p_draw: f.p_draw, p_away: f.p_away, xg_home: f.xg_home, xg_away: f.xg_away,
-    picks: picks.filter((x): x is [string, number] => x[1] != null),
+    p_home: f.p_home, p_draw: f.p_draw, p_away: f.p_away, xg_home: f.xg_home, xg_away: f.xg_away, book,
+    picks: picks
+      .filter((x) => x[1] != null)
+      .map(([l, p, k]) => {
+        const b = k ? book[k] : undefined;
+        return [b ? `${l} · Sisal ${b.odds.toFixed(2)}` : l, p as number] as [string, number];
+      }),
   };
 }

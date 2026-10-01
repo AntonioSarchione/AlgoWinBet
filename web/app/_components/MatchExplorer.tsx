@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { compShort, dayTime, fairOdds } from "./format";
+import { compShort, dayTime, fairOdds, pct } from "./format";
 import { HBar, Ring, Split1X2, TeamBadge } from "./ui";
 
 export type ExplorerMatch = {
@@ -18,7 +18,20 @@ export type ExplorerMatch = {
   xg_home: number | null;
   xg_away: number | null;
   picks: [string, number][];
+  // headline selections priced by Sisal: playable odds, devigged market probability, final probability used by the slips
+  book: Partial<Record<"p_home" | "p_draw" | "p_away" | "p_over25" | "p_btts", { odds: number; book: string; pm: number | null; pf: number }>>;
 };
+
+type Side = "p_home" | "p_draw" | "p_away";
+
+// The pure model alone can sit far from the bookmakers (national teams: few matches in its history). Where Sisal prices the
+// 1X2, the ring shows the final probability (model shrunk toward the market, the one the slips use) and the Sisal price.
+function side(f: ExplorerMatch, k: Side) {
+  const b = f.book[k];
+  const model = f[k];
+  if (!b) return { value: model, sub: `quota equa ${fairOdds(model)}` };
+  return { value: b.pf, sub: `Sisal ${b.odds.toFixed(2)} · modello ${pct(model)}` };
+}
 
 // Home: every match passing the filters in a scrollable strip (nearest kickoff first); the selected one drives the rings
 // and the market bars below. Selection is client state, so switching match costs no server round trip.
@@ -42,6 +55,13 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
   }, [sel]);
 
   if (!f) return null;
+  const [h, d, a] = (["p_home", "p_draw", "p_away"] as Side[]).map((k) => side(f, k));
+  const priced = Boolean(f.book.p_home || f.book.p_draw || f.book.p_away);
+  const apart = (["p_home", "p_draw", "p_away"] as Side[]).some((k) => {
+    const pm = f.book[k]?.pm;
+    const m = f[k];
+    return pm != null && m != null && Math.abs(pm - m) > 0.1;
+  });
   const scroll = (dir: number) => strip.current?.scrollBy({ left: dir * strip.current.clientWidth * 0.8, behavior: "smooth" });
   const move = (e: React.KeyboardEvent, i: number) => {
     const j = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : -1;
@@ -91,12 +111,20 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
       ) : (
         <div className="split card-pad" style={{ gap: 24 }}>
           <div>
-            <h4 className="note" style={{ margin: "0 0 10px" }}>Probabilità 1X2 (modello)</h4>
+            <h4 className="note" style={{ margin: "0 0 10px" }}>
+              {priced ? "Probabilità 1X2 (modello + quote Sisal)" : "Probabilità 1X2 (solo modello: nessuna quota Sisal recente)"}
+            </h4>
             <div className="rings">
-              <Ring value={f.p_home} label={f.home} sub={`quota equa ${fairOdds(f.p_home)}`} color="var(--s1)" top={<TeamBadge name={f.home} size="lg" />} />
-              <Ring value={f.p_draw} label="Pareggio" sub={`quota equa ${fairOdds(f.p_draw)}`} color="var(--s2)" top={<span className="ring-x" aria-hidden="true">X</span>} />
-              <Ring value={f.p_away} label={f.away} sub={`quota equa ${fairOdds(f.p_away)}`} color="var(--s3)" top={<TeamBadge name={f.away} size="lg" />} />
+              <Ring value={h.value} label={f.home} sub={h.sub} color="var(--s1)" top={<TeamBadge name={f.home} size="lg" />} />
+              <Ring value={d.value} label="Pareggio" sub={d.sub} color="var(--s2)" top={<span className="ring-x" aria-hidden="true">X</span>} />
+              <Ring value={a.value} label={f.away} sub={a.sub} color="var(--s3)" top={<TeamBadge name={f.away} size="lg" />} />
             </div>
+            {apart && (
+              <p className="note warn-note">
+                Il modello da solo si discosta molto dalle quote (dati storici scarsi per queste squadre): le schedine usano la
+                probabilità combinata con il mercato mostrata nei cerchi.
+              </p>
+            )}
             {f.xg_home != null && f.xg_away != null && (
               <p className="note" style={{ textAlign: "center", marginTop: 12 }}>
                 Gol attesi: <span className="num">{f.xg_home.toFixed(2)}</span> – <span className="num">{f.xg_away.toFixed(2)}</span>
@@ -104,9 +132,9 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
             )}
           </div>
           <div>
-            <h4 className="note" style={{ margin: "0 0 10px" }}>Mercati principali (probabilità del modello)</h4>
+            <h4 className="note" style={{ margin: "0 0 10px" }}>Mercati principali (con quota Sisal: probabilità combinata; senza: modello)</h4>
             {f.picks.map(([l, p]) => <HBar key={l} label={l} p={p} />)}
-            <div style={{ marginTop: 10 }}><Split1X2 h={f.p_home} d={f.p_draw} a={f.p_away} /></div>
+            <div style={{ marginTop: 10 }}><Split1X2 h={h.value} d={d.value} a={a.value} /></div>
           </div>
         </div>
       )}

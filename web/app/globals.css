@@ -282,6 +282,7 @@ td.wrap { white-space: normal; min-width: 210px; }
 .ring svg { width: 100%; max-width: 116px; height: auto; }
 .ring b { font-size: 13px; font-weight: 600; }
 .ring small { color: var(--muted); font-size: 12px; }
+.warn-note { margin: 12px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--text-2); }
 .ring-top { height: 52px; display: grid; place-items: center; }
 .ring-x {
   width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-strong);
@@ -407,3 +408,6 @@ td.wrap { white-space: normal; min-width: 210px; }
 .strip-text b { display: block; font-size: 13.5px; line-height: 1.35; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .strip-text small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .strip { scroll-behavior: auto; } }
+
+.refresh { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.refresh .btn { width: 100%; justify-content: center; gap: 6px; }

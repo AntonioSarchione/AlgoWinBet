@@ -45,6 +45,7 @@ export type FixtureRow = {
   xg_home: number | null;
   xg_away: number | null;
   markets: string | null;
+  book?: string | null; // JSON: Sisal price, market and final probability of the headline selections (absent on old runs)
 };
 
 export type OppRow = {
@@ -202,8 +203,16 @@ export const usage = persist(async () => {
   const month = `M${now.toISOString().slice(0, 7)}`;
   const rows = await all<Usage>("SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", [day, month]);
   const get = (src: string, kind: "D" | "M") => rows.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
-  return { goalDay: get("goal-api", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D") };
+  return { goalDay: get("goal-api", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D"), manualMonth: get("manual-refresh", "M") };
 }, "usage", LIVE_TTL);
+
+/** Uncached: the manual refresh button checks the monthly cap right before starting a run. */
+export async function manualRefreshesThisMonth(): Promise<number> {
+  const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'manual-refresh' AND period = ?", [
+    `M${new Date().toISOString().slice(0, 7)}`,
+  ]);
+  return rows[0]?.used ?? 0;
+}
 
 export const lastTick = persist(async () => {
   const r = await all<{ t: string | null }>("SELECT MAX(fetched_at) AS t FROM raw_requests");

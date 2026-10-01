@@ -410,6 +410,7 @@ def test_publish_writes_dashboard_tables_and_prunes():
         s.save_quotes("mock", mock.get_quotes(f.id))
     cfg = Config()
     cfg.ensemble.quote_window_hours = 72  # mock prices are timed relative to kickoff, not to "now"
+    cfg.bet_bookmakers = ["BookA", "BookB", "BookC"]  # mock books stand in for Sisal
     rid, res = analyze_and_publish(s, cfg, now=mock.as_of)
     n_fx = s.db.execute("SELECT COUNT(*), SUM(p_home IS NOT NULL) FROM pub_fixtures WHERE run_id=?", (rid,)).fetchone()
     assert n_fx[0] == len(res.fixtures) > 0 and n_fx[1] == n_fx[0]
@@ -425,6 +426,10 @@ def test_publish_writes_dashboard_tables_and_prunes():
     assert xg_h > 0 and abs(mk[("1X2", "1")] + mk[("1X2", "X")] + mk[("1X2", "2")] - 1) < 0.01
     assert mk[("Combo", "1 + Over 2.5")] <= min(mk[("1X2", "1")], mk[("Under/Over", "Over 2.5")])
     assert mk[("Multigol", "Multigol 1-3")] >= mk[("Multigol", "Multigol 2-3")]
+    # bookmaker side of the headline selections: playable price, market probability, final (blended) probability
+    books = [json.loads(b) for (b,) in s.db.execute("SELECT book FROM pub_fixtures WHERE run_id=? AND book IS NOT NULL", (rid,))]
+    assert books and all(v["odds"] > 1 and 0 < v["pf"] < 1 for b in books for v in b.values())
+    assert set().union(*books) <= {"p_home", "p_draw", "p_away", "p_over25", "p_btts"}
 
 
 def test_publish_adds_new_columns_to_an_existing_database():
