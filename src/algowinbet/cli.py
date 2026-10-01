@@ -496,6 +496,54 @@ def _has_table(store: SnapshotStore, name: str) -> bool:
     return store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
+def cmd_model_check(a) -> None:
+    """Expected goals of the upcoming matches of a team, current model vs variants (no API request): to see why the model
+    prices a match the way it does."""
+    import copy
+    from .engine import Engine
+    from .markets import probability
+    from .domain import SelectionRef
+    store = SnapshotStore(a.db)
+    try:
+        prov = SnapshotProvider(store)
+        now = datetime.now(timezone.utc)
+        fx = [f for f in prov.list_fixtures(None, now, now + timedelta(days=14)) if a.team.lower() in (f.home + " " + f.away).lower()]
+        base = _cfg(a)
+        variants = {"attuale": {}, "senza-elo-nazionali": {"nation_elo_per_100": 0.0}}
+        o75 = SelectionRef(market_code="TOTAL_GOALS", selection="OVER", line=7.5)
+        for name, ch in variants.items():
+            c = copy.deepcopy(base)
+            for k, v in ch.items():
+                setattr(c.model, k, v)
+            eng = Engine(prov, c, use_lineups=False)
+            for f in fx[:6]:
+                fitted = eng.fit(f.competition, now)
+                if not fitted:
+                    print(f"[{name}] {f.home}-{f.away}: nessun modello")
+                    continue
+                m = fitted[0]
+                lh, la = m.expected_goals(f.home, f.away)
+                mat = m.score_matrix(f.home, f.away)
+                print(f"[{name}] {f.home}-{f.away} ({f.competition}): xG {lh:.2f}-{la:.2f}, Over 7.5 {probability(mat, o75):.1%}, "
+                      f"partite nello storico {m.n_matches.get(f.home, 0)}/{m.n_matches.get(f.away, 0)}, "
+                      f"livello gol {m.mu_comp.get(f.competition, m.mu):.2f}, casa {m.home_adv:.2f}")
+                for t in (f.home, f.away):
+                    if t in m.teams:
+                        k = m.teams[t]
+                        print(f"    {t}: attacco {m.attack[k]:+.2f} difesa {m.defence[k]:+.2f}")
+            if name == "attuale":
+                clubs, nations = eng.elo()
+                for f in fx[:6]:
+                    print("    Elo nazionali: " + ", ".join(f"{t} {nations.at(t, now):.0f}" if nations and nations.at(t, now) else f"{t} -"
+                                                       for t in (f.home, f.away)))
+        for f in fx[:2]:
+            for t in (f.home, f.away):
+                rows = [r for r in prov.list_history(None, now) if t in (r.home, r.away)][-8:]
+                print(f"  ultime di {t}: " + "; ".join(f"{r.home} {r.home_goals}-{r.away_goals} {r.away} ({r.kickoff:%d/%m/%y})" for r in rows))
+    finally:
+        store.close()
+
+
 def cmd_model_eval(a) -> None:
     """Walk-forward comparison of model variants on the stored results (no API request)."""
     from .modeleval import VARIANTS, default_window, evaluate, print_report
@@ -890,6 +938,11 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--db", default="turso")
     dr.add_argument("--examples", type=int, default=6)
     dr.set_defaults(fn=cmd_dataset_report)
+    mk = sub.add_parser("model-check", help="gol attesi del modello per le prossime partite di una squadra (nessuna richiesta)")
+    mk.add_argument("team")
+    mk.add_argument("--db", default="turso")
+    mk.add_argument("--config")
+    mk.set_defaults(fn=cmd_model_check)
     me = sub.add_parser("model-eval", help="confronto walk-forward delle varianti del modello sui risultati salvati (nessuna richiesta)")
     me.add_argument("--db", default="turso")
     me.add_argument("--weeks", type=int, default=52)
