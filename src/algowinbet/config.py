@@ -21,6 +21,9 @@ class ModelCfg(BaseModel):
     nation_elo_per_100: float = 0.15  # model-eval 2026-10-01: national matches 1X2 log loss 1.0095 -> 0.9850 (n=259)
     # league effects (pooled model): home advantage per competition shrunk to the shared one (None = shared only), goal
     # level per competition shrunk to the overall one (0 = free)
+    # national teams: years of international results (every friendly and competitive match, github martj42) added to the
+    # history of the national teams our competitions involve (0 = only our own results)
+    national_history_years: float = 0.0
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results

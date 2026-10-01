@@ -68,6 +68,7 @@ class DixonColes:
         cidx = {c: k for k, c in enumerate(comps)}
         C = len(comps)
         ci = np.array([cidx[r.competition] if self.comp_mu else 0 for r in results])
+        hm = np.array([0.0 if getattr(r, "neutral", False) else 1.0 for r in results])  # home advantage applies (1) or not (0)
 
         a0, d0 = np.zeros(T), np.zeros(T)
         for team, (pa, pd) in (prior or {}).items():
@@ -92,7 +93,7 @@ class DixonColes:
         def nll(th):
             a, d, h, mu0, mu, dh = unpack(th)
             m = mu[ci]
-            eh = m + h + dh[ci] + a[hi] - d[ai]
+            eh = m + (h + dh[ci]) * hm + a[hi] - d[ai]
             ea = m + a[ai] - d[hi]
             lh, la = np.exp(eh), np.exp(ea)
             ll = np.sum(w * (x * eh - lh + y * ea - la))
@@ -100,11 +101,11 @@ class DixonColes:
             ga = np.bincount(hi, rh, T) + np.bincount(ai, ra, T)
             gd = -np.bincount(ai, rh, T) - np.bincount(hi, ra, T)
             gmu = -np.bincount(ci, rh + ra, C) + 2 * lmu * (mu - mu0)
-            gdh = -np.bincount(ci, rh, C) + (2 * lh_c * dh if lh_c is not None else 0.0)
+            gdh = -np.bincount(ci, rh * hm, C) + (2 * lh_c * dh if lh_c is not None else 0.0)
             pen = self.l2 * ((a - a0) @ (a - a0) + (d - d0) @ (d - d0)) + lmu * ((mu - mu0) @ (mu - mu0))
             if lh_c is not None:
                 pen += lh_c * (dh @ dh)
-            parts = [-ga + 2 * self.l2 * (a - a0), -gd + 2 * self.l2 * (d - d0), [-rh.sum()], gmu]
+            parts = [-ga + 2 * self.l2 * (a - a0), -gd + 2 * self.l2 * (d - d0), [-(rh * hm).sum()], gmu]
             if n_mu0:
                 parts.append([-2 * lmu * (mu - mu0).sum()])
             if n_dh:
@@ -122,7 +123,7 @@ class DixonColes:
         self.home_comp = {c: float(dh[k]) for c, k in cidx.items()} if lh_c is not None else {}
 
         # stage 2: rho on low-score cells
-        lh = np.exp(mu[ci] + h + dh[ci] + a[hi] - d[ai])
+        lh = np.exp(mu[ci] + (h + dh[ci]) * hm + a[hi] - d[ai])
         la = np.exp(mu[ci] + a[ai] - d[hi])
 
         def neg_rho(r):
@@ -145,21 +146,22 @@ class DixonColes:
     def knows(self, team: str) -> bool:
         return team in self.teams
 
-    def expected_goals(self, home: str, away: str, competition: str | None = None) -> tuple[float, float]:
+    def expected_goals(self, home: str, away: str, competition: str | None = None, neutral: bool = False) -> tuple[float, float]:
         ah = self.attack[self.teams[home]] if home in self.teams else 0.0
         dh = self.defence[self.teams[home]] if home in self.teams else 0.0
         aa = self.attack[self.teams[away]] if away in self.teams else 0.0
         da = self.defence[self.teams[away]] if away in self.teams else 0.0
         mu = self.mu_comp.get(competition, self.mu) if competition else self.mu
-        home = self.home_adv + (self.home_comp.get(competition, 0.0) if competition else 0.0)
+        home = 0.0 if neutral else self.home_adv + (self.home_comp.get(competition, 0.0) if competition else 0.0)
         return float(math.exp(mu + home + ah - da)), float(math.exp(mu + aa - dh))
 
     def for_competition(self, competition: str) -> "CompetitionView":
         return CompetitionView(self, competition)
 
-    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0), competition: str | None = None) -> np.ndarray:
+    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0), competition: str | None = None,
+                     neutral: bool = False) -> np.ndarray:
         """log_adj shifts log-lambda of (home, away), e.g. from lineup/availability effects."""
-        lh, la = self.expected_goals(home, away, competition)
+        lh, la = self.expected_goals(home, away, competition, neutral)
         lh, la = lh * math.exp(log_adj[0]), la * math.exp(log_adj[1])
         g = np.arange(GRID)
         m = np.outer(poisson.pmf(g, lh), poisson.pmf(g, la))
@@ -193,11 +195,12 @@ class CompetitionView:
     def __init__(self, model: DixonColes, competition: str):
         self.model, self.competition = model, competition
 
-    def expected_goals(self, home: str, away: str, competition: str | None = None) -> tuple[float, float]:
-        return self.model.expected_goals(home, away, competition or self.competition)
+    def expected_goals(self, home: str, away: str, competition: str | None = None, neutral: bool = False) -> tuple[float, float]:
+        return self.model.expected_goals(home, away, competition or self.competition, neutral)
 
-    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0), competition: str | None = None) -> np.ndarray:
-        return self.model.score_matrix(home, away, log_adj, competition or self.competition)
+    def score_matrix(self, home: str, away: str, log_adj: tuple[float, float] = (0.0, 0.0), competition: str | None = None,
+                     neutral: bool = False) -> np.ndarray:
+        return self.model.score_matrix(home, away, log_adj, competition or self.competition, neutral)
 
     def __getattr__(self, item):
         return getattr(self.model, item)

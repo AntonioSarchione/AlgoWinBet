@@ -49,6 +49,7 @@ class MatchResult(BaseModel):
     kickoff: datetime
     home_goals: int
     away_goals: int
+    neutral: bool = False  # played on neutral ground: no home advantage (international tournaments)
 
     @property
     def available_at(self) -> datetime:

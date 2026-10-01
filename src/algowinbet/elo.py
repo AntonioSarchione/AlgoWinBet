@@ -126,6 +126,44 @@ def parse_international(body: bytes, names: TeamNames | None = None) -> list[Elo
     return out
 
 
+INTL_FRIENDLY = "Nazionali · amichevoli"
+INTL_OFFICIAL = "Nazionali · ufficiali"
+
+
+def international_results(body: bytes, names: TeamNames | None = None) -> list:
+    """Every played international match as a MatchResult for the goal model: friendlies and competitive matches get their
+    own goal level, neutral-ground matches no home advantage. Dated results: kickoff set at 18:00 UTC of that day."""
+    from .domain import MatchResult
+    names = names or TeamNames()
+    out = []
+    for row in csv.DictReader(io.StringIO(body.decode("utf-8-sig", errors="replace"))):
+        try:
+            hg, ag = int(row["home_score"]), int(row["away_score"])
+            day = datetime.strptime(row["date"], "%Y-%m-%d").replace(hour=18, tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        h, a = names.canon(row["home_team"]), names.canon(row["away_team"])
+        comp = INTL_FRIENDLY if row.get("tournament", "").strip().lower() == "friendly" else INTL_OFFICIAL
+        out.append(MatchResult(fixture_id=f"intl:{row['date']}:{h}:{a}", competition=comp, home=h, away=a, kickoff=day,
+                               home_goals=hg, away_goals=ag, neutral=str(row.get("neutral", "")).strip().upper() == "TRUE"))
+    return out
+
+
+def national_history(intl: list, ours: list, nations: set[str], since: datetime, until: datetime) -> list:
+    """International results that add to our own history: involving one of `nations`, between since and until (known by
+    then), and not already in our results (same teams within a day: our feed keeps its own row)."""
+    seen = {(r.home, r.away, r.kickoff.date()) for r in ours}
+    out = []
+    for r in intl:
+        if not (since <= r.kickoff and r.available_at <= until) or not (r.home in nations or r.away in nations):
+            continue
+        d = r.kickoff.date()
+        if any((r.home, r.away, d + timedelta(days=k)) in seen for k in (-1, 0, 1)):
+            continue
+        out.append(r)
+    return out
+
+
 def national_timeline(body: bytes | None, names: TeamNames | None = None) -> EloTimeline:
     return EloTimeline(parse_international(body, names) if body else [])
 

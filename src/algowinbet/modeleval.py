@@ -31,6 +31,9 @@ VARIANTS: dict[str, dict] = {
     "campionati": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0},
     "elo-club": {"club_elo_per_100": 0.10},
     "senza-elo-nazionali": {"nation_elo_per_100": 0.0},  # base has it on since 2026-10-01
+    "storico-nazionali-2": {"national_history_years": 2.0},
+    "storico-nazionali-4": {"national_history_years": 4.0},
+    "storico-nazionali-4-senza-elo": {"national_history_years": 4.0, "nation_elo_per_100": 0.0},
     "elo-nazionali-0.08": {"nation_elo_per_100": 0.08},
     "elo-nazionali-0.25": {"nation_elo_per_100": 0.25},
     "emivita-180": {"xi_half_life_days": 180.0},
@@ -139,36 +142,74 @@ class _Frozen:
         return getattr(self.base, item)
 
 
+INTL_GROUP = "nazionali (tutte le partite)"
+
+
+def _international_tests(provider, cfg: Config, finished: list, start: datetime, end: datetime) -> list[tuple]:
+    """Extra test matches for national teams: every non-neutral international between two national sides of our
+    competitions, played in the window and not already among our results. Predicted with our national competition's
+    goal level, so every variant prices them the same way."""
+    fn = getattr(provider, "international_results", None)
+    body = fn() if fn else None
+    if not body:
+        return []
+    from .elo import international_results, national_history
+    from .names import TeamNames
+    intl = international_results(body, TeamNames.load(cfg.model.aliases_path))
+    ours = [r for r in provider.rows if group_of(r.competition) == "nazionali"]
+    if not ours:
+        return []
+    comp = max({r.competition for r in ours}, key=lambda c: sum(r.competition == c for r in ours))
+    nations = {t for r in ours for t in (r.home, r.away)}
+    extra = [r for r in national_history(intl, provider.rows, nations, start, end + timedelta(days=7))
+             if r.kickoff < end and r.home in nations and r.away in nations and not r.neutral]
+    return [(r, comp, (INTL_GROUP,)) for r in extra]
+
+
 def evaluate(provider, cfg: Config, start: datetime, end: datetime, variants: dict[str, dict] | None = None,
-             with_reference: bool = True) -> EvalReport:
+             with_reference: bool = True, intl_tests: bool = True) -> EvalReport:
+    """Every variant predicts the same matches: a match is scored only when all variants can price it (a variant that
+    knows more teams does not get a different test set)."""
     variants = variants or VARIANTS
     provider = _Frozen(provider, end)
     finished = [r for r in provider.rows if start <= r.kickoff < end]
+    tests = [(r, r.competition, (group_of(r.competition), "tutte") + ((INTL_GROUP,) if group_of(r.competition) == "nazionali" else ()))
+             for r in finished]
+    if intl_tests:
+        tests += _international_tests(provider, cfg, finished, start, end)
     weeks: dict[datetime, list] = defaultdict(list)
-    for r in finished:
-        monday = (r.kickoff - timedelta(days=r.kickoff.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        weeks[monday].append(r)
+    for t in tests:
+        k = t[0].kickoff
+        weeks[(k - timedelta(days=k.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)].append(t)
     refs = _closing_all(provider, {r.fixture_id for r in finished}) if with_reference else {}
-    rep = EvalReport(weeks=len(weeks))
+    engines = {}
     for name, changes in variants.items():
         c = copy.deepcopy(cfg)
         for k, v in changes.items():
             setattr(c.model, k, v)
-        eng = Engine(provider, c, use_lineups=False)
-        t0 = time.monotonic()
-        acc: dict[str, Scores] = defaultdict(Scores)
-        for monday in sorted(weeks):
-            for r in weeks[monday]:
-                fitted = eng.fit(r.competition, monday)
+        engines[name] = Engine(provider, c, use_lineups=False)
+    rep = EvalReport(weeks=len(weeks))
+    acc: dict[str, dict[str, Scores]] = {name: defaultdict(Scores) for name in engines}
+    secs = {name: 0.0 for name in engines}
+    for monday in sorted(weeks):
+        for r, comp, groups in weeks[monday]:
+            preds = {}
+            for name, eng in engines.items():
+                t0 = time.monotonic()
+                fitted = eng.fit(comp, monday)
                 if fitted is None or not (fitted[0].knows(r.home) and fitted[0].knows(r.away)):
-                    continue
+                    break
                 m = fitted[0].score_matrix(r.home, r.away)
-                p = {k: float(probability(m, ref)) for k, ref in REFS.items()}
-                ref = refs.get(r.fixture_id)
-                for g in (group_of(r.competition), "tutte"):
-                    acc[g].add(p, r.home_goals, r.away_goals, ref)
-        rep.seconds[name] = time.monotonic() - t0
-        rep.scores[name] = {g: s.row() for g, s in sorted(acc.items())}
+                preds[name] = {k: float(probability(m, ref)) for k, ref in REFS.items()}
+                secs[name] += time.monotonic() - t0
+            if len(preds) < len(engines):
+                continue
+            ref = refs.get(r.fixture_id)
+            for name, p in preds.items():
+                for g in groups:
+                    acc[name][g].add(p, r.home_goals, r.away_goals, ref)
+    rep.seconds = secs
+    rep.scores = {name: {g: s.row() for g, s in sorted(a.items())} for name, a in acc.items()}
     return rep
 
 
@@ -178,14 +219,14 @@ def print_report(rep: EvalReport) -> None:
     base = rep.scores.get("base", {})
     for g in groups:
         print(f"\n[{g}]  (più basso = meglio; diff = differenza rispetto a base)")
-        print(f"  {'variante':<15}{'n':>6} {'LL 1X2':>8} {'diff':>8} {'RPS':>7} {'LL O2.5':>8} {'diff':>8} {'LL GG':>7} {'diff':>8}  {'LL chiusura (stesse partite)':>30}")
+        print(f"  {'variante':<30}{'n':>6} {'LL 1X2':>8} {'diff':>8} {'RPS':>7} {'LL O2.5':>8} {'diff':>8} {'LL GG':>7} {'diff':>8}  {'LL chiusura (stesse partite)':>30}")
         for name, by in rep.scores.items():
             s = by.get(g)
             if not s:
                 continue
             b = base.get(g) or s
             ref = (f"modello {s['ll_1x2_model_on_ref']:.4f} vs quota {s['ll_1x2_ref']:.4f} (n={s['n_ref']})" if s["n_ref"] else "—")
-            print(f"  {name:<15}{s['n']:>6} {s['ll_1x2']:>8.4f} {s['ll_1x2'] - b['ll_1x2']:>+8.4f} {s['rps']:>7.4f} "
+            print(f"  {name:<30}{s['n']:>6} {s['ll_1x2']:>8.4f} {s['ll_1x2'] - b['ll_1x2']:>+8.4f} {s['rps']:>7.4f} "
                   f"{s['ll_o25']:>8.4f} {s['ll_o25'] - b['ll_o25']:>+8.4f} {s['ll_btts']:>7.4f} {s['ll_btts'] - b['ll_btts']:>+8.4f}  {ref}")
     print("\nTempi: " + ", ".join(f"{k} {v:.0f}s" for k, v in rep.seconds.items()))
 

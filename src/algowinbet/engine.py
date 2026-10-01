@@ -72,6 +72,7 @@ class Engine:
         self._impact: dict[tuple[str, datetime], PlayerImpactModel | None] = {}
         self._rosters: dict[str, list[Player]] = {}
         self._elo: tuple[EloTimeline | None, EloTimeline | None] | None = None
+        self._intl: list | None = None
 
     # ---------------------------------------------------------------- models
     def roster(self, competition: str) -> list[Player]:
@@ -89,7 +90,7 @@ class Engine:
             key = ("*", cutoff)
             if key not in self._models:
                 hist = history_at(self.provider, None, cutoff, m.history_seasons)
-                self._models[key] = self._fit_hist(hist, cutoff, comp_mu=True)
+                self._models[key] = self._fit_hist(hist + self.national_extra(hist, cutoff), cutoff, comp_mu=True)
             pooled = self._models[key]
             if pooled is None or competition not in pooled[0].mu_comp:
                 return None  # no history for this competition at all: no model, no bet
@@ -115,6 +116,30 @@ class Engine:
                 nations = national_timeline(body, TeamNames.load(m.aliases_path)) if body else None
             self._elo = (clubs, nations)
         return self._elo
+
+    def international(self) -> list:
+        if self._intl is None:
+            fn = getattr(self.provider, "international_results", None)
+            body = fn() if fn else None
+            if body:
+                from .elo import international_results
+                from .names import TeamNames
+                self._intl = international_results(body, TeamNames.load(self.cfg.model.aliases_path))
+            else:
+                self._intl = []
+        return self._intl
+
+    def national_extra(self, hist, cutoff: datetime) -> list:
+        """International results of the national teams in our history (pooled model only): a national side plays a few
+        competitive matches a year in our feed, ten or more in all."""
+        years = self.cfg.model.national_history_years
+        intl = self.international() if years else []
+        if not intl:
+            return []
+        from .elo import national_history
+        known = {t for r in intl for t in (r.home, r.away)}
+        nations = {t for r in hist for t in (r.home, r.away) if t in known}
+        return national_history(intl, hist, nations, cutoff - timedelta(days=365.25 * years), cutoff)
 
     def _fit_hist(self, hist, cutoff: datetime, comp_mu: bool):
         m = self.cfg.model

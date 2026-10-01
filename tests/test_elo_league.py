@@ -130,3 +130,38 @@ def test_model_eval_scores_variants_walk_forward():
     s = rep.scores["base"]["campionati"]
     assert rep.weeks >= 4 and s["n"] > 100 and 0.8 < s["ll_1x2"] < 1.3 and s["n_ref"] == 0
     assert set(rep.scores) == {"base", "campionati"}
+
+
+def test_international_history_adds_matches_not_in_our_feed_and_skips_home_advantage_on_neutral_ground():
+    from algowinbet.elo import INTL_FRIENDLY, INTL_OFFICIAL, international_results, national_history
+    intl = international_results(INTL + b"2025-06-14,Spain,Malta,4,0,Friendly,Cadiz,Spain,TRUE\n")
+    assert [r.competition for r in intl] == [INTL_OFFICIAL, INTL_OFFICIAL, INTL_OFFICIAL, INTL_FRIENDLY]
+    assert intl[-1].neutral and not intl[0].neutral
+    ours = [MatchResult(fixture_id="goal:1", competition="UEFA Nations League", home="Netherlands", away="Greece",
+                        kickoff=datetime(2025, 3, 20, 19, 45, tzinfo=UTC), home_goals=3, away_goals=0)]
+    got = national_history(intl, ours, {"Netherlands"}, datetime(2025, 1, 1, tzinfo=UTC), datetime(2025, 12, 31, tzinfo=UTC))
+    assert [(r.home, r.away) for r in got] == [("Greece", "Netherlands"), ("Netherlands", "Malta")]  # ours kept, Spain not involved
+
+
+def test_neutral_ground_has_no_home_advantage():
+    res = _league("L", 8, 1.8, 1.0, 40, 5)
+    m = DixonColes().fit(res, T0 + timedelta(days=41))
+    lh, la = m.expected_goals("L0", "L1")
+    nh, na = m.expected_goals("L0", "L1", neutral=True)
+    assert math.isclose(lh / nh, math.exp(m.home_adv)) and math.isclose(la, na)
+    neutral = [r.model_copy(update={"neutral": True}) for r in res]
+    assert abs(DixonColes().fit(neutral, T0 + timedelta(days=41)).home_adv - 0.25) < 1e-6  # no data on it: stays at the start
+
+
+def test_engine_adds_international_history_for_our_national_teams():
+    st = SnapshotStore(":memory:")
+    res = _league("Liga", 10, 1.5, 1.1, 30, 3, start=T0 - timedelta(days=60))
+    res.append(MatchResult(fixture_id="n1", competition="UEFA Nations League", home="Netherlands", away="Greece",
+                           kickoff=datetime(2025, 9, 1, tzinfo=UTC), home_goals=1, away_goals=1))
+    st.save_results("goal", res, T0)
+    from algowinbet.elo import INTL_ENDPOINT, INTL_SOURCE
+    st.put_raw(INTL_SOURCE, INTL_ENDPOINT, {}, 200, INTL, T0, cost=0)
+    cfg = Config()
+    cfg.model.national_history_years = 4
+    m = Engine(SnapshotProvider(st), cfg, use_lineups=False).fit("UEFA Nations League", datetime(2025, 9, 10, tzinfo=UTC))[0]
+    assert m.knows("Malta") and m.n_matches["Netherlands"] == 4  # ours + 3 internationals
