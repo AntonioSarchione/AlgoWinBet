@@ -23,11 +23,11 @@ class ModelCfg(BaseModel):
     # level per competition shrunk to the overall one (0 = free)
     # national teams: years of international results (every friendly and competitive match, github martj42) added to the
     # history of the national teams our competitions involve (0 = only our own results)
-    national_history_years: float = 0.0
+    national_history_years: float = 4.0  # model-eval 2026-10-01, 190 internationals: 1X2 LL 0.898 -> 0.842, O2.5 0.717 -> 0.664
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
-    version: str = "dc-poisson-v2"  # v2: national-team Elo prior
+    version: str = "dc-poisson-v3"  # v2: national-team Elo prior; v3: + 4 years of international results
 
 
 class EnsembleCfg(BaseModel):

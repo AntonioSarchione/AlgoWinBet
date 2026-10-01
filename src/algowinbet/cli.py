@@ -509,7 +509,7 @@ def cmd_model_check(a) -> None:
         now = datetime.now(timezone.utc)
         fx = [f for f in prov.list_fixtures(None, now, now + timedelta(days=14)) if a.team.lower() in (f.home + " " + f.away).lower()]
         base = _cfg(a)
-        variants = {"attuale": {}, "senza-elo-nazionali": {"nation_elo_per_100": 0.0}}
+        variants = {"attuale": {}, "senza-storico-nazionali": {"national_history_years": 0.0}}
         o75 = SelectionRef(market_code="TOTAL_GOALS", selection="OVER", line=7.5)
         for name, ch in variants.items():
             c = copy.deepcopy(base)

@@ -31,9 +31,9 @@ VARIANTS: dict[str, dict] = {
     "campionati": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0},
     "elo-club": {"club_elo_per_100": 0.10},
     "senza-elo-nazionali": {"nation_elo_per_100": 0.0},  # base has it on since 2026-10-01
+    "senza-storico-nazionali": {"national_history_years": 0.0},  # base has 4 years since 2026-10-01
     "storico-nazionali-2": {"national_history_years": 2.0},
-    "storico-nazionali-4": {"national_history_years": 4.0},
-    "storico-nazionali-4-senza-elo": {"national_history_years": 4.0, "nation_elo_per_100": 0.0},
+    "storico-nazionali-6": {"national_history_years": 6.0},
     "elo-nazionali-0.08": {"nation_elo_per_100": 0.08},
     "elo-nazionali-0.25": {"nation_elo_per_100": 0.25},
     "emivita-180": {"xi_half_life_days": 180.0},
