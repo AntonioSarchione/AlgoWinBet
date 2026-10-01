@@ -888,7 +888,7 @@ def build_parser() -> argparse.ArgumentParser:
     me = sub.add_parser("model-eval", help="confronto walk-forward delle varianti del modello sui risultati salvati (nessuna richiesta)")
     me.add_argument("--db", default="turso")
     me.add_argument("--weeks", type=int, default=52)
-    me.add_argument("--variants", nargs="*", help="es. base campionati elo-club elo-nazionali emivita-180 emivita-540 tutto")
+    me.add_argument("--variants", nargs="*", help="es. base senza-elo-nazionali campionati elo-club emivita-180 emivita-540 tutto")
     me.add_argument("--config")
     me.set_defaults(fn=cmd_model_eval)
     mc = sub.add_parser("market-coverage", help="mercati quotati da un bookmaker nelle fotografie salvate (nessuna richiesta API)")
