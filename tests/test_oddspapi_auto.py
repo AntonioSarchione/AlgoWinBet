@@ -145,7 +145,10 @@ def test_mapper_links_fixture_and_maps_goal_markets_only():
     assert qs[("pinnacle", "BTTS", "YES", None)] == 1.9 and ("pinnacle", "BTTS", "NO", None) not in qs  # inactive price
     assert not any(b == "snai.it" for b, *_ in qs)  # suspended bookmaker
     assert m.report.unmapped_markets == {"Corners Over/Under": 1}
-    assert m.match_fixture(fixture_odds(start="2026-10-11T13:00:00Z"), cal) is None and m.report.gaps
+    assert m.match_fixture(fixture_odds(start="2026-10-11T13:00:00Z"), cal).id == "goal:g1"  # moved by a day: same match
+    assert m.match_fixture(fixture_odds(start="2026-10-16T13:00:00Z"), cal) is None and m.report.gaps  # too far apart
+    twice = cal + [Fixture(id="goal:g9", competition="Coppa Italia", home="Genoa", away="Fiorentina", kickoff=utc(2026, 10, 13, 19))]
+    assert m.match_fixture(fixture_odds(start="2026-10-11T19:00:00Z"), twice) is None  # two candidates: never guess
 
 
 def test_history_keeps_only_prekickoff_points_and_marks_close():

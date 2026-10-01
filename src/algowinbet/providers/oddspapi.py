@@ -194,6 +194,13 @@ class OddsPapiMapper:
         if scored and scored[0][0] >= 0.75 and (len(scored) == 1 or scored[1][0] < scored[0][0] - 0.15):
             self.report.good("fixture link (nomi simili)")
             return scored[0][1]
+        # Rescheduled match (TV picks, postponements): the two sources disagree on the date. Same two teams within a few days
+        # and only one such fixture: it is the same match. The calendar (GOAL) keeps its own kickoff.
+        moved = [f for f in calendar if abs(f.kickoff - ko) <= timedelta(days=4)
+                 and self._sim(home, f.home) >= 0.95 and self._sim(away, f.away) >= 0.95]
+        if len(moved) == 1:
+            self.report.good("fixture link (orario diverso)")
+            return moved[0]
         self.report.gap(f"fixture oddspapi senza corrispondenza: {home}-{away} {ko:%Y-%m-%d %H:%M}")
         return None
 
