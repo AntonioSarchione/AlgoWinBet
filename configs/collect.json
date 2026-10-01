@@ -1,13 +1,13 @@
 {
-  "_comment": "Scheduler online (GitHub Actions). Id salvati una volta: nessuna richiesta di ricerca a runtime. goal = id lega GOAL (goal leagues ...), oddspapi = tournamentId OddsPapi (verificati 2026-09-30).",
+  "_comment": "Scheduler online (GitHub Actions). Id salvati una volta: nessuna richiesta di ricerca a runtime. goal = id lega GOAL (goal leagues ...), oddspapi = tournamentId OddsPapi (verificati 2026-09-30), fd = divisione football-data.co.uk (CSV stagionali gratuiti, uso privato).",
   "leagues": [
-    {"name": "Serie A", "goal": "cmr77dvpd006yrx06zig7907g", "oddspapi": 23},
-    {"name": "Premier League", "goal": "cmr77dvkr005nrx06lp7rvp49", "oddspapi": 17},
-    {"name": "Bundesliga", "goal": "cmr77dvgm0002rx06rt2uqxii", "oddspapi": 35},
-    {"name": "Ligue 1", "goal": "cmr77dvqg007crx06q1kaceyo", "oddspapi": 34},
-    {"name": "LaLiga", "goal": "cmr77dvnt006nrx063v3w622e", "oddspapi": 8},
-    {"name": "Liga Portugal", "goal": "cmr77dvun00adrx06xz20yfxe", "oddspapi": 238},
-    {"name": "Eredivisie", "goal": "cmr77dvrh007vrx0664phtxs5", "oddspapi": 37},
+    {"name": "Serie A", "goal": "cmr77dvpd006yrx06zig7907g", "oddspapi": 23, "fd": "I1"},
+    {"name": "Premier League", "goal": "cmr77dvkr005nrx06lp7rvp49", "oddspapi": 17, "fd": "E0"},
+    {"name": "Bundesliga", "goal": "cmr77dvgm0002rx06rt2uqxii", "oddspapi": 35, "fd": "D1"},
+    {"name": "Ligue 1", "goal": "cmr77dvqg007crx06q1kaceyo", "oddspapi": 34, "fd": "F1"},
+    {"name": "LaLiga", "goal": "cmr77dvnt006nrx063v3w622e", "oddspapi": 8, "fd": "SP1"},
+    {"name": "Liga Portugal", "goal": "cmr77dvun00adrx06xz20yfxe", "oddspapi": 238, "fd": "P1"},
+    {"name": "Eredivisie", "goal": "cmr77dvrh007vrx0664phtxs5", "oddspapi": 37, "fd": "N1"},
     {"name": "UEFA Champions League", "goal": "cmr77dw3900f5rx06j05wgzv4", "oddspapi": 7},
     {"name": "UEFA Europa League", "goal": "cmr77dw3900f6rx06tuqwft2d", "oddspapi": 679},
     {"name": "UEFA Nations League", "goal": "cmr77dw4800fgrx06rwmig2h8", "oddspapi": 23755}

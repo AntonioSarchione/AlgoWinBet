@@ -17,6 +17,8 @@ Plan per tick (UTC):
   - OddsPapi history ..... free /historical-odds (Sisal + Pinnacle) for linked fixtures: once a day up to 7 days ahead,
                            then at 24/12/6/3/1.5h before kickoff and right after a confirmed XI. Pinnacle comes only from here
   - OddsPapi closing ..... free /historical-odds after kickoff (closing line for CLV)
+  - football-data ........ season CSVs (stats, xG, opening/closing Pinnacle, Betfair Exchange, market average) once the
+                           GOAL backfill is complete: past seasons once, the current season every dataset_refresh_days
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ from pathlib import Path
 from typing import Callable
 
 from .collector import CollectStats, GoalCollector
+from .fdcollector import FootballDataCollector
 from .oddscollector import LINKS_SCHEMA, OddsCollector
 from .providers.oddspapi import SOURCE
 from .snapshots import SnapshotProvider, SnapshotStore
@@ -39,6 +42,7 @@ class League:
     name: str
     goal: str | None = None       # GOAL league id (goal leagues "...")
     oddspapi: int | None = None   # OddsPapi tournamentId (odds tournaments "...")
+    fd: str | None = None         # football-data.co.uk division (I1, E0...): season CSVs
 
 
 @dataclass
@@ -64,6 +68,8 @@ class AutoConfig:
     history_checkpoints_h: tuple[float, ...] = (24, 12, 6, 3, 1.5)
     history_days: int = 7             # daily free price path for fixtures up to this far ahead
     history_per_tick: int = 20
+    divisions: dict[str, str] = field(default_factory=dict)  # football-data division -> competition
+    dataset_refresh_days: float = 3
 
     @classmethod
     def load(cls, path: str | Path) -> "AutoConfig":
@@ -76,6 +82,7 @@ class AutoConfig:
         # ids saved once in the config: no lookup request is ever needed at run time
         cfg.goal_leagues = cfg.goal_leagues or [l.goal for l in cfg.leagues if l.goal]
         cfg.oddspapi_tournaments = cfg.oddspapi_tournaments or [str(l.oddspapi) for l in cfg.leagues if l.oddspapi]
+        cfg.divisions = cfg.divisions or {l.fd: l.name for l in cfg.leagues if l.fd}
         return cfg
 
 
@@ -188,6 +195,8 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         steps.append("lineups")  # costs nothing when no fixture is inside the window
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
             steps.append("backfill")  # one league per tick until every league has its multi-season history
+        elif cfg.divisions and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days):
+            steps.append("datasets")  # season CSVs link to the backfilled results, so they wait for it
     if cfg.oddspapi_tournaments:
         cost = odds_cost or len(cfg.bookmakers)
         if manual:
@@ -205,7 +214,7 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
              max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
-             manual: bool = False, history: bool = False) -> list[CollectStats]:
+             manual: bool = False, history: bool = False, datasets: FootballDataCollector | None = None) -> list[CollectStats]:
     """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
     whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
@@ -232,6 +241,8 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if s in ("fixtures", "results", "stats", "lineups", "backfill") and goal is None:
             continue
         if s in ("odds", "history", "closing") and odds is None:
+            continue
+        if s == "datasets" and datasets is None:
             continue
         if s == "fixtures":
             out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
@@ -262,6 +273,9 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 out.append(odds.sync_prematch_history(only=history_due(store, cfg, t), max_seconds=left))
         elif s == "closing":
             out.append(odds.sync_closing())
+        elif s == "datasets":
+            left = 300.0 if max_seconds is None else max(30.0, max_seconds - (clock() - t0))
+            out.append(datasets.sync(cfg.history_seasons, cfg.dataset_refresh_days, max_seconds=left, clock=clock))
         if on_step and len(out) > before:
             on_step(out[-1])
     return out

@@ -18,6 +18,13 @@ const LABELS: Record<string, string> = {
 export default async function Sistema() {
   const [st, use, tick] = await Promise.all([systemStatus(), usage(), lastTick()]);
   const backfill = st.jobs.filter((j) => j.name.startsWith("backfill:"));
+  type Report = { season: string; competition: string; rows: number; linked: number; unmatched: string[] };
+  const datasets = st.jobs
+    .filter((j) => j.name.startsWith("dataset-report:"))
+    .map((j) => ({ at: j.done_at, ...parseJSON<Report>(j.detail, { season: "", competition: "", rows: 0, linked: 0, unmatched: [] }) }))
+    .sort((a, b) => a.competition.localeCompare(b.competition) || b.season.localeCompare(a.season));
+  const rows = datasets.reduce((n, d) => n + d.rows, 0);
+  const linked = datasets.reduce((n, d) => n + d.linked, 0);
 
   return (
     <>
@@ -67,6 +74,36 @@ export default async function Sistema() {
           </div>
         </section>
       </div>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>Dati stagionali (football-data.co.uk)</h2>
+          <span className="count">{rows ? `${((100 * linked) / rows).toFixed(1)}% abbinate` : "in attesa del primo download"}</span>
+        </div>
+        {datasets.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Competizione</th><th>Stagione</th><th className="num">Partite</th><th className="num">Abbinate</th><th>Aggiornato</th><th>Non abbinate</th></tr>
+              </thead>
+              <tbody>
+                {datasets.map((d) => (
+                  <tr key={`${d.competition}-${d.season}`}>
+                    <td>{d.competition}</td>
+                    <td className="muted">20{d.season.slice(0, 2)}/{d.season.slice(2)}</td>
+                    <td className="num">{d.rows}</td>
+                    <td className="num">{d.rows ? `${((100 * d.linked) / d.rows).toFixed(0)}%` : "—"}</td>
+                    <td className="muted">{ago(d.at)}</td>
+                    <td className="muted" style={{ whiteSpace: "normal", fontSize: 12, minWidth: 200 }}>{d.unmatched.slice(0, 3).join(" · ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty icon={Database} title="Nessun file stagionale ancora">Statistiche, xG e quote di apertura/chiusura arrivano dopo lo storico GOAL.</Empty>
+        )}
+      </section>
 
       <section className="card">
         <div className="card-head"><h2><Activity size={17} color="var(--accent)" aria-hidden="true" /> Analisi pubblicate</h2></div>

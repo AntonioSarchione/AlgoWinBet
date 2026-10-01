@@ -497,13 +497,16 @@ def cmd_collect_auto(a) -> None:
     if cfg.oddspapi_tournaments and (os.environ.get("ODDSPAPI_API_KEY") or os.environ.get("ODDSPAPI_KEY")):
         oc = OddsPapiClient(store=store, budget=BudgetGuard(store, "oddspapi", monthly=cfg.oddspapi_monthly_limit, reserve=cfg.oddspapi_reserve))
         odds = OddsCollector(oc, store, cfg.oddspapi_tournaments, cfg.bookmakers, names, history_books=cfg.history_bookmakers)
+    from .fdcollector import FootballDataCollector
+    datasets = FootballDataCollector(store, cfg.divisions, names) if cfg.divisions else None  # public files, no key
     t0 = time.monotonic()
 
     def show(st):
         _print_stats(st)
         print(f"  ({time.monotonic() - t0:.0f}s dall'inizio)", flush=True)
     try:
-        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history)
+        results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history,
+                           datasets=datasets)
         if not results:
             print("tick: niente da fare")
         from .autorun import should_publish
