@@ -361,9 +361,29 @@ def test_history_reads_count_a_match_stored_under_two_ids_once():
         s.db.execute("INSERT INTO results(fixture_id,source,competition,home,away,kickoff,home_goals,away_goals,observed_at) "
                      "VALUES(?,?,?,?,?,?,?,?,?)", (fid, "goal-api", "Bundesliga", h, a, k.isoformat(), hg, ag, NOW.isoformat()))
     hist = SnapshotProvider(s).list_history(None, NOW)
-    assert [r.fixture_id for r in hist] == ["goal:b", "goal:d", "goal:c"]  # earliest kickoff of the pair kept; reverse fixture is another match
+    assert [r.fixture_id for r in hist] == ["goal:d", "goal:a", "goal:c"]  # smallest id of the pair kept; reverse fixture is another match
     merged = MergedProvider(SnapshotProvider(s), type("E", (), {"name": "e", "list_history": lambda *a: [], "list_competitions": lambda *a: []})())
     assert len(merged.list_history(None, NOW)) == 3
+
+
+def test_upcoming_match_listed_twice_is_one_fixture_under_one_id():
+    """Calendar, odds links, history and result all use the smallest id, whichever id the result was stored under."""
+    s = SnapshotStore(":memory:")
+    ko = NOW + timedelta(days=2)
+    s.save_fixtures("goal-api", [Fixture(id=fid, competition="LaLiga", home=h, away="Alavés", kickoff=ko, status=FixtureStatus.SCHEDULED)
+                                 for fid, h in (("goal:y", "Real Betis"), ("goal:x", "Real Betis"))], NOW)
+    s.save_fixtures("goal-api", [Fixture(id="goal:z", competition="LaLiga", home="Alavés", away="Real Betis", kickoff=ko + timedelta(days=90),
+                                         status=FixtureStatus.SCHEDULED)], NOW)
+    p = SnapshotProvider(s)
+    assert [f.id for f in p.list_fixtures(None, NOW, NOW + timedelta(days=120))] == ["goal:x", "goal:z"]
+    from algowinbet.domain import MatchResult
+    s.save_results("goal-api", [MatchResult(fixture_id="goal:y", competition="LaLiga", home="Real Betis", away="Alaves", kickoff=ko,
+                                            home_goals=2, away_goals=0)], NOW)
+    later = ko + timedelta(hours=3)
+    assert [r.fixture_id for r in p.list_history(None, later)] == ["goal:x"]
+    assert p.result_of("goal:x").home_goals == 2 and p.result_of("goal:y").fixture_id == "goal:y"
+    assert p.result_of("goal:z") is None
+    assert [f.id for f in p.list_fixtures(None, NOW, NOW + timedelta(days=3))] == ["goal:x"]  # backtest joins fixtures and results by id
 
 
 def test_plan_upgrade_required_is_reported_not_crashing():

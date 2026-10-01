@@ -65,16 +65,24 @@ def _match_key(home: str, away: str) -> tuple[str, str]:
     return normalize(home), normalize(away)
 
 
-def dedupe_results(results: Iterable[MatchResult]) -> list[MatchResult]:
-    """One row per match, in kickoff order. The first in (kickoff, fixture_id) order is kept, the choice save_results makes too."""
-    last: dict[tuple[str, str], datetime] = {}
-    out = []
-    for r in sorted(results, key=lambda r: (r.kickoff, r.fixture_id)):
-        k = _match_key(r.home, r.away)
-        if k in last and r.kickoff - last[k] <= SAME_MATCH:
-            continue
-        last[k] = r.kickoff
-        out.append(r)
+def canonical_ids(matches: Iterable[tuple[str, str, datetime, str]]) -> dict[str, str]:
+    """(home, away, kickoff, fixture_id) of every stored row -> fixture_id: the id each match is known by everywhere (calendar,
+    history, results, odds links), the smallest of the ids GOAL gave it. Kickoffs chained within SAME_MATCH are one match."""
+    out: dict[str, str] = {}
+    last: dict[tuple[str, str], tuple[datetime, list[str]]] = {}
+    groups: list[list[str]] = []
+    for h, a, ko, fid in sorted(matches, key=lambda m: (m[2], m[3])):
+        k = _match_key(h, a)
+        if k in last and ko - last[k][0] <= SAME_MATCH:
+            last[k][1].append(fid)
+            last[k] = (ko, last[k][1])
+        else:
+            g = [fid]
+            last[k] = (ko, g)
+            groups.append(g)
+    for g in groups:
+        c = min(g)
+        out.update((fid, c) for fid in g)
     return out
 
 
@@ -335,8 +343,25 @@ class SnapshotProvider:
         rows = self.store.db.execute("SELECT competition FROM fixtures UNION SELECT competition FROM results").fetchall()
         return sorted(r[0] for r in rows)
 
+    def _canonical(self, fixtures: list[Fixture] | None = None, results: list[MatchResult] | None = None) -> dict[str, str]:
+        fixtures = self._latest_fixtures() if fixtures is None else fixtures
+        results = self._results() if results is None else results
+        return canonical_ids([(f.home, f.away, f.kickoff, f.id) for f in fixtures] +
+                             [(r.home, r.away, r.kickoff, r.fixture_id) for r in results])
+
+    def _unique_fixtures(self) -> list[Fixture]:
+        """One fixture per match: a match GOAL lists under two ids appears once, under its canonical id."""
+        fixtures = self._latest_fixtures()
+        canon = self._canonical(fixtures)
+        out: dict[str, Fixture] = {}
+        for f in sorted(fixtures, key=lambda f: (f.id != canon.get(f.id, f.id), f.id)):  # the canonical row wins when stored
+            c = canon.get(f.id, f.id)
+            if c not in out:
+                out[c] = f if f.id == c else f.model_copy(update={"id": c})
+        return list(out.values())
+
     def list_fixtures(self, competitions, start, end) -> list[Fixture]:
-        return sorted((f for f in self._latest_fixtures()
+        return sorted((f for f in self._unique_fixtures()
                        if (not competitions or f.competition in competitions) and start <= f.kickoff <= end), key=lambda f: f.kickoff)
 
     def _results(self) -> list[MatchResult]:
@@ -344,11 +369,27 @@ class SnapshotProvider:
         return [MatchResult(fixture_id=r[0], competition=r[1], home=r[2], away=r[3], kickoff=_dt(r[4]), home_goals=r[5], away_goals=r[6])
                 for r in rows]
 
+    def _unique_results(self) -> tuple[list[MatchResult], dict[str, str]]:
+        """One result per match under its canonical id (pairs stored before save_results deduplicated are read once)."""
+        results = self._results()
+        canon = self._canonical(results=results)
+        out: dict[str, MatchResult] = {}
+        for r in sorted(results, key=lambda r: r.fixture_id):
+            c = canon.get(r.fixture_id, r.fixture_id)
+            if c not in out:
+                out[c] = r if r.fixture_id == c else r.model_copy(update={"fixture_id": c})
+        return list(out.values()), canon
+
     def list_history(self, competitions, until) -> list[MatchResult]:
-        return dedupe_results(r for r in self._results() if (not competitions or r.competition in competitions) and r.available_at <= until)
+        return sorted((r for r in self._unique_results()[0] if (not competitions or r.competition in competitions) and r.available_at <= until),
+                      key=lambda r: (r.kickoff, r.fixture_id))
 
     def result_of(self, fixture_id: str) -> MatchResult | None:
-        return next((r for r in self._results() if r.fixture_id == fixture_id), None)
+        """Result of a match by any of its ids (odds or lineups may sit on the id GOAL did not keep for the result)."""
+        results, canon = self._unique_results()
+        c = canon.get(fixture_id, fixture_id)
+        r = next((r for r in results if r.fixture_id == c), None)
+        return r.model_copy(update={"fixture_id": fixture_id}) if r else None
 
     def get_quotes(self, fixture_id: str) -> list[OddsQuote]:
         rows = self.store.db.execute(
