@@ -86,6 +86,7 @@ class AutoConfig:
         return cfg
 
 
+DATASETS_SECONDS = 180.0  # time a tick may spend on season CSVs (about 4 files on Turso)
 MANUAL_REFRESHES = "manual-refresh"  # api_usage source: refreshes started from the dashboard (a count, not requests)
 MANUAL_REQUESTS = "oddspapi-manual"  # api_usage source: counted OddsPapi requests spent by those refreshes
 
@@ -195,8 +196,6 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         steps.append("lineups")  # costs nothing when no fixture is inside the window
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
             steps.append("backfill")  # one league per tick until every league has its multi-season history
-        elif cfg.divisions and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days):
-            steps.append("datasets")  # season CSVs link to the backfilled results, so they wait for it
     if cfg.oddspapi_tournaments:
         cost = odds_cost or len(cfg.bookmakers)
         if manual:
@@ -208,6 +207,9 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         if manual or history or history_due(store, cfg, now):
             steps.append("history")
         steps.append("closing")
+    backfilled = all(store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues)
+    if cfg.divisions and backfilled and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days):
+        steps.append("datasets")  # last: nothing time-critical; the files link to the backfilled results, so they wait for it
     return steps
 
 
@@ -274,7 +276,8 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         elif s == "closing":
             out.append(odds.sync_closing())
         elif s == "datasets":
-            left = 300.0 if max_seconds is None else max(30.0, max_seconds - (clock() - t0))
+            # capped so the analysis still gets published in the same tick; the first load spreads over a few ticks
+            left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
             out.append(datasets.sync(cfg.history_seasons, cfg.dataset_refresh_days, max_seconds=left, clock=clock))
         if on_step and len(out) > before:
             on_step(out[-1])
