@@ -8,6 +8,7 @@ import { explainSlip, optimize, type OptOpp, type OptSettings } from "@/lib/opti
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
 import { OppTable } from "@/app/_components/OppTable";
+import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
 
 export const dynamic = "force-dynamic";
 
@@ -81,8 +82,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const expl = best && settings ? explainSlip(best, settings.z) : null;
   const op = summary.top;
   const nOpp = summary.count;
-  const featured = pickFeatured(fx, best);
   const upcoming = fx.slice(0, 6);
+  // strip above the deep analysis: every filtered match not started yet, nearest kickoff first
+  const explorer = fx
+    .filter((f) => new Date(f.kickoff).getTime() >= now)
+    .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
+    .map(explorerMatch);
   const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10"));
   const allComps = !picked.size || comps.every((c) => picked.has(c));
   const compLabel = allComps ? "Tutti i campionati" : picked.size === 1 ? [...picked][0] : `${picked.size} campionati`;
@@ -337,7 +342,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             )}
           </section>
 
-          {featured && <DeepPreview f={featured} />}
+          {explorer.length > 0 && <MatchExplorer matches={explorer} initial={explorer.find((m) => m.p_home != null)?.id} />}
         </div>
 
         {/* ---------------- right rail ---------------- */}
@@ -426,16 +431,7 @@ function Mini({ label, value, tone }: { label: string; value: string; tone?: "po
   );
 }
 
-function pickFeatured(fx: FixtureRow[], best?: { legs: { match: string }[] }) {
-  if (best) {
-    const [h, a] = (best.legs[0]?.match ?? "").split(" - ");
-    const f = fx.find((x) => x.home === h && x.away === a);
-    if (f) return f;
-  }
-  return fx.find((f) => f.p_home != null) ?? null;
-}
-
-function DeepPreview({ f }: { f: FixtureRow }) {
+function explorerMatch(f: FixtureRow): ExplorerMatch {
   const mk = parseJSON<ModelMarket[]>(f.markets, []);
   const get = (g: string, l: string) => mk.find((m) => m.g === g && m.l === l)?.p;
   const picks: [string, number | undefined][] = [
@@ -445,34 +441,9 @@ function DeepPreview({ f }: { f: FixtureRow }) {
     ["1X", get("Doppia chance", "1X")],
     ["1 + Over 2.5", get("Combo", "1 + Over 2.5")],
   ];
-  return (
-    <section className="card" aria-labelledby="deep-title">
-      <div className="card-head">
-        <h2 id="deep-title">Analisi approfondita · {f.home} vs {f.away}</h2>
-        <Link href={`/partita/${encodeURIComponent(f.fixture_id)}`} className="btn btn-ghost btn-sm">
-          Apri analisi completa <ChevronRight size={15} aria-hidden="true" />
-        </Link>
-      </div>
-      <div className="split card-pad" style={{ gap: 24 }}>
-        <div>
-          <h3 className="note" style={{ margin: "0 0 10px" }}>Probabilità 1X2 (modello)</h3>
-          <div className="rings">
-            <Ring value={f.p_home} label={f.home} sub={`quota equa ${fairOdds(f.p_home)}`} color="var(--s1)" />
-            <Ring value={f.p_draw} label="Pareggio" sub={`quota equa ${fairOdds(f.p_draw)}`} color="var(--s2)" />
-            <Ring value={f.p_away} label={f.away} sub={`quota equa ${fairOdds(f.p_away)}`} color="var(--s3)" />
-          </div>
-          {f.xg_home != null && f.xg_away != null && (
-            <p className="note" style={{ textAlign: "center", marginTop: 12 }}>
-              Gol attesi: <span className="num">{f.xg_home.toFixed(2)}</span> – <span className="num">{f.xg_away.toFixed(2)}</span>
-            </p>
-          )}
-        </div>
-        <div>
-          <h3 className="note" style={{ margin: "0 0 10px" }}>Mercati principali (probabilità del modello)</h3>
-          {picks.filter(([, p]) => p != null).map(([l, p]) => <HBar key={l} label={l} p={p!} />)}
-          <div style={{ marginTop: 10 }}><Split1X2 h={f.p_home} d={f.p_draw} a={f.p_away} /></div>
-        </div>
-      </div>
-    </section>
-  );
+  return {
+    id: f.fixture_id, kickoff: f.kickoff, competition: f.competition, home: f.home, away: f.away,
+    p_home: f.p_home, p_draw: f.p_draw, p_away: f.p_away, xg_home: f.xg_home, xg_away: f.xg_away,
+    picks: picks.filter((x): x is [string, number] => x[1] != null),
+  };
 }

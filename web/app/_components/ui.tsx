@@ -72,12 +72,13 @@ export function Split1X2({ h, d, a }: { h: number | null; d: number | null; a: n
   );
 }
 
-export function Ring({ value, label, sub, color }: { value: number | null; label: string; sub?: string; color: string }) {
+export function Ring({ value, label, sub, color, top }: { value: number | null; label: string; sub?: string; color: string; top?: React.ReactNode }) {
   const r = 42;
   const c = 2 * Math.PI * r;
   const v = value ?? 0;
   return (
     <div className="ring">
+      {top && <span className="ring-top">{top}</span>}
       <svg viewBox="0 0 100 100" role="img" aria-label={`${label}: ${pct(value, 1)}`}>
         <circle cx="50" cy="50" r={r} fill="none" stroke="var(--track)" strokeWidth="9" />
         <circle

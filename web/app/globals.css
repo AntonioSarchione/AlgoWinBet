@@ -282,6 +282,11 @@ td.wrap { white-space: normal; min-width: 210px; }
 .ring svg { width: 100%; max-width: 116px; height: auto; }
 .ring b { font-size: 13px; font-weight: 600; }
 .ring small { color: var(--muted); font-size: 12px; }
+.ring-top { height: 52px; display: grid; place-items: center; }
+.ring-x {
+  width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-strong);
+  background: var(--card-2); color: var(--text-2); font-weight: 700; font-size: 15px;
+}
 
 /* ---------- tabs ---------- */
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); }
@@ -382,3 +387,23 @@ td.wrap { white-space: normal; min-width: 210px; }
 .btn:disabled { opacity: 0.7; cursor: progress; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- home: scrollable strip of the filtered matches ---------- */
+.strip-nav { width: 36px; padding: 0; justify-content: center; }
+.strip {
+  position: relative; display: flex; gap: 8px; overflow-x: auto; padding: 12px 18px 14px; scroll-snap-type: x proximity; scroll-padding: 0 18px;
+  overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+}
+.strip-item {
+  flex: 0 0 auto; width: 200px; min-height: 76px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--card-2); color: var(--text-2);
+  text-align: left; font: inherit; cursor: pointer; scroll-snap-align: start; transition: border-color 140ms ease, background 140ms ease;
+}
+.strip-item:hover { border-color: var(--line-strong); color: var(--text); }
+.strip-item[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.strip-item:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.strip-teams { display: flex; flex-direction: column; gap: 4px; }
+.strip-text { min-width: 0; }
+.strip-text b { display: block; font-size: 13.5px; line-height: 1.35; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip-text small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .strip { scroll-behavior: auto; } }
