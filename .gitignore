@@ -5,5 +5,5 @@ __pycache__/
 *.db
 .venv/
 configs/calibration.json
-data/
+/data/
 *.zip
