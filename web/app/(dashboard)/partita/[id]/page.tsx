@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, History, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
 import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
-import { lineName, MARKET_NAMES, MARKET_ORDER, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
+import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
@@ -17,7 +17,7 @@ const TABS = [
   { v: "forma", l: "Forma e precedenti", icon: History },
 ] as const;
 
-type QSP = { m?: string; s?: string; l?: string };
+type QSP = { g?: string; m?: string; s?: string; l?: string };
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string } & QSP> };
 
 export async function generateMetadata({ params }: Props) {
@@ -249,7 +249,11 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
       </Empty>
     );
   }
-  const markets = MARKET_ORDER.filter((m) => menu.some((k) => k.market_code === m));
+  const all = orderMarkets([...new Set(menu.map((k) => k.market_code))]);
+  // market group first (whole match, 1st half, 2nd half, both halves): Sisal lists dozens of markets per match
+  const groups = MARKET_GROUPS.filter((g) => all.some((c) => groupOf(c) === g.key));
+  const g = groups.find((x) => x.key === q.g)?.key ?? (q.m && all.includes(q.m) ? groupOf(q.m) : groups[0]?.key ?? "ft");
+  const markets = all.filter((c) => groupOf(c) === g);
   const m = markets.includes(q.m ?? "") ? q.m! : markets[0];
   const sels = [...new Set(menu.filter((k) => k.market_code === m).map((k) => k.selection))].sort(sortSelections);
   const sel = sels.includes(q.s ?? "") ? q.s! : sels[0];
@@ -274,7 +278,7 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
   const lineSels = [...new Set(path.map((p) => p.selection))].sort(sortSelections);
   const latest = (b: string, s: string) => path.filter((p) => p.bookmaker === b && p.selection === s).at(-1);
   const href = (next: Partial<QSP>) => {
-    const u = new URLSearchParams({ tab: "quote", m, s: sel, l: line, ...next });
+    const u = new URLSearchParams({ tab: "quote", g, m, s: sel, l: line, ...next });
     for (const [k, v] of [...u]) if (!v) u.delete(k);
     return `/partita/${encodeURIComponent(id)}?${u}`;
   };
@@ -282,9 +286,16 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
   return (
     <div className="col">
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <nav className="chips" aria-label="Mercato">
+        {groups.length > 1 && (
+          <nav className="chips" aria-label="Parte di partita">
+            {groups.map((x) => (
+              <Link key={x.key} href={href({ g: x.key, m: "", s: "", l: "" })} scroll={false} aria-current={x.key === g ? "true" : undefined}>{x.label}</Link>
+            ))}
+          </nav>
+        )}
+        <nav className={groups.length > 1 ? "chips chips-sub" : "chips"} aria-label="Mercato">
           {markets.map((x) => (
-            <Link key={x} href={href({ m: x, s: "", l: "" })} scroll={false} aria-current={x === m ? "true" : undefined}>{MARKET_NAMES[x]}</Link>
+            <Link key={x} href={href({ m: x, s: "", l: "" })} scroll={false} aria-current={x === m ? "true" : undefined}>{marketName(x)}</Link>
           ))}
         </nav>
         <nav className="chips chips-sub" aria-label="Esito">
@@ -314,7 +325,7 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
         <p className="note">Una linea per bookmaker. Usa le frecce sinistra/destra sul grafico per scorrere le rilevazioni.</p>
       </div>
       <div>
-        <h2 className="section">Ultime quote · {MARKET_NAMES[m]}{line ? ` ${lineName(m, line)}` : ""}</h2>
+        <h2 className="section">Ultime quote · {marketName(m)}{line ? ` ${lineName(m, line)}` : ""}{groupOf(m) === "h1" ? " · 1° tempo" : groupOf(m) === "h2" ? " · 2° tempo" : ""}</h2>
         <div className="table-wrap" style={{ marginTop: 10 }}>
           <table>
             <thead>

@@ -10,7 +10,7 @@ import numpy as np
 from .calibration import CalibrationSet
 from .config import Config
 from .domain import Opportunity, OpportunityStatus, Player, SelectionRef
-from .markets import UnsupportedMarket, family_of, probability
+from .markets import UnsupportedMarket, family_of, probability, void_probability
 from .information import Adjustment, PlayerImpactModel, TeamAvailability, build_availability
 from .models import DixonColes
 from .pricing import MarketView, SOURCE_LEVEL_SCORE, build_market_views
@@ -159,8 +159,19 @@ def analyze_fixture(
             unc = max(unc, 0.15)  # unseen team: model is guessing
         z = cfg.thresholds.z
         p_lo, p_hi = max(1e-4, p_fin - z * unc), min(1 - 1e-4, p_fin + z * unc)
+        fair = 1 / p_fin
+        p_mkt = v.p_market
+        void = void_probability(matrix, v.ref)
+        if void > 0:
+            # Draw no bet: everything above is "win given no refund". Keep that for the fair price, then switch to the
+            # probability that gives the same expected return at this price (win pays the odds, refund pays 1), so EV, the
+            # slip optimizer and the stakes treat the leg exactly in expectation.
+            eq = lambda x: (1 - void) * x + void / v.best_odds  # noqa: E731
+            p_s, p_blind, p_raw, p_fin, p_lo, p_hi = (eq(x) for x in (p_s, p_blind, p_raw, p_fin, p_lo, p_hi))
+            p_mkt = eq(p_mkt) if has_mkt else None
+            unc *= 1 - void
         dq = data_quality(state, model, v, stale)
-        edge_v = (p_fin - v.p_market) if has_mkt else None
+        edge_v = (p_fin - p_mkt) if has_mkt else None
         ev_v = p_fin * v.best_odds - 1
         ev_lo = p_lo * v.best_odds - 1
         status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg)
@@ -169,8 +180,8 @@ def analyze_fixture(
         out.append(Opportunity(
             fixture_id=f.id, competition=f.competition, home=f.home, away=f.away, kickoff=f.kickoff,
             ref=v.ref, description=v.ref.label(), odds=v.best_odds, bookmaker=v.best_book,
-            odds_observed_at=v.best_observed_at, n_books=v.n_books, p_struct=p_s, p_market=v.p_market,
-            p_ensemble_raw=p_raw, p_final=p_fin, p_low=p_lo, p_high=p_hi, fair_odds=1 / p_fin, edge=edge_v,
+            odds_observed_at=v.best_observed_at, n_books=v.n_books, p_struct=p_s, p_market=p_mkt,
+            p_ensemble_raw=p_raw, p_final=p_fin, p_low=p_lo, p_high=p_hi, fair_odds=fair, edge=edge_v,
             ev=ev_v, ev_lower=ev_lo, uncertainty=unc, model_disagreement=disagreement,
             data_quality=dq["total"], data_quality_parts=dq, status=status,
             score=opportunity_score(ev_v, edge_v, dq["total"], disagreement, unc, calib.version(fam) != "identity-v1"),

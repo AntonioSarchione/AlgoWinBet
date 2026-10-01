@@ -80,3 +80,34 @@ def test_same_match_combo_uses_joint_not_product(analysis):
     out = price_combo(a.matrix, refs, 4.0)
     assert out["joint_probability"] != pytest.approx(out["product_of_marginals"], rel=1e-3)
     assert out["fair_odds_joint"] == pytest.approx(1 / out["joint_probability"])
+
+
+def test_draw_no_bet_ev_counts_the_refund():
+    """A draw-no-bet leg pays the odds on a win and the stake back on a draw: the engine's probability must give exactly that
+    expected return (p_final * odds = P(win) * odds + P(draw)), while the fair price stays the no-refund one."""
+    from algowinbet.domain import OddsQuote
+    from algowinbet.markets import probability, void_probability
+    from algowinbet.snapshots import SnapshotProvider, SnapshotStore
+    mock = MockProvider(seed=7)
+    s = SnapshotStore(":memory:")
+    s.save_results("mock", mock.list_history(None, mock.as_of), mock.as_of)
+    fxs = mock.list_fixtures(None, mock.as_of, mock.as_of + timedelta(days=3))
+    s.save_fixtures("mock", fxs, mock.as_of - timedelta(days=1))
+    f = fxs[0]
+    s.save_quotes("mock", mock.get_quotes(f.id) + [
+        OddsQuote(fixture_id=f.id, market_code="DRAW_NO_BET", selection=sel, bookmaker="BookA", odds=o,
+                  observed_at=mock.as_of - timedelta(hours=1), kind="current") for sel, o in (("HOME", 1.45), ("AWAY", 2.6))])
+    cfg = Config()
+    cfg.ensemble.quote_window_hours = 72
+    cfg.bet_bookmakers = ["BookA", "BookB", "BookC"]
+    eng = Engine(SnapshotProvider(s), cfg)
+    res = eng.analyze(None, mock.as_of, mock.as_of + timedelta(days=3), mock.as_of)
+    dnb = [o for o in res.opportunities if o.ref.market_code == "DRAW_NO_BET"]
+    assert {o.ref.selection for o in dnb} == {"HOME", "AWAY"}
+    matrix = res.analyses[f.id].matrix
+    for o in dnb:
+        void = void_probability(matrix, o.ref)
+        assert 0.1 < void < 0.5
+        assert o.ev == pytest.approx(o.p_final * o.odds - 1)
+        assert o.p_final == pytest.approx((1 - void) / o.fair_odds + void / o.odds)  # win given no refund, then refund
+        assert o.p_struct == pytest.approx((1 - void) * probability(matrix, o.ref) + void / o.odds)

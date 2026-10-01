@@ -481,6 +481,28 @@ REAL_MARKETS = [
      "outcomes": [{"outcomeId": 10316, "outcomeName": "Yes"}, {"outcomeId": 10317, "outcomeName": "No"}]},
     {"marketId": 10208, "marketType": "1x2", "marketName": "First Half Result", "period": "p1", "handicap": 0.0,
      "outcomes": [{"outcomeId": 10208, "outcomeName": "1"}, {"outcomeId": 10209, "outcomeName": "X"}, {"outcomeId": 10210, "outcomeName": "2"}]},
+    {"marketId": 10214, "marketType": "drawnobet", "marketName": "Draw No Bet", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10214, "outcomeName": "1"}, {"outcomeId": 10215, "outcomeName": "2"}]},
+    {"marketId": 10322, "marketType": "drawnobet", "marketName": "Draw No Bet Second Half", "period": "p2", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10322, "outcomeName": "1"}, {"outcomeId": 10323, "outcomeName": "2"}]},
+    {"marketId": 10216, "marketType": "firstgoal", "marketName": "First Goal Full Time", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10216, "outcomeName": "1"}, {"outcomeId": 10217, "outcomeName": "No Goal"}, {"outcomeId": 10218, "outcomeName": "2"}]},
+    {"marketId": 10332, "marketType": "oddeven-team1", "marketName": "Team 1 Odd Even", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10332, "outcomeName": "Odd"}, {"outcomeId": 10333, "outcomeName": "Even"}]},
+    {"marketId": 101919, "marketType": "halftime-fulltime", "marketName": "Half Time / Full Time", "period": None, "handicap": 0.0,
+     "outcomes": [{"outcomeId": 101919, "outcomeName": "1/1"}, {"outcomeId": 101924, "outcomeName": "X/2"}]},
+    {"marketId": 102041, "marketType": "highestscoringh", "marketName": "Highest Scoring Half", "period": None, "handicap": 0.0,
+     "outcomes": [{"outcomeId": 102041, "outcomeName": "1st"}, {"outcomeId": 102042, "outcomeName": "X"}, {"outcomeId": 102043, "outcomeName": "2nd"}]},
+    {"marketId": 10304, "marketType": "wineitherh-team1", "marketName": "Team 1 To Win Either Halves", "period": None, "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10304, "outcomeName": "Yes"}, {"outcomeId": 10305, "outcomeName": "No"}]},
+    {"marketId": 10300, "marketType": "bothteamsscore", "marketName": "Both Teams To Score First Half", "period": "p1", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10300, "outcomeName": "Yes"}, {"outcomeId": 10301, "outcomeName": "No"}]},
+    {"marketId": 10292, "marketType": "toscore-team1", "marketName": "Team 1 To Score Second Half", "period": "p2", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10292, "outcomeName": "Yes"}, {"outcomeId": 10293, "outcomeName": "No"}]},
+    {"marketId": 101979, "marketType": "winningmargin", "marketName": "Winning Margin First Half", "period": "p1", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 101980, "outcomeName": "Draw (incl 0:0)"}, {"outcomeId": 102003, "outcomeName": "2 By 1+"}]},
+    {"marketId": 10761, "marketType": "2up", "marketName": "2Up - Full Time Result", "period": "fulltime", "handicap": 0.0,
+     "outcomes": [{"outcomeId": 10761, "outcomeName": "1"}]},
 ]
 
 
@@ -498,7 +520,13 @@ def test_mapper_covers_the_real_goal_market_catalogue():
     assert {("CORRECT_SCORE", "2-2", None), ("WINNING_MARGIN", "D", None), ("WINNING_MARGIN", "NG", None),
             ("WINNING_MARGIN", "H3", None), ("WINNING_MARGIN", "H5+", None), ("TOTAL_EXACT", "3+", None),
             ("ODD_EVEN", "ODD", None), ("WIN_TO_NIL_HOME", "YES", None)} <= qs
-    assert not any(c == "MATCH_1X2" for c, *_ in qs)  # first-half 1X2 is not a full-time market
+    assert not any(c == "MATCH_1X2" for c, *_ in qs)  # first-half 1X2 is not a full-time market...
+    assert {("MATCH_1X2@H1", s, None) for s in ("HOME", "DRAW", "AWAY")} <= qs  # ...it is its own half market
+    assert {("DRAW_NO_BET", "HOME", None), ("DRAW_NO_BET@H2", "AWAY", None), ("FIRST_GOAL", "NONE", None), ("FIRST_GOAL", "AWAY", None),
+            ("TEAM_ODD_EVEN_HOME", "ODD", None), ("HT_FT", "1/1", None), ("HT_FT", "X/2", None), ("HIGHEST_HALF", "EQUAL", None),
+            ("WIN_EITHER_HALF_HOME", "YES", None), ("BTTS@H1", "NO", None), ("TEAM_TOTAL_HOME@H2", "OVER", 0.5),
+            ("WINNING_MARGIN@H1", "DI", None), ("WINNING_MARGIN@H1", "A1+", None)} <= qs
+    assert not any(c.startswith("2UP") or c == "2up" for c, *_ in qs)  # early payout markets are not priced
     from algowinbet.domain import SelectionRef
     assert all(is_supported(SelectionRef(market_code=c, selection=s, line=l)) for c, s, l in qs)
 

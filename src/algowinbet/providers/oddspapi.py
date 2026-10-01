@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..domain import Fixture, OddsQuote, SelectionRef
-from ..markets import is_supported
+from ..markets import is_supported, split_code
 from ..names import TeamNames, normalize
 from ..snapshots import BudgetGuard, SnapshotStore
 from .goalapi import MappingReport, Transport, parse_dt, urllib_transport
@@ -208,7 +208,20 @@ class OddsPapiMapper:
         "exactscore-team2": "TEAM_EXACT_AWAY", "wintonil-team1": "WIN_TO_NIL_HOME", "wintonil-team2": "WIN_TO_NIL_AWAY",
         "toscore-team1": ("TEAM_TOTAL_HOME", 0.5), "toscore-team2": ("TEAM_TOTAL_AWAY", 0.5),
         "cleansheet-team1": ("TEAM_TOTAL_AWAY", 0.5), "cleansheet-team2": ("TEAM_TOTAL_HOME", 0.5),
+        "drawnobet": "DRAW_NO_BET", "oddeven-team1": "TEAM_ODD_EVEN_HOME", "oddeven-team2": "TEAM_ODD_EVEN_AWAY",
+        "firstgoal": "FIRST_GOAL", "lastgoal": "LAST_GOAL",
+        # both halves (catalogue period: none)
+        "halftime-fulltime": "HT_FT", "highestscoringh": "HIGHEST_HALF", "highestscoringh-team1": "HIGHEST_HALF_HOME",
+        "highestscoringh-team2": "HIGHEST_HALF_AWAY", "toscoreinbh-team1": "SCORE_BOTH_HALVES_HOME",
+        "toscoreinbh-team2": "SCORE_BOTH_HALVES_AWAY", "winbothh-team1": "WIN_BOTH_HALVES_HOME", "winbothh-team2": "WIN_BOTH_HALVES_AWAY",
+        "wineitherh-team1": "WIN_EITHER_HALF_HOME", "wineitherh-team2": "WIN_EITHER_HALF_AWAY",
     }
+    # catalogue period -> our suffix; markets over both halves carry no period. Corners, bookings and player props are other
+    # marketTypes and never reach this table.
+    PERIOD_SUFFIX = {"fulltime": "", "full time": "", "ft": "", "": "", "none": "", "p1": "@H1", "p2": "@H2"}
+    WHOLE_MATCH_ONLY = {"FIRST_GOAL", "LAST_GOAL", "HT_FT", "HIGHEST_HALF", "HIGHEST_HALF_HOME", "HIGHEST_HALF_AWAY",
+                        "SCORE_BOTH_HALVES_HOME", "SCORE_BOTH_HALVES_AWAY", "WIN_BOTH_HALVES_HOME", "WIN_BOTH_HALVES_AWAY",
+                        "WIN_EITHER_HALF_HOME", "WIN_EITHER_HALF_AWAY"}
     LINE_CODES = {"TOTAL_GOALS", "TEAM_TOTAL_HOME", "TEAM_TOTAL_AWAY", "ASIAN_HANDICAP", "EURO_HANDICAP"}
 
     def _market(self, mid: int) -> tuple[str, float | None] | None:
@@ -222,16 +235,18 @@ class OddsPapiMapper:
             return None
         mapped = self.TYPE_MAP.get(str(m.get("marketType") or "").lower())
         if mapped is not None:
-            if str(m.get("period") or "").lower() not in ("fulltime", "full time", "ft", ""):
-                return None  # halves, corners and cards need models we do not have
+            suffix = self.PERIOD_SUFFIX.get(str(m.get("period") or "").lower())
+            base = mapped[0] if isinstance(mapped, tuple) else mapped
+            if suffix is None or (suffix and base in self.WHOLE_MATCH_ONLY):
+                return None  # unknown period (e.g. extra time) or a both-halves market listed per half
             if isinstance(mapped, tuple):
-                return mapped
+                return mapped[0] + suffix, mapped[1]
             if mapped in self.LINE_CODES:
                 try:
-                    return mapped, float(m.get("handicap"))
+                    return mapped + suffix, float(m.get("handicap"))
                 except (TypeError, ValueError):
                     return None
-            return mapped, None
+            return mapped + suffix, None
         name = str(m.get("marketName") or "").lower()
         mtype = str(m.get("marketType") or "").lower()
         # The catalogue types every market: a type we do not map (totals-bookings, totals-corners, player props...) is NOT a goal
@@ -264,6 +279,7 @@ class OddsPapiMapper:
         return None
 
     def _selection(self, code: str, mid: int, oid: int, fixture: Fixture) -> str | None:
+        code = split_code(code)[0]
         label = self.markets.get(mid, {}).get("_out", {}).get(oid, "")
         t = label.strip().lower()
         if code == "MATCH_1X2":
@@ -296,8 +312,19 @@ class OddsPapiMapper:
             return "OVER" if t.startswith("over") else "UNDER" if t.startswith("under") else None
         elif code in ("EURO_HANDICAP", "ASIAN_HANDICAP"):
             return {"1": "HOME", "x": "DRAW", "2": "AWAY"}.get(t)
-        elif code == "ODD_EVEN":
+        elif code in ("ODD_EVEN", "TEAM_ODD_EVEN_HOME", "TEAM_ODD_EVEN_AWAY"):
             return {"odd": "ODD", "even": "EVEN"}.get(t)
+        elif code == "DRAW_NO_BET":
+            return {"1": "HOME", "2": "AWAY", "home": "HOME", "away": "AWAY"}.get(t)
+        elif code in ("FIRST_GOAL", "LAST_GOAL"):
+            return {"1": "HOME", "2": "AWAY", "no goal": "NONE", "none": "NONE"}.get(t)
+        elif code == "HT_FT":
+            mm = re.fullmatch(r"([12x])\s*/\s*([12x])", t)
+            return f"{mm.group(1)}/{mm.group(2)}".upper() if mm else None
+        elif code.startswith("HIGHEST_HALF"):
+            return {"1st": "1ST", "2nd": "2ND", "x": "EQUAL", "equal": "EQUAL"}.get(t)
+        elif code.startswith(("SCORE_BOTH_HALVES", "WIN_BOTH_HALVES", "WIN_EITHER_HALF")):
+            return {"yes": "YES", "no": "NO"}.get(t)
         elif code in ("WIN_TO_NIL_HOME", "WIN_TO_NIL_AWAY"):
             return {"yes": "YES", "no": "NO"}.get(t)
         elif code == "CORRECT_SCORE":
@@ -316,7 +343,7 @@ class OddsPapiMapper:
     def _priceable(mk: tuple[str, float | None]) -> bool:
         """Line markets: only lines the score grid prices without refunds (x.5 totals/Asian, whole European)."""
         code, line = mk
-        if line is None or code not in OddsPapiMapper.LINE_CODES:
+        if line is None or split_code(code)[0] not in OddsPapiMapper.LINE_CODES:
             return True
         probe = {"EURO_HANDICAP": "HOME", "ASIAN_HANDICAP": "HOME"}.get(code, "OVER")
         return is_supported(SelectionRef(market_code=code, selection=probe, line=line))

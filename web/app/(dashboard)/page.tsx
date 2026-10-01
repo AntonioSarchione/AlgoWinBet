@@ -386,11 +386,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
               <div>
                 <span className="note">Con quote dei bookmaker (valore atteso)</span>
-                <div className="text-2">1X2, Doppia chance, Under/Over, Gol/NoGol</div>
+                <div className="text-2">Tutti i mercati gol quotati da Sisal: 1X2, doppia chance, draw no bet, Under/Over e gol squadra, Gol/NoGol, handicap, risultato e gol esatti, margine, primo/ultimo gol, 1° e 2° tempo, Parziale/Finale</div>
               </div>
               <div>
                 <span className="note">Solo probabilità del modello (quota equa)</span>
-                <div className="text-2">Multigol, Combo, Gol squadra, Risultato esatto</div>
+                <div className="text-2">Multigol e Combo. Corner, cartellini e marcatori arrivano con i loro modelli</div>
               </div>
             </div>
           </section>

@@ -11,7 +11,7 @@ import numpy as np
 from .calibration import brier, ece, fit_ensemble_weight, log_loss
 from .config import Config
 from .engine import Engine
-from .markets import family_of, outcome
+from .markets import UnsupportedMarket, family_of, outcome
 from .optimizer import optimize
 from .pricing import build_market_views
 
@@ -26,6 +26,15 @@ class BacktestReport:
     slips: dict = field(default_factory=dict)
     curve: list[float] = field(default_factory=list)
     calibration_data: dict[str, tuple[list[float], list[float]]] = field(default_factory=dict)
+
+
+def _settle(res, ref) -> float | None:
+    """1/0 for a won/lost selection; None when the score cannot settle it (refund, half-time score or goal order missing)."""
+    ht = (res.ht_home, res.ht_away) if getattr(res, "ht_home", None) is not None else None
+    try:
+        return 1.0 if outcome(res.home_goals, res.away_goals, ref, ht) else 0.0
+    except UnsupportedMarket:
+        return None
 
 
 def _max_drawdown(curve: list[float]) -> float:
@@ -69,8 +78,9 @@ def run_backtest(provider, cfg: Config, competitions: list[str] | None = None, m
             continue
         used += 1
         for o in opps:
-            res = res_by_fid[o.fixture_id]
-            y = 1.0 if outcome(res.home_goals, res.away_goals, o.ref) else 0.0
+            y = _settle(res_by_fid[o.fixture_id], o.ref)
+            if y is None:
+                continue
             fam = family_of(o.ref.market_code)
             if o.p_market is not None:
                 fam_rows[fam].append((o.p_struct, o.p_market, o.p_final, y))
@@ -90,7 +100,10 @@ def run_backtest(provider, cfg: Config, competitions: list[str] | None = None, m
         if opt.no_bet:
             no_bet_rounds += 1
         for s in opt.slips:
-            win = all(outcome(res_by_fid[l.fixture_id].home_goals, res_by_fid[l.fixture_id].away_goals, l.ref) for l in s.legs)
+            ys = [_settle(res_by_fid[l.fixture_id], l.ref) for l in s.legs]
+            if None in ys:
+                continue
+            win = all(ys)
             slip_pnl.append((s.total_odds - 1) if win else -1.0)
             slip_hits += int(win)
     rep.n_rounds = used
@@ -162,8 +175,9 @@ def run_info_value(provider, cfg: Config, competitions: list[str] | None = None,
                 b = blind_by.get((o.fixture_id, o.ref.key))
                 if b is None or o.p_market is None:
                     continue
-                r = res[o.fixture_id]
-                y = 1.0 if outcome(r.home_goals, r.away_goals, o.ref) else 0.0
+                y = _settle(res[o.fixture_id], o.ref)
+                if y is None:
+                    continue
                 rows[name][family_of(o.ref.market_code)].append((b.p_struct, o.p_struct, o.p_market, y))
                 got = True
         used += int(got)
@@ -226,8 +240,9 @@ def run_stale_backtest(provider, cfg: Config, competitions: list[str] | None = N
         for o in opps:
             if not o.odds_stale or o.p_market is None:
                 continue
-            r = res[o.fixture_id]
-            y = 1.0 if outcome(r.home_goals, r.away_goals, o.ref) else 0.0
+            y = _settle(res[o.fixture_id], o.ref)
+            if y is None:
+                continue
             p = (o.odds - 1) if y else -1.0
             base.append(p)
             if o.ev >= t.min_ev and o.uncertainty <= t.max_uncertainty and o.data_quality >= t.min_dq_candidate:
