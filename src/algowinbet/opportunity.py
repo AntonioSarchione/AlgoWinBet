@@ -49,13 +49,14 @@ def data_quality(state: MatchState, model: DixonColes, view: MarketView, stale: 
     return parts
 
 
-def classify(ev: float, ev_lower: float, edge: float | None, unc: float, dq: float, has_market: bool, cfg: Config) -> OpportunityStatus:
+def classify(ev: float, ev_lower: float, edge: float | None, unc: float, dq: float, has_market: bool, cfg: Config,
+             p: float | None = None) -> OpportunityStatus:
     t = cfg.thresholds
     if dq < t.min_dq_valid:
         return S.INVALID
     if ev <= t.avoid_ev:
         return S.AVOID
-    if ev < t.min_ev:
+    if ev < t.min_ev or (p is not None and p < t.min_probability):
         return S.NEUTRAL
     # ev >= min_ev from here
     if not has_market or dq < t.min_dq_candidate or unc > t.max_uncertainty:
@@ -174,7 +175,7 @@ def analyze_fixture(
         edge_v = (p_fin - p_mkt) if has_mkt else None
         ev_v = p_fin * v.best_odds - 1
         ev_lo = p_lo * v.best_odds - 1
-        status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg)
+        status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg, p_fin)
         if stale and status in (S.STRONG, S.CANDIDATE):
             status = S.WATCH  # the edge may only be a not-yet-updated price: verify the current quote first
         out.append(Opportunity(

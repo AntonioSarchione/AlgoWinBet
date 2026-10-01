@@ -756,7 +756,7 @@
    "uncertainty": 0.02434501700483781,
    "disagreement": 0.1309510400558684,
    "score": 0.0824611318185739,
-   "status": "CANDIDATE",
+   "status": "NEUTRAL",
    "dq_lineup": 0.5
   },
   {
@@ -2386,63 +2386,8 @@
    "odds_min": 8.0,
    "odds_max": 40.0,
    "max_legs": 6,
-   "no_bet": false,
-   "slips": [
-    {
-     "legs": [
-      [
-       "mock-1-20-02",
-       "MATCH_1X2|AWAY|"
-      ],
-      [
-       "mock-0-20-04",
-       "MATCH_1X2|HOME|"
-      ]
-     ],
-     "total_odds": 8.967600000000001,
-     "joint_probability": 0.10753079053955696,
-     "ev": -0.035706882757468916,
-     "ev_lower": -0.20501983480570263,
-     "objective": -0.10072481110562967,
-     "stake": 0.0
-    },
-    {
-     "legs": [
-      [
-       "mock-1-20-04",
-       "MATCH_1X2|HOME|"
-      ],
-      [
-       "mock-0-20-04",
-       "MATCH_1X2|HOME|"
-      ]
-     ],
-     "total_odds": 9.602100000000002,
-     "joint_probability": 0.09953889985704693,
-     "ev": -0.04421752968264947,
-     "ev_lower": -0.2145395360031197,
-     "objective": -0.12135539541436521,
-     "stake": 0.0
-    },
-    {
-     "legs": [
-      [
-       "mock-0-20-04",
-       "MATCH_1X2|HOME|"
-      ],
-      [
-       "mock-1-20-05",
-       "MATCH_1X2|HOME|"
-      ]
-     ],
-     "total_odds": 9.221400000000001,
-     "joint_probability": 0.10357846439789037,
-     "ev": -0.04486154840129364,
-     "ev_lower": -0.21372901190309423,
-     "objective": -0.13949094792280234,
-     "stake": 0.0
-    }
-   ]
+   "no_bet": true,
+   "slips": []
   }
  ]
 }

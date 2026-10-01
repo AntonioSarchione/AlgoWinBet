@@ -50,6 +50,9 @@ class Thresholds(BaseModel):
     avoid_ev: float = -0.03
     z: float = 1.645  # one-sided 95% for lower bounds
     min_odds: float = 1.05
+    # below this probability a selection is never proposed, whatever its EV: long shots (exact scores, 7+ goals) carry the
+    # model's largest errors exactly where no sharp price can check it, and the tool is after the slip most likely to win
+    min_probability: float = 0.25
 
 
 class OptimizerCfg(BaseModel):
