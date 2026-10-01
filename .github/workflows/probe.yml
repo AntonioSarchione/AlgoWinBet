@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -54,6 +54,7 @@ jobs:
           DB=data/probe.db
           if [ -n "$TURSO_DATABASE_URL" ]; then DB=turso; fi   # raw payloads and budget counters persist on Turso
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remap" ]; then algowinbet remap-odds --db "$DB" && algowinbet inspect Denmark --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "coverage" ]; then algowinbet market-coverage --db "$DB" --book "${ARG:-sisal}"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "inspect" ]; then algowinbet inspect "$ARG" --db "$DB"; exit 0; fi
           if [ "$SOURCE" = "db" ]; then algowinbet teams --db "$DB"; exit 0; fi
           args=("$SOURCE" "$COMMAND")

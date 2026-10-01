@@ -413,6 +413,46 @@ def cmd_inspect(a) -> None:
     store.close()
 
 
+def cmd_market_coverage(a) -> None:
+    """Every market a bookmaker prices in the stored snapshots (no API request): per catalogue marketType and period, how many
+    fixtures and lines it covers and whether our mapper reads it (used) or skips it."""
+    from .providers.oddspapi import OddsPapiMapper
+    store = SnapshotStore(a.db)
+    cat_raw = store.last_raw("oddspapi", "/markets")
+    catalogue = {int(m["marketId"]): m for m in (cat_raw[1] if cat_raw else []) if "marketId" in m}
+    mapper = OddsPapiMapper(TeamNames(), list(catalogue.values()), [])
+    raws = store.db.execute("SELECT id, params FROM raw_requests WHERE source='oddspapi' AND endpoint='/odds-by-tournaments' AND status=200 "
+                            "AND params LIKE ? ORDER BY id DESC LIMIT ?", (f"%{a.book}%", a.snapshots)).fetchall()
+    cov: dict[tuple[str, str], dict] = {}
+    seen_fx: set[str] = set()
+    for rid, _ in raws:
+        body = json.loads(store.raw_body(rid))
+        for row in body if isinstance(body, list) else [body]:
+            fx = str(row.get("fixtureId"))
+            if fx in seen_fx:
+                continue  # newest snapshot of each fixture only
+            seen_fx.add(fx)
+            for book, bd in (row.get("bookmakerOdds") or {}).items():
+                if a.book not in book:
+                    continue
+                for mid, md in ((bd or {}).get("markets") or {}).items():
+                    m = catalogue.get(int(mid))
+                    key = (str(m.get("marketType")) if m else f"? id {mid}", str(m.get("period")) if m else "?")
+                    c = cov.setdefault(key, {"fixtures": set(), "lines": set(), "name": (m or {}).get("marketName", "fuori catalogo"),
+                                             "used": mapper._market(int(mid)) is not None, "prop": bool((m or {}).get("playerProp"))})
+                    c["fixtures"].add(fx)
+                    c["lines"].add((m or {}).get("handicap"))
+    print(f"{a.book}: {len(seen_fx)} partite nelle ultime {len(raws)} fotografie, {len(cov)} tipi di mercato")
+    for used in (True, False):
+        print("\n== USATI" if used else "\n== NON USATI")
+        for (mtype, period), c in sorted(cov.items(), key=lambda kv: -len(kv[1]["fixtures"])):
+            if c["used"] != used:
+                continue
+            lines = sorted(x for x in c["lines"] if isinstance(x, (int, float)))
+            ln = f" linee {lines[0]}..{lines[-1]} ({len(lines)})" if len(lines) > 1 else ""
+            print(f"  {mtype:32} {period:10} {len(c['fixtures']):4} partite{ln}  '{c['name']}'{' [giocatore]' if c['prop'] else ''}")
+
+
 def cmd_remap_odds(a) -> None:
     """Re-map every stored OddsPapi payload with the current mapper (no API request)."""
     from .oddscollector import remap_stored_odds
@@ -742,6 +782,11 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("--db", default="algowinbet.db")
     rm.add_argument("--aliases", default="configs/team_aliases.json")
     rm.set_defaults(fn=cmd_remap_odds)
+    mc = sub.add_parser("market-coverage", help="mercati quotati da un bookmaker nelle fotografie salvate (nessuna richiesta API)")
+    mc.add_argument("--db", default="turso")
+    mc.add_argument("--book", default="sisal")
+    mc.add_argument("--snapshots", type=int, default=4)
+    mc.set_defaults(fn=cmd_market_coverage)
     ins = sub.add_parser("inspect", help="quote grezze OddsPapi vs quote salvate per le partite di una squadra (nessuna richiesta API)")
     ins.add_argument("team")
     ins.add_argument("--db", default="algowinbet.db")
