@@ -37,6 +37,7 @@ SOURCE = "football-data"
 BASE = "https://football-data.co.uk/mmz4281/{season}/{div}.csv"
 USER_AGENT = "AlgoWinBet/1.0 (private non-commercial use; few downloads a week)"
 UK = ZoneInfo("Europe/London")
+LINK_VERSION = 2  # bump when linking improves: files with unlinked rows are read again once
 LINKED_ENOUGH = 0.9  # a past season is done once this share of its rows is linked to our matches
 # column prefix -> bookmaker name stored in quotes
 BOOKS = {"PS": "pinnacle", "BFE": "betfair-ex", "Avg": "market-avg"}
@@ -120,6 +121,17 @@ class FootballDataCollector:
         row = self.store.db.execute("SELECT done_at FROM jobs WHERE name=?", (name,)).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
+    def _loaded(self, job: str) -> bool:
+        """Loaded with the current linker, or with nothing left to link."""
+        row = self.store.db.execute("SELECT detail FROM jobs WHERE name=?", (job,)).fetchone()
+        if row is None:
+            return False
+        try:
+            d = json.loads(row[0] or "{}")
+        except ValueError:
+            return False
+        return d.get("link_version", 1) >= LINK_VERSION or not d.get("n_unmatched")
+
     # ------------------------------------------------------------------ sync
     def due(self, previous_seasons: int = 2, refresh_days: float = 3.0) -> list[tuple[str, str]]:
         """(season, division) files to download now: past seasons not loaded yet, the current season every refresh_days.
@@ -129,7 +141,7 @@ class FootballDataCollector:
         out = []
         for season in seasons_back(t, previous_seasons):
             for div in self.divisions:
-                if season != current and self.store.job_done(f"dataset:{SOURCE}:{div}:{season}"):
+                if season != current and self._loaded(f"dataset:{SOURCE}:{div}:{season}"):
                     continue
                 checked = self._checked_at(f"dataset-check:{SOURCE}:{div}:{season}")
                 if checked and t - checked < timedelta(days=refresh_days):  # also a past season that failed: retry later
@@ -171,12 +183,13 @@ class FootballDataCollector:
                 continue
             raw_id = self.store.put_raw(SOURCE, endpoint, {}, 200, body, t)
             new_hash = self.store.db.execute("SELECT hash FROM raw_requests WHERE id=?", (raw_id,)).fetchone()[0]
-            if old_hash == new_hash and self.store.job_done(job):
+            if old_hash == new_hash and self._loaded(job):
                 st.skipped.append(f"{div} {season}: invariato")
                 continue
             rep = self.load(body, div, raw_id, st)
             detail = json.dumps({"season": season, "div": div, "competition": self.divisions[div], "rows": rep.rows,
-                                 "linked": rep.linked, "unmatched": rep.unmatched[:20], "n_unmatched": len(rep.unmatched)},
+                                 "linked": rep.linked, "unmatched": rep.unmatched[:20], "n_unmatched": len(rep.unmatched),
+                                 "link_version": LINK_VERSION},
                                 ensure_ascii=False)
             self.store.mark_job(f"dataset-report:{SOURCE}:{div}:{season}", t, detail)
             if season == current or rep.linked >= LINKED_ENOUGH * rep.rows:
@@ -279,13 +292,14 @@ class FootballDataCollector:
             rep.rows += 1
             h, a = mapping.get(row["HomeTeam"].strip()), mapping.get(row["AwayTeam"].strip())
             hit = [x for x in near if x[1] == h and x[2] == a] if h and a else []
-            if len(hit) != 1:
+            # the same match stored under two GOAL ids (same clubs, same kickoff) gets the data on both
+            if not hit or any(abs(x[3] - hit[0][3]) > timedelta(hours=3) for x in hit):
                 rep.unmatched.append(f"{row['HomeTeam']}-{row['AwayTeam']} {ko:%d/%m/%Y}")
                 continue
             rep.linked += 1
-            fid, kickoff = hit[0][0], hit[0][3]
-            stats += self._stats(row, fid, t)
-            quotes += self._quotes(row, fid, kickoff)
+            for fid, _, _, kickoff in hit:
+                stats += self._stats(row, fid, t)
+                quotes += self._quotes(row, fid, kickoff)
         st.add("stats", self.store.save_stats(SOURCE, stats, raw_id))
         st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
         return rep

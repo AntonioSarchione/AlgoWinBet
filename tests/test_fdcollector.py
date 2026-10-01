@@ -89,6 +89,14 @@ def test_row_without_our_match_is_reported_not_guessed():
     assert rep.linked == 1 and rep.unmatched == ["Roma-Lazio 20/09/2026"]
 
 
+def test_same_match_under_two_ids_gets_the_data_on_both():
+    ko = datetime(2025, 8, 24, 13, 30, tzinfo=UTC)
+    st = store_with(("goal:a", "Mainz 05", "Köln", ko), ("goal:b", "Mainz 05", "Köln", ko))
+    c = FootballDataCollector(st, {"D1": "Bundesliga"}, now=lambda: NOW)
+    rep = c.load(csv_body(row("24/08/2025", "14:30", "Mainz", "FC Koln")), "D1", None, CollectStats("t"))
+    assert rep.linked == 1 and st.stats_of("goal:a")["goals"] == st.stats_of("goal:b")["goals"] == (2, 1)
+
+
 class FakeSite:
     def __init__(self, body):
         self.body, self.calls, self.status = body, [], 200
@@ -131,6 +139,14 @@ def test_past_season_with_few_links_is_read_again_later():
     assert "I1 2526: abbinate 0/1, riprovo tra 3 giorni" in r.skipped
     t[0] = NOW + timedelta(days=4)
     assert ("2526", "I1") in c.due(previous_seasons=1)
+
+
+def test_past_season_read_again_once_when_the_linker_improves():
+    st = SnapshotStore(":memory:")
+    st.mark_job("dataset:football-data:I1:2526", NOW, '{"rows": 380, "linked": 370, "n_unmatched": 10}')  # old linker
+    st.mark_job("dataset:football-data:I1:2425", NOW, '{"rows": 380, "linked": 380, "n_unmatched": 0}')
+    c = FootballDataCollector(st, {"I1": "Serie A"}, now=lambda: NOW + timedelta(days=4))
+    assert c.due() == [("2627", "I1"), ("2526", "I1")]
 
 
 def test_sync_stops_starting_files_when_time_is_up():
