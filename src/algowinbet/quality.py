@@ -85,10 +85,15 @@ def _quotes(provider, ids: set[str], canon: dict[str, str]) -> dict[str, list[tu
     return out
 
 
+SANE = 0.12  # a reference price this far (in probability) from the market average is a feed error, not information
+
+
 def _price(qs: list[tuple], family: list[tuple], books: tuple[str, ...], until: datetime | None, closing: bool,
-           fair: bool) -> tuple[list[float], str] | None:
+           fair: bool, anchor: list[float] | None = None) -> tuple[list[float], str] | None:
     """Price of a whole family at one book: latest quote of each selection observed by `until` (closing=True: the
-    closing quote, else the latest before kickoff). fair=True removes the margin. First book with a complete set wins."""
+    closing quote, else the latest before kickoff). fair=True removes the margin. First book with a complete set wins;
+    with `anchor` (the market average, fair), a book whose fair price strays more than SANE from it is skipped (the
+    season files carry some exchange prices taken in play)."""
     for book in books:
         sel_odds = []
         for code, sel, line in family:
@@ -100,7 +105,10 @@ def _price(qs: list[tuple], family: list[tuple], books: tuple[str, ...], until: 
         else:
             if fair:
                 p = devig({str(k): o for k, o in enumerate(sel_odds)})
-                return [p[str(k)] for k in range(len(sel_odds))], book
+                pf = [p[str(k)] for k in range(len(sel_odds))]
+                if anchor and book != "market-avg" and max(abs(a - b) for a, b in zip(pf, anchor)) > SANE:
+                    continue
+                return pf, book
             return sel_odds, book
     return None
 
@@ -139,8 +147,10 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
             k = next(i for i, (c, s, _) in enumerate(sels) if _outcome(c, s, r.home_goals, r.away_goals))
             p = {name: [float(probability(m, ref)) for ref in refs] for name, (m, _) in mats.items()}
             n_eff = max(mats["attuale"][1], 3)
-            mkt = _price(qs, sels, REFERENCE, r.kickoff - DECISION, closing=False, fair=True)
-            close = _price(qs, sels, REFERENCE, None, closing=True, fair=True)
+            avg_now = _price(qs, sels, ("market-avg",), r.kickoff - DECISION, closing=False, fair=True)
+            avg_close = _price(qs, sels, ("market-avg",), None, closing=True, fair=True)
+            mkt = _price(qs, sels, REFERENCE, r.kickoff - DECISION, closing=False, fair=True, anchor=avg_now[0] if avg_now else None)
+            close = _price(qs, sels, REFERENCE, None, closing=True, fair=True, anchor=avg_close[0] if avg_close else None)
             row = {"k": k, "model": p["attuale"], "v1": p["v1"]}
             if mkt:
                 pm = mkt[0]

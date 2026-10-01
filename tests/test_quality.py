@@ -44,3 +44,12 @@ def test_quality_replay_scores_model_ensemble_and_closing_and_is_saved():
     rid = save_quality(st, rep, T0, T0 + timedelta(days=80), "test")
     saved = json.loads(st.db.execute("SELECT report FROM quality_runs WHERE id=?", (rid,)).fetchone()[0])
     assert saved["n_matches"] == rep["n_matches"]
+
+
+def test_reference_price_far_from_the_market_average_is_skipped():
+    fam = [("MATCH_1X2", s, None) for s in ("HOME", "DRAW", "AWAY")]
+    qs = [("MATCH_1X2", s, None, "betfair-ex", o, T0, "current") for s, o in zip(("HOME", "DRAW", "AWAY"), (9.6, 5.9, 1.23))]
+    qs += [("MATCH_1X2", s, None, "market-avg", o, T0, "current") for s, o in zip(("HOME", "DRAW", "AWAY"), (1.5, 4.2, 6.5))]
+    avg = _price(qs, fam, ("market-avg",), T0, closing=False, fair=True)[0]
+    got = _price(qs, fam, ("betfair-ex", "market-avg"), T0, closing=False, fair=True, anchor=avg)
+    assert got[1] == "market-avg"
