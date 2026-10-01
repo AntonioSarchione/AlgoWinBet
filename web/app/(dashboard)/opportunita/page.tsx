@@ -17,7 +17,7 @@ const STATUSES = [
 
 type SP = { s?: string; comp?: string; lmin?: string; lmax?: string };
 
-const MAX_ROWS = 200; // the database filters and returns only the first rows by EV: the page stays light
+const MAX_ROWS = 200; // the database filters and returns only the best rows (status, prudent EV): the page stays light
 
 export default async function Opportunita({ searchParams }: { searchParams: Promise<SP> }) {
   const { s = "", comp = "", lmin = "", lmax = "" } = await searchParams;
@@ -45,8 +45,8 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
         <div>
           <h1>Opportunità</h1>
           <p>
-            Mercati con valore atteso da osservare, ordinati per EV{run && ` · analisi del ${dayTime(run.created_at)}`}. Il valore esiste solo
-            se la quota del bookmaker supera la quota equa del modello.
+            Mercati con valore atteso, dal più solido: prima per stato, poi per EV prudente{run && ` · analisi del ${dayTime(run.created_at)}`}.
+            Clicca un&apos;intestazione per ordinare per quella colonna. Il valore esiste solo se la quota del bookmaker supera la quota equa del modello.
           </p>
         </div>
       </header>
@@ -85,7 +85,7 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
             <OppTable rows={rows} />
             {total > rows.length && (
               <p className="note card-pad">
-                Mostrate le prime {rows.length} su {total} per EV. Usa i filtri per stato, competizione o quota per vedere le altre.
+                Mostrate le migliori {rows.length} su {total}. Usa i filtri per stato, competizione o quota per vedere le altre.
               </p>
             )}
           </>
