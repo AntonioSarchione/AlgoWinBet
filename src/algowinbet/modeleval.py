@@ -41,10 +41,10 @@ VARIANTS: dict[str, dict] = {
 
 def group_of(competition: str) -> str:
     c = competition.lower()
-    if any(k in c for k in ("nations league", "world cup", "euro ", "qualif", "friendl", "uefa euro")):
-        return "nazionali"
-    if any(k in c for k in ("champions", "europa", "conference")):
+    if any(k in c for k in ("champions", "europa league", "conference")):  # club cups, qualifying rounds included
         return "coppe"
+    if any(k in c for k in ("nations league", "world cup", "uefa euro", "qualif", "friendl")):
+        return "nazionali"
     return "campionati"
 
 
