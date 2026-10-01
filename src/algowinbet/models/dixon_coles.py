@@ -26,9 +26,15 @@ def _tau(i: np.ndarray, j: np.ndarray, lh: np.ndarray, la: np.ndarray, rho: floa
 
 
 class DixonColes:
-    def __init__(self, xi: float = math.log(2) / 365.0, l2: float = 1.0, comp_mu: bool = False):
+    def __init__(self, xi: float = math.log(2) / 365.0, l2: float = 1.0, comp_mu: bool = False,
+                 l2_comp_home: float | None = None, l2_comp_mu: float = 0.0):
         self.xi = xi  # decay per day (default half-life 1 year)
         self.l2 = l2
+        # league effects (pooled model only): each competition's home advantage as a deviation from the shared one, shrunk
+        # with l2_comp_home (None = one home advantage for all); its goal level shrunk towards the overall level with
+        # l2_comp_mu (0 = free, the original behaviour). Leagues with few matches borrow from the others.
+        self.l2_comp_home, self.l2_comp_mu = l2_comp_home, l2_comp_mu
+        self.home_comp: dict[str, float] = {}
         # comp_mu: one pooled model over every competition, with its own unpenalised goal level per competition. Team
         # strengths are shared, so Champions/Europa League matches put clubs from different leagues on one scale.
         self.comp_mu = comp_mu
@@ -68,35 +74,55 @@ class DixonColes:
             if team in self.teams:
                 a0[self.teams[team]], d0[self.teams[team]] = pa, pd
 
+        lh_c = self.l2_comp_home if self.comp_mu and self.l2_comp_home is not None else None
+        lmu = self.l2_comp_mu if self.comp_mu else 0.0
+
+        # parameters: attack (T), defence (T), shared home advantage, goal level per competition (C), then only when the
+        # league effects are on: overall goal level (shrinkage centre) and home deviation per competition (C). Without them
+        # the vector is exactly the original one, so the default fit is unchanged.
+        n_mu0 = 1 if lmu else 0
+        n_dh = C if lh_c is not None else 0
+        o_mu, o_mu0, o_dh = 2 * T + 1, 2 * T + 1 + C, 2 * T + 1 + C + n_mu0
+
         def unpack(th):
-            return th[:T], th[T : 2 * T], th[2 * T], th[2 * T + 1 :]
+            mu0 = th[o_mu0] if n_mu0 else 0.0
+            dh = th[o_dh : o_dh + n_dh] if n_dh else np.zeros(C)
+            return th[:T], th[T : 2 * T], th[2 * T], mu0, th[o_mu : o_mu + C], dh
 
         def nll(th):
-            a, d, h, mu = unpack(th)
+            a, d, h, mu0, mu, dh = unpack(th)
             m = mu[ci]
-            eh = m + h + a[hi] - d[ai]
+            eh = m + h + dh[ci] + a[hi] - d[ai]
             ea = m + a[ai] - d[hi]
             lh, la = np.exp(eh), np.exp(ea)
             ll = np.sum(w * (x * eh - lh + y * ea - la))
             rh, ra = w * (x - lh), w * (y - la)
             ga = np.bincount(hi, rh, T) + np.bincount(ai, ra, T)
             gd = -np.bincount(ai, rh, T) - np.bincount(hi, ra, T)
-            gmu = np.bincount(ci, rh + ra, C)
-            grad = np.concatenate([-ga + 2 * self.l2 * (a - a0), -gd + 2 * self.l2 * (d - d0), [-rh.sum()], -gmu])
-            return -ll + self.l2 * ((a - a0) @ (a - a0) + (d - d0) @ (d - d0)), grad
+            gmu = -np.bincount(ci, rh + ra, C) + 2 * lmu * (mu - mu0)
+            gdh = -np.bincount(ci, rh, C) + (2 * lh_c * dh if lh_c is not None else 0.0)
+            pen = self.l2 * ((a - a0) @ (a - a0) + (d - d0) @ (d - d0)) + lmu * ((mu - mu0) @ (mu - mu0))
+            if lh_c is not None:
+                pen += lh_c * (dh @ dh)
+            parts = [-ga + 2 * self.l2 * (a - a0), -gd + 2 * self.l2 * (d - d0), [-rh.sum()], gmu]
+            if n_mu0:
+                parts.append([-2 * lmu * (mu - mu0).sum()])
+            if n_dh:
+                parts.append(gdh)
+            return -ll + pen, np.concatenate(parts)
 
-        th0 = np.concatenate([a0, d0, np.zeros(1 + C)])
-        th0[2 * T] = 0.25
-        th0[2 * T + 1 :] = math.log(max((x.mean() + y.mean()) / 2, 0.5))
+        base = math.log(max((x.mean() + y.mean()) / 2, 0.5))
+        th0 = np.concatenate([a0, d0, [0.25], np.full(C, base), np.full(n_mu0, base), np.zeros(n_dh)])
         res = minimize(nll, th0, jac=True, method="L-BFGS-B")
-        a, d, h, mu = unpack(res.x)
+        a, d, h, _, mu, dh = unpack(res.x)
         self.attack, self.defence, self.home_adv = a, d, float(h)
         counts_c = np.bincount(ci, None, C)
         self.mu = float(np.average(mu, weights=counts_c))
         self.mu_comp = {c: float(mu[k]) for c, k in cidx.items()} if self.comp_mu else {}
+        self.home_comp = {c: float(dh[k]) for c, k in cidx.items()} if lh_c is not None else {}
 
         # stage 2: rho on low-score cells
-        lh = np.exp(mu[ci] + h + a[hi] - d[ai])
+        lh = np.exp(mu[ci] + h + dh[ci] + a[hi] - d[ai])
         la = np.exp(mu[ci] + a[ai] - d[hi])
 
         def neg_rho(r):
@@ -125,7 +151,8 @@ class DixonColes:
         aa = self.attack[self.teams[away]] if away in self.teams else 0.0
         da = self.defence[self.teams[away]] if away in self.teams else 0.0
         mu = self.mu_comp.get(competition, self.mu) if competition else self.mu
-        return float(math.exp(mu + self.home_adv + ah - da)), float(math.exp(mu + aa - dh))
+        home = self.home_adv + (self.home_comp.get(competition, 0.0) if competition else 0.0)
+        return float(math.exp(mu + home + ah - da)), float(math.exp(mu + aa - dh))
 
     def for_competition(self, competition: str) -> "CompetitionView":
         return CompetitionView(self, competition)

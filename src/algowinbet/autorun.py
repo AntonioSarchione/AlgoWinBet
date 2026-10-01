@@ -19,6 +19,7 @@ Plan per tick (UTC):
   - OddsPapi closing ..... free /historical-odds after kickoff (closing line for CLV)
   - football-data ........ season CSVs (stats, xG, opening/closing Pinnacle, Betfair Exchange, market average) once the
                            GOAL backfill is complete: past seasons once, the current season every dataset_refresh_days
+  - international ........ results of every national team (github martj42, public CSV) once a week: national-team Elo
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 from .collector import CollectStats, GoalCollector
+from .elo import international_due, sync_international
 from .fdcollector import FootballDataCollector
 from .oddscollector import LINKS_SCHEMA, OddsCollector
 from .providers.oddspapi import SOURCE
@@ -70,6 +72,7 @@ class AutoConfig:
     history_per_tick: int = 20
     divisions: dict[str, str] = field(default_factory=dict)  # football-data division -> competition
     dataset_refresh_days: float = 3
+    international: bool = False  # weekly international results (national-team Elo), public CSV, no key
 
     @classmethod
     def load(cls, path: str | Path) -> "AutoConfig":
@@ -208,7 +211,7 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
             steps.append("history")
         steps.append("closing")
     backfilled = all(store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues)
-    if cfg.divisions and backfilled and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days):
+    if (cfg.divisions and backfilled and FootballDataCollector(store, cfg.divisions, now=lambda: now).due(cfg.history_seasons, cfg.dataset_refresh_days))             or (cfg.international and international_due(store, now)):
         steps.append("datasets")  # last: nothing time-critical; the files link to the backfilled results, so they wait for it
     return steps
 
@@ -244,7 +247,7 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
             continue
         if s in ("odds", "history", "closing") and odds is None:
             continue
-        if s == "datasets" and datasets is None:
+        if s == "datasets" and datasets is None and not cfg.international:
             continue
         if s == "fixtures":
             out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
@@ -278,7 +281,14 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         elif s == "datasets":
             # capped so the analysis still gets published in the same tick; the first load spreads over a few ticks
             left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
-            out.append(datasets.sync(cfg.history_seasons, cfg.dataset_refresh_days, max_seconds=left, clock=clock))
+            if cfg.international:
+                st = sync_international(store, t)  # one small file a week: national-team Elo
+                if st:
+                    out.append(st)
+                    if on_step and datasets is not None:  # the last stat of the step is shown below
+                        on_step(st)
+            if datasets is not None:
+                out.append(datasets.sync(cfg.history_seasons, cfg.dataset_refresh_days, max_seconds=left, clock=clock))
         if on_step and len(out) > before:
             on_step(out[-1])
     return out

@@ -17,6 +17,7 @@
   "history_bookmakers": ["sisal", "pinnacle"],
   "oddspapi_plan_monthly": 200,
   "manual_monthly": 5,
+  "international": true,
   "goal_daily_limit": 1000,
   "goal_reserve": 50,
   "oddspapi_monthly_limit": 250,

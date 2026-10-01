@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from .calibration import CalibrationSet
+from .elo import EloTimeline, club_timeline, elo_prior, national_timeline
 from .config import Config
 from .domain import Fixture, InformationEvent, Opportunity, OpportunityStatus, Player, SelectionRef
 from .explain import explain_slip
@@ -70,6 +71,7 @@ class Engine:
         self._models: dict[tuple[str, datetime], tuple[DixonColes, list[DixonColes]] | None] = {}
         self._impact: dict[tuple[str, datetime], PlayerImpactModel | None] = {}
         self._rosters: dict[str, list[Player]] = {}
+        self._elo: tuple[EloTimeline | None, EloTimeline | None] | None = None
 
     # ---------------------------------------------------------------- models
     def roster(self, competition: str) -> list[Player]:
@@ -98,12 +100,33 @@ class Engine:
             self._models[key] = self._fit_hist(history_at(self.provider, competition, cutoff, m.history_seasons), cutoff, comp_mu=False)
         return self._models[key]
 
+    def elo(self) -> tuple[EloTimeline | None, EloTimeline | None]:
+        """(clubs, national teams) rating timelines, built once: lookups read the rating known at the cutoff."""
+        if self._elo is None:
+            m = self.cfg.model
+            clubs = nations = None
+            if m.club_elo_per_100:
+                from .domain import utc
+                clubs = club_timeline(self.provider.list_history(None, utc(2100, 1, 1)))
+            if m.nation_elo_per_100:
+                from .names import TeamNames
+                fn = getattr(self.provider, "international_results", None)
+                body = fn() if fn else None
+                nations = national_timeline(body, TeamNames.load(m.aliases_path)) if body else None
+            self._elo = (clubs, nations)
+        return self._elo
+
     def _fit_hist(self, hist, cutoff: datetime, comp_mu: bool):
         m = self.cfg.model
         if len(hist) < m.min_history:
             return None
-        kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2, comp_mu=comp_mu)
-        model = DixonColes(**kw).fit(hist, cutoff, prior=newcomer_prior(hist, cutoff, m.newcomer_prior))
+        kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2, comp_mu=comp_mu, l2_comp_home=m.l2_comp_home, l2_comp_mu=m.l2_comp_mu)
+        prior = newcomer_prior(hist, cutoff, m.newcomer_prior)
+        if m.club_elo_per_100 or m.nation_elo_per_100:
+            clubs, nations = self.elo()
+            teams = {t for r in hist for t in (r.home, r.away)}
+            prior.update(elo_prior(teams, cutoff, clubs, nations, m.club_elo_per_100, m.nation_elo_per_100))
+        model = DixonColes(**kw).fit(hist, cutoff, prior=prior)
         boots = DixonColes.bootstrap(hist, cutoff, m.n_bootstrap, seed=1, **kw) if m.n_bootstrap else []
         return model, boots
 

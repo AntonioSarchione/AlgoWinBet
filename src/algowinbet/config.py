@@ -15,6 +15,15 @@ class ModelCfg(BaseModel):
     pooled: bool = True  # one model over all competitions (needed for European cups); False = one model per competition
     newcomer_prior: float = -0.2  # log-strength prior (attack and defence) for clubs with no match before this season
     history_seasons: int = 2  # results used by the model: current season + this many previous seasons (seasons start 1 July)
+    # Elo prior (0 = off): log-goal strength per 100 Elo above the average of the teams of the same kind, used as the centre
+    # of the ridge penalty instead of 0. Clubs: Elo from our results; national teams: Elo from the international results.
+    club_elo_per_100: float = 0.0
+    nation_elo_per_100: float = 0.0
+    # league effects (pooled model): home advantage per competition shrunk to the shared one (None = shared only), goal
+    # level per competition shrunk to the overall one (0 = free)
+    l2_comp_home: float | None = None
+    l2_comp_mu: float = 0.0
+    aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
     version: str = "dc-poisson-v1"
 
 

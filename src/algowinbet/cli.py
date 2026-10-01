@@ -480,6 +480,19 @@ def _has_table(store: SnapshotStore, name: str) -> bool:
     return store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
+def cmd_model_eval(a) -> None:
+    """Walk-forward comparison of model variants on the stored results (no API request)."""
+    from .modeleval import VARIANTS, default_window, evaluate, print_report
+    store = SnapshotStore(a.db)
+    try:
+        start, end = default_window(weeks=a.weeks)
+        chosen = {k: v for k, v in VARIANTS.items() if not a.variants or k in a.variants}
+        rep = evaluate(SnapshotProvider(store), _cfg(a), start, end, chosen)
+        print_report(rep)
+    finally:
+        store.close()
+
+
 def cmd_market_coverage(a) -> None:
     """Every market a bookmaker prices in the stored snapshots (no API request): per catalogue marketType and period, how many
     fixtures and lines it covers and whether our mapper reads it (used) or skips it."""
@@ -856,6 +869,12 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--db", default="turso")
     dr.add_argument("--examples", type=int, default=6)
     dr.set_defaults(fn=cmd_dataset_report)
+    me = sub.add_parser("model-eval", help="confronto walk-forward delle varianti del modello sui risultati salvati (nessuna richiesta)")
+    me.add_argument("--db", default="turso")
+    me.add_argument("--weeks", type=int, default=52)
+    me.add_argument("--variants", nargs="*", help="es. base campionati elo-club elo-nazionali emivita-180 emivita-540 tutto")
+    me.add_argument("--config")
+    me.set_defaults(fn=cmd_model_eval)
     mc = sub.add_parser("market-coverage", help="mercati quotati da un bookmaker nelle fotografie salvate (nessuna richiesta API)")
     mc.add_argument("--db", default="turso")
     mc.add_argument("--book", default="sisal")

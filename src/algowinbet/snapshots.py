@@ -384,6 +384,13 @@ class SnapshotProvider:
         return sorted((r for r in self._unique_results()[0] if (not competitions or r.competition in competitions) and r.available_at <= until),
                       key=lambda r: (r.kickoff, r.fixture_id))
 
+    def international_results(self) -> bytes | None:
+        """Latest international results CSV (national-team Elo), downloaded weekly by the scheduler."""
+        if not hasattr(self, "_intl"):
+            from .elo import latest_international
+            self._intl = latest_international(self.store)
+        return self._intl
+
     def result_of(self, fixture_id: str) -> MatchResult | None:
         """Result of a match by any of its ids (odds or lineups may sit on the id GOAL did not keep for the result)."""
         results, canon = self._unique_results()
