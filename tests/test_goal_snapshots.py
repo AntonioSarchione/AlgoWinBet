@@ -328,6 +328,44 @@ def test_fixture_and_results_sync_store_rows_and_report_gaps():
     assert SnapshotProvider(store).list_history(None, NOW)[0].home_goals == 3
 
 
+# Real pair from /leagues/{LaLiga}/results (2026-09-30): one match, two GOAL ids from two upstream feeds (apiId 610628 / 687733).
+def _betis_alaves(fid, api_id, away_name):
+    return {"id": fid, "apiId": api_id, "leagueName": "LaLiga", "kickoffUtc": "2025-08-22T19:30:00.000Z", "matchStatus": "FINISHED",
+            "homeTeamName": "Betis", "homeTeamScore": "1", "awayTeamName": away_name, "awayTeamScore": "0",
+            "homeTeam": {"id": "cmr7m55uo5eg8rx06hlsjolr6", "name": "Real Betis"}, "awayTeam": {"id": "cmr7m55ue5eg4rx06vdyle9qd", "name": "Alavés"}}
+
+
+def test_match_listed_twice_by_goal_is_stored_and_read_once():
+    store = SnapshotStore(":memory:")
+    rows = [_betis_alaves("cmrjhshs6t0n7o8070iny6gwe", "687733", "Alaves"), _betis_alaves("cmrjhshrkt0mxo8074kvog6tn", "610628", "Alavés")]
+    col, _ = _collector({"/leagues/1/results": [ok(rows, pagination={"hasMore": False})]}, store, now=utc(2025, 8, 23, 9, 0))
+    assert col.sync_results(3).saved == {"results": 1}
+    assert store.db.execute("SELECT fixture_id FROM results").fetchall() == [("goal:cmrjhshrkt0mxo8074kvog6tn",)]  # smallest id kept
+    assert store.db.execute("SELECT COUNT(DISTINCT fixture_id) FROM fixtures").fetchone()[0] == 2  # both ids stay in the calendar
+    # a later page with the other id, or the same id again, adds nothing; the same clubs days later are another match
+    from algowinbet.domain import MatchResult
+    r = MatchResult(fixture_id="goal:zzz", competition="LaLiga", home="Real Betis", away="Alavés", kickoff=utc(2025, 8, 22, 21, 0),
+                    home_goals=1, away_goals=0)
+    assert store.save_results("x", [r], NOW) == 0
+    assert store.save_results("x", [r.model_copy(update={"kickoff": utc(2025, 8, 26, 19, 30)})], NOW) == 1
+
+
+def test_history_reads_count_a_match_stored_under_two_ids_once():
+    """Pairs stored before save_results deduplicated (37 on Turso): the model must not fit them twice."""
+    from algowinbet.domain import MatchResult
+    s = SnapshotStore(":memory:")
+    ko = utc(2025, 8, 24, 13, 30)
+    rows = [("goal:b", "Mainz 05", "Köln", ko, 0, 1), ("goal:a", "Mainz 05", "Koln", ko + timedelta(hours=1), 0, 1),
+            ("goal:c", "Mainz 05", "Köln", ko + timedelta(days=200), 2, 2), ("goal:d", "Köln", "Mainz 05", ko, 1, 1)]
+    for fid, h, a, k, hg, ag in rows:  # straight into the table, as the old save_results did
+        s.db.execute("INSERT INTO results(fixture_id,source,competition,home,away,kickoff,home_goals,away_goals,observed_at) "
+                     "VALUES(?,?,?,?,?,?,?,?,?)", (fid, "goal-api", "Bundesliga", h, a, k.isoformat(), hg, ag, NOW.isoformat()))
+    hist = SnapshotProvider(s).list_history(None, NOW)
+    assert [r.fixture_id for r in hist] == ["goal:b", "goal:d", "goal:c"]  # earliest kickoff of the pair kept; reverse fixture is another match
+    merged = MergedProvider(SnapshotProvider(s), type("E", (), {"name": "e", "list_history": lambda *a: [], "list_competitions": lambda *a: []})())
+    assert len(merged.list_history(None, NOW)) == 3
+
+
 def test_plan_upgrade_required_is_reported_not_crashing():
     store = SnapshotStore(":memory:")
     _seed_fixtures(store, [NOW + timedelta(hours=10)])

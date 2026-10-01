@@ -387,7 +387,7 @@ def test_bulk_writes_use_few_statements():
             calls.append(a[0][:20])
             return real.execute(*a)
     store.db = Spy()
-    assert store.save_results("x", rs, NOW) == 1000 and len(calls) <= 10
+    assert store.save_results("x", rs, NOW) == 1000 and len(calls) <= 11  # one lookup of stored matches + 10 inserts
 
 
 def test_interrupted_tick_leaves_no_league_behind():

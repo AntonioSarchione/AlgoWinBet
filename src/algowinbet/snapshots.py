@@ -13,9 +13,11 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterable
 
 from .domain import (Fixture, FixtureStatus, HistoricalLineup, InformationEvent, LineupSnapshot, MatchResult, MatchStat, NewsItem,
                      OddsQuote, Player, Position)
+from .names import normalize
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS blobs(hash TEXT PRIMARY KEY, body BLOB);
@@ -53,6 +55,27 @@ def _dt(s: str) -> datetime:
 
 
 REMOTE_PREFIXES = ("libsql://", "https://", "wss://")
+
+# GOAL lists some matches twice in the same /leagues/{id}/results page: two fixture ids built from two upstream feeds (different
+# apiId), same clubs, kickoff and score (37 pairs on early 2025/26 pages). Same canonical clubs with kickoffs this close = one match.
+SAME_MATCH = timedelta(hours=3)
+
+
+def _match_key(home: str, away: str) -> tuple[str, str]:
+    return normalize(home), normalize(away)
+
+
+def dedupe_results(results: Iterable[MatchResult]) -> list[MatchResult]:
+    """One row per match, in kickoff order. The first in (kickoff, fixture_id) order is kept, the choice save_results makes too."""
+    last: dict[tuple[str, str], datetime] = {}
+    out = []
+    for r in sorted(results, key=lambda r: (r.kickoff, r.fixture_id)):
+        k = _match_key(r.home, r.away)
+        if k in last and r.kickoff - last[k] <= SAME_MATCH:
+            continue
+        last[k] = r.kickoff
+        out.append(r)
+    return out
 
 
 def connect(path: str | Path):
@@ -150,7 +173,26 @@ class SnapshotStore:
             batch[f.id] = (source, f.id, f.competition, f.home, f.away, _iso(f.kickoff), f.status.value, _iso(observed_at), raw_id)
         return self._bulk("INSERT INTO fixtures(source,fixture_id,competition,home,away,kickoff,status,observed_at,raw_id)", list(batch.values()))
 
+    def _new_matches(self, results: list[MatchResult]) -> list[MatchResult]:
+        """Drop results that repeat a match already stored, or earlier in the batch, under another fixture id (one query)."""
+        if not results:
+            return []
+        lo, hi = min(r.kickoff for r in results) - SAME_MATCH, max(r.kickoff for r in results) + SAME_MATCH
+        known: dict[tuple[str, str], list[tuple[str, datetime]]] = {}
+        for fid, h, a, ko in self.db.execute("SELECT fixture_id, home, away, kickoff FROM results WHERE kickoff BETWEEN ? AND ?",
+                                             (_iso(lo), _iso(hi))).fetchall():
+            known.setdefault(_match_key(h, a), []).append((fid, _dt(ko)))
+        out = []
+        for r in sorted(results, key=lambda r: (r.kickoff, r.fixture_id)):
+            same = known.setdefault(_match_key(r.home, r.away), [])
+            if any(fid != r.fixture_id and abs(ko - r.kickoff) <= SAME_MATCH for fid, ko in same):
+                continue
+            same.append((r.fixture_id, r.kickoff))
+            out.append(r)
+        return out
+
     def save_results(self, source: str, results: list[MatchResult], observed_at: datetime) -> int:
+        results = self._new_matches(results)
         return self._bulk("INSERT OR IGNORE INTO results(fixture_id,source,competition,home,away,kickoff,home_goals,away_goals,observed_at)",
                           [(r.fixture_id, source, r.competition, r.home, r.away, _iso(r.kickoff), r.home_goals, r.away_goals, _iso(observed_at))
                            for r in results])
@@ -303,8 +345,7 @@ class SnapshotProvider:
                 for r in rows]
 
     def list_history(self, competitions, until) -> list[MatchResult]:
-        return sorted((r for r in self._results() if (not competitions or r.competition in competitions) and r.available_at <= until),
-                      key=lambda r: r.kickoff)
+        return dedupe_results(r for r in self._results() if (not competitions or r.competition in competitions) and r.available_at <= until)
 
     def result_of(self, fixture_id: str) -> MatchResult | None:
         return next((r for r in self._results() if r.fixture_id == fixture_id), None)

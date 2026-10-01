@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from algowinbet.collector import CollectStats
-from algowinbet.domain import MatchResult
+from algowinbet.domain import Fixture, FixtureStatus, MatchResult
 from algowinbet.fdcollector import FootballDataCollector, opening_time, season_code, seasons_back
 from algowinbet.snapshots import SnapshotStore
 
@@ -91,7 +91,10 @@ def test_row_without_our_match_is_reported_not_guessed():
 
 def test_same_match_under_two_ids_gets_the_data_on_both():
     ko = datetime(2025, 8, 24, 13, 30, tzinfo=UTC)
-    st = store_with(("goal:a", "Mainz 05", "Köln", ko), ("goal:b", "Mainz 05", "Köln", ko))
+    st = store_with(("goal:a", "Mainz 05", "Köln", ko))
+    # results keeps one id per match; the GOAL calendar (fixtures) keeps both, and the CSV data goes on both
+    st.save_fixtures("goal", [Fixture(id=fid, competition="Bundesliga", home="Mainz 05", away="Köln", kickoff=ko, status=FixtureStatus.FINISHED)
+                              for fid in ("goal:a", "goal:b")], NOW)
     c = FootballDataCollector(st, {"D1": "Bundesliga"}, now=lambda: NOW)
     rep = c.load(csv_body(row("24/08/2025", "14:30", "Mainz", "FC Koln")), "D1", None, CollectStats("t"))
     assert rep.linked == 1 and st.stats_of("goal:a")["goals"] == st.stats_of("goal:b")["goals"] == (2, 1)

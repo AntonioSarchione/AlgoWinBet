@@ -441,7 +441,9 @@ def _duplicate_report(store: SnapshotStore, examples: int) -> None:
     rows = store.db.execute(
         "SELECT a.fixture_id, b.fixture_id FROM results a JOIN results b ON a.home=b.home AND a.away=b.away AND a.fixture_id<b.fixture_id "
         "AND abs(julianday(a.kickoff)-julianday(b.kickoff)) <= 0.125 ORDER BY a.kickoff").fetchall()
-    print(f"results duplicati: {len(rows)} coppie")
+    n_rows = store.db.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+    n_read = len(SnapshotProvider(store).list_history(None, datetime(2100, 1, 1, tzinfo=timezone.utc)))
+    print(f"results duplicati: {len(rows)} coppie; righe {n_rows}, partite lette dal modello {n_read}")
     pairs = rows[:examples]
     want = {fid.split(":", 1)[-1]: fid for p in pairs for fid in p}
     seen: dict[str, list[str]] = {}
