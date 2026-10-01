@@ -167,7 +167,9 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
                             continue
                         won = i == k
                         bets[fam].append({"ev": pe * o - 1, "pnl": (o - 1) if won else -1.0, "won": won, "book": bet_odds[1],
-                                          "clv": close[0][i] * o - 1 if close else None})
+                                          "clv": close[0][i] * o - 1 if close else None,
+                                          "label": f"{r.home}-{r.away} {r.kickoff:%d/%m/%y} {sels[i][1]} @{o:.2f} p={pe:.3f} "
+                                                   f"mkt={row['market'][i]:.3f} mod={p['attuale'][i]:.3f} prezzi {bet_odds[0]} ref={mkt[1]}"})
     report = {"groups": {}, "calibration": {}, "value": {}, "monthly": []}
     for (g, fam), rows in sorted(acc.items()):
         out = {"n": len(rows)}
@@ -201,6 +203,7 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime) -> dict:
             "n": len(bs), "hits": sum(b["won"] for b in bs), "roi": float(np.mean([b["pnl"] for b in bs])),
             "mean_ev": float(np.mean([b["ev"] for b in bs])), "n_clv": len(clv), "mean_clv": float(np.mean(clv)) if clv else None,
             "books": {k: sum(b["book"] == k for b in bs) for k in PLAYABLE},
+            "examples": [b["label"] for b in sorted(bs, key=lambda b: -b["ev"])[:8]],
         }
     report["monthly"] = [{"month": m, "n": len(v["model"]), "ll_model": float(np.mean(v["model"])), "ll_close": float(np.mean(v["close"]))}
                          for m, v in sorted(monthly.items())]
@@ -234,3 +237,5 @@ def print_quality(report: dict) -> None:
     for fam, v in report["value"].items():
         clv = f"{v['mean_clv']:+.1%}" if v["mean_clv"] is not None else "—"
         print(f"  {fam:<10} giocate {v['n']}, vinte {v['hits']}, ROI {v['roi']:+.1%}, EV atteso {v['mean_ev']:+.1%}, CLV {clv} (n={v['n_clv']}) {v['books']}")
+        for e in v.get("examples", []):
+            print(f"      {e}")
