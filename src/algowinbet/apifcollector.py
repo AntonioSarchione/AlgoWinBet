@@ -82,6 +82,10 @@ class ApiFootballCollector:
         self.squads_per_day = squads_per_day
         self.provider = SnapshotProvider(store)
         store.db.executescript(SCHEMA)
+        if "detail" not in {r[1] for r in store.db.execute("PRAGMA table_info(lineups)").fetchall()}:
+            # shirt number and pitch position ("row:col") of every player: the dashboard draws the formation on a pitch
+            store.db.execute("ALTER TABLE lineups ADD COLUMN detail TEXT")
+            store.db.commit()
 
     # ------------------------------------------------------------------ helpers
     def _last_fetch(self, endpoint: str, params: dict) -> datetime | None:
@@ -225,6 +229,7 @@ class ApiFootballCollector:
             if players:
                 self._save_players(players, keep_position=True)
             st.add("lineups", self.store.save_lineups(SOURCE, lus))
+            self._save_detail(env.get("response") or [], fid, names)
 
     def _lineups(self, rows: list[dict], fid: str, names: dict[int, str]) -> tuple[list[LineupSnapshot], list[Player]]:
         t = self.now()
@@ -243,6 +248,31 @@ class ApiFootballCollector:
                                       starters=[pid(p["id"]) for p in xi if p.get("id")], bench=[pid(p["id"]) for p in bench if p.get("id")],
                                       published_at=t, observed_at=t, source_level="A"))
         return lus, players
+
+    def _save_detail(self, rows: list[dict], fid: str, names: dict[int, str]) -> None:
+        for r in rows:
+            team = names.get(int(r["team"]["id"]))
+            if not team:
+                continue
+            detail = {pid(x["player"]["id"]): {"n": x["player"].get("number"), "g": x["player"].get("grid")}
+                      for x in (r.get("startXI") or []) + (r.get("substitutes") or []) if x["player"].get("id")}
+            self.store.db.execute("UPDATE lineups SET detail=? WHERE fixture_id=? AND team=? AND source=? AND detail IS NULL",
+                                  (json.dumps(detail), fid, team, SOURCE))
+        self.store.db.commit()
+
+    def backfill_detail(self) -> int:
+        """Lineups saved before the detail column existed: numbers and positions from the stored raw responses (no request)."""
+        todo = self.store.db.execute("SELECT DISTINCT fixture_id FROM lineups WHERE source=? AND detail IS NULL", (SOURCE,)).fetchall()
+        links, names, n = self._links(), self._team_names(), 0
+        for (fid,) in todo:
+            ext = links.get(fid)
+            row = ext and self.store.db.execute(
+                "SELECT id FROM raw_requests WHERE source=? AND endpoint='/fixtures/lineups' AND params=? AND status=200 ORDER BY id DESC LIMIT 1",
+                (SOURCE, json.dumps({"fixture": ext}, sort_keys=True))).fetchone()
+            if row:
+                self._save_detail(json.loads(self.store.raw_body(row[0])).get("response") or [], fid, names)
+                n += 1
+        return n
 
     # ------------------------------------------------------------------ squads
     def sync_squads(self, st: CollectStats, reserve_for_leagues: int = 0) -> None:
@@ -286,6 +316,7 @@ class ApiFootballCollector:
         t0 = clock()
         before = self.client.requests_sent
         try:
+            self.backfill_detail()
             self.sync_days(st)
             reserve = 2 * self._league_matches_left_today()  # up to 2 tries each for the league lineups still to come today
             self.sync_lineups(st, reserve_for_leagues=reserve)

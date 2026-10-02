@@ -19,7 +19,8 @@ def _api_fixture(fid, league, home, away, hid, aid, ko=KO):
 
 def _xi(team_id, base):
     return {"team": {"id": team_id}, "formation": "4-3-3",
-            "startXI": [{"player": {"id": base + i, "name": f"P{base + i}", "pos": "GDDDDMMMFFF"[i]}} for i in range(11)],
+            "startXI": [{"player": {"id": base + i, "name": f"P{base + i}", "pos": "GDDDDMMMFFF"[i], "number": i + 1,
+                                    "grid": ["1:1", "2:1", "2:2", "2:3", "2:4", "3:1", "3:2", "3:3", "4:1", "4:2", "4:3"][i]}} for i in range(11)],
             "substitutes": [{"player": {"id": base + 50, "name": f"S{base}", "pos": "M"}}]}
 
 
@@ -103,6 +104,8 @@ def test_tick_links_fixtures_and_saves_injuries_lineups_and_squads():
     assert ev == {"apif:7": "OUT", "apif:8": "SUSPENDED", "apif:9": "DOUBTFUL"}
     lus = SnapshotProvider(s).get_lineups("g1")
     assert {l.team for l in lus} == {"Milan", "Inter"} and all(len(l.starters) == 11 and l.status == "confirmed" for l in lus)
+    detail = json.loads(s.db.execute("SELECT detail FROM lineups WHERE fixture_id='g1' AND team='Milan'").fetchone()[0])
+    assert detail["apif:100"] == {"n": 1, "g": "1:1"} and detail["apif:110"] == {"n": 11, "g": "4:3"}
     roles = dict(s.db.execute("SELECT id, position FROM players").fetchall())
     assert roles["apif:7"] == "FWD" and roles["apif:100"] == "GK"  # squad role wins over the lineup's
     paths = [p for p, _ in fake.calls]
