@@ -56,6 +56,7 @@ class OddsPapiClient:
         self._last_call: dict[str, float] = {}
         self.requests_sent = 0
         self.billable_sent = 0
+        self.last_raw_s = 0.0
 
     def __repr__(self) -> str:
         return f"OddsPapiClient(base={self.base!r}, requests_sent={self.requests_sent})"
@@ -87,7 +88,9 @@ class OddsPapiClient:
             if self.budget:
                 self.budget.add(1)
         if self.store:
+            t_raw = time.monotonic()
             self.store.put_raw(SOURCE, endpoint, params, status, body, fetched, cost=1 if counted else 0)
+            self.last_raw_s = time.monotonic() - t_raw  # time spent writing the raw payload (diagnostics of slow ticks)
         if status == 429:
             raise OddsPapiError(f"429 da OddsPapi (quota mensile o cooldown): {body[:200]!r}", 429)
         if status in (401, 403):

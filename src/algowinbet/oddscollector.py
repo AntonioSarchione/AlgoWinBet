@@ -156,15 +156,22 @@ class OddsCollector:
                     st.skipped.append(f"{len(rows) - i} partite rimandate al prossimo giro (limite per run)")
                     break
                 fx = upcoming[fid]
+                c0 = clock()
                 env = self.client.get("/historical-odds", {"fixtureId": ext_id, "bookmakers": ",".join(books)})
+                c1 = clock()
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
                 quotes = thin_history(m.history(env["data"], fx, closing=False), fx.kickoff, t)
+                c2 = clock()
                 st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
+                c3 = clock()
                 self._drop_older_paths(raw_id)
+                c4 = clock()
                 if quotes:
                     first, last = min(q.observed_at for q in quotes), max(q.observed_at for q in quotes)
                     print(f"  storico {fx.home}-{fx.away} ({fx.kickoff:%d/%m %H:%M} UTC): {len(quotes)} prezzi, dal {first:%d/%m %H:%M} "
-                          f"({(fx.kickoff - first).total_seconds() / 3600:.0f}h prima) all'ultimo cambio {last:%d/%m %H:%M}", flush=True)
+                          f"({(fx.kickoff - first).total_seconds() / 3600:.0f}h prima) all'ultimo cambio {last:%d/%m %H:%M}  "
+                          f"[richiesta {c1 - c0 - getattr(self.client, 'last_raw_s', 0):.1f}s, grezzo {getattr(self.client, 'last_raw_s', 0):.1f}s, "
+                          f"lettura {c2 - c1:.1f}s, quote {c3 - c2:.1f}s, pulizia {c4 - c3:.1f}s]", flush=True)
             try:
                 self.client.account()
             except OddsPapiError as e:
