@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { inCollectionHours, REPO, WORKFLOW } from "@/lib/refresh";
 
 // Scheduler tick from an external pinger (GitHub's own cron starts most runs hours late or never). The pinger calls this
-// URL every 20 minutes with "Authorization: Bearer <CRON_SECRET>"; inside the collection hours (lib/refresh.ts) it starts one
+// URL every 30 minutes with "Authorization: Bearer <CRON_SECRET>"; inside the collection hours (lib/refresh.ts) it starts one
 // ordinary `collect` run (the job itself decides what is worth doing, as for a cron run).
 // CRON_SECRET and GITHUB_DISPATCH_TOKEN are Vercel env vars set by the owner; neither ever reaches the browser.
 export const dynamic = "force-dynamic";
