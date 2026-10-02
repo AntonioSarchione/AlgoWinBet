@@ -213,6 +213,8 @@ def analyze_fixture(
         edge_v = (p_fin - p_mkt) if has_mkt else None
         ev_v = p_fin * v.best_odds - 1
         ev_lo = p_lo * v.best_odds - 1
+        if has_mkt:  # prudent EV also trusts only part of the edge over the market (optimizer.edge_shrink, from the replay)
+            ev_lo = min(ev_lo, min(p_fin, p_mkt + cfg.optimizer.edge_shrink * (p_fin - p_mkt)) * v.best_odds - 1)
         status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg, p_fin)
         if stale and status in (S.STRONG, S.CANDIDATE):
             status = S.WATCH  # the edge may only be a not-yet-updated price: verify the current quote first

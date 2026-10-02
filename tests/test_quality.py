@@ -63,3 +63,15 @@ def test_price_matches_the_brand_whatever_the_country_suffix():
     qs = [("MATCH_1X2", s, None, "sisal.it", o, T0, "current") for s, o in zip(("HOME", "DRAW", "AWAY"), (2.0, 3.3, 3.8))]
     got = _price(qs, fam, ("sisal", "market-avg"), T0, closing=False, fair=False)
     assert got == ([2.0, 3.3, 3.8], "sisal")
+
+
+def test_edge_shrink_is_low_when_picked_edges_do_not_win_more_than_the_market():
+    from algowinbet.quality import edge_shrink
+    assert edge_shrink([])["lambda"] == 1.0
+    fake = [{"p": 0.6, "pm": 0.5, "won": i % 2 == 0} for i in range(400)]  # won 50% = market
+    lo = edge_shrink(fake)
+    assert lo["n"] == 400 and lo["lambda"] < 0.1
+    real = [{"p": 0.6, "pm": 0.5, "won": i % 10 < 6} for i in range(400)]  # won 60% = model
+    assert edge_shrink(real)["lambda"] > 0.9
+    few = edge_shrink(fake[:4])
+    assert 0.3 < few["lambda"] < 0.5  # few picks: pulled toward one half

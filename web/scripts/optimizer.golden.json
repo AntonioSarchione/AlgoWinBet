@@ -48,6 +48,20 @@
     1.77
    ],
    "multi_bonus_min_odds": 1.25,
+   "edge_shrink": 1.0,
+   "profile": "equilibrata",
+   "profiles": {
+    "probabilita": {
+     "w_ev": 0.5,
+     "w_prob": 3.0,
+     "w_unc": 1.0
+    },
+    "equilibrata": {},
+    "value": {
+     "w_ev": 2.0,
+     "w_prob": 0.1
+    }
+   },
    "w_ev": 1.0,
    "w_prob": 0.5,
    "w_div": 0.1,
@@ -2507,6 +2521,191 @@
      "ev": -0.04851845101536034,
      "ev_lower": -0.1293858650313887,
      "objective": 0.13082954183097484,
+     "stake": 0.0,
+     "bonus": 0.0
+    }
+   ]
+  },
+  {
+   "name": "profile-probabilita",
+   "odds_min": null,
+   "odds_max": null,
+   "max_legs": 6,
+   "profile": "probabilita",
+   "no_bet": false,
+   "slips": [
+    {
+     "legs": [
+      [
+       "mock-0-20-01",
+       "BTTS|YES|"
+      ],
+      [
+       "mock-1-20-00",
+       "TOTAL_GOALS|OVER|1.5"
+      ]
+     ],
+     "total_odds": 2.001,
+     "joint_probability": 0.4818164803967595,
+     "ev": -0.0358852227260843,
+     "ev_lower": -0.11417011784376929,
+     "objective": 1.4397022647545148,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-0-20-00",
+       "TOTAL_GOALS|UNDER|3.5"
+      ]
+     ],
+     "total_odds": 2.0272,
+     "joint_probability": 0.4761510682304868,
+     "ev": -0.03474655448315711,
+     "ev_lower": -0.11427294620941308,
+     "objective": 1.4365363859029714,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|AWAY|"
+      ]
+     ],
+     "total_odds": 2.12,
+     "joint_probability": 0.46646954871153457,
+     "ev": -0.011084556731546624,
+     "ev_lower": -0.09259022752141255,
+     "objective": 1.4316048741316634,
+     "stake": 0.0,
+     "bonus": 0.0
+    }
+   ]
+  },
+  {
+   "name": "profile-value",
+   "odds_min": null,
+   "odds_max": null,
+   "max_legs": 6,
+   "profile": "value",
+   "no_bet": false,
+   "slips": [
+    {
+     "legs": [
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|AWAY|"
+      ]
+     ],
+     "total_odds": 2.12,
+     "joint_probability": 0.46646954871153457,
+     "ev": -0.011084556731546624,
+     "ev_lower": -0.09259022752141255,
+     "objective": 0.03607206392992135,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-0-20-03",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|AWAY|"
+      ]
+     ],
+     "total_odds": 2.4804,
+     "joint_probability": 0.3975161142266003,
+     "ev": -0.014001030272340564,
+     "ev_lower": -0.10518243320060627,
+     "objective": -7.047644720862764e-05,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-04",
+       "MATCH_1X2|HOME|"
+      ]
+     ],
+     "total_odds": 2.27,
+     "joint_probability": 0.43180065414360175,
+     "ev": -0.01981251509402404,
+     "ev_lower": -0.10680396314844631,
+     "objective": -0.001608396946357657,
+     "stake": 0.0,
+     "bonus": 0.0
+    }
+   ]
+  },
+  {
+   "name": "edge-shrink",
+   "odds_min": null,
+   "odds_max": null,
+   "max_legs": 4,
+   "edge_shrink": 0.3,
+   "no_bet": false,
+   "slips": [
+    {
+     "legs": [
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|AWAY|"
+      ]
+     ],
+     "total_odds": 2.12,
+     "joint_probability": 0.46646954871153457,
+     "ev": -0.011084556731546624,
+     "ev_lower": -0.09259022752141255,
+     "objective": 0.2337444401460818,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-0-20-00",
+       "TOTAL_GOALS|UNDER|3.5"
+      ]
+     ],
+     "total_odds": 2.0272,
+     "joint_probability": 0.4761510682304868,
+     "ev": -0.03474655448315711,
+     "ev_lower": -0.11427294620941308,
+     "objective": 0.20265113192924564,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-04",
+       "TOTAL_GOALS|UNDER|3.5"
+      ],
+      [
+       "mock-0-20-00",
+       "TOTAL_GOALS|UNDER|3.5"
+      ]
+     ],
+     "total_odds": 2.0633999999999997,
+     "joint_probability": 0.46783562100259674,
+     "ev": -0.034667979623242084,
+     "ev_lower": -0.1145684034547485,
+     "objective": 0.2013377676527788,
      "stake": 0.0,
      "bonus": 0.0
     }

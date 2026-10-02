@@ -30,6 +30,13 @@ def multi_bonus(legs: list[Opportunity], o) -> float:
     return o.multi_bonus[min(n, 4 + len(o.multi_bonus)) - 5]
 
 
+def prudent_p(leg: Opportunity, shrink: float) -> float:
+    """Probability for the prudent EV: only `shrink` of the model's edge over the market price is trusted (never above p_final)."""
+    if leg.p_market is None:
+        return leg.p_final
+    return min(leg.p_final, leg.p_market + shrink * (leg.p_final - leg.p_market))
+
+
 def make_slip(legs: list[Opportunity], matrices, cfg: Config, C=None, idx=None) -> Slip:
     o = cfg.optimizer
     odds = float(np.prod([l.odds for l in legs]))
@@ -40,7 +47,8 @@ def make_slip(legs: list[Opportunity], matrices, cfg: Config, C=None, idx=None) 
     bonus = multi_bonus(legs, o)
     payout = 1 + (odds - 1) * (1 + bonus)  # what a winning unit returns, bonus on the net winnings included
     ev = joint * payout - 1
-    ev_lo = p_lo * payout - 1
+    shrunk = joint * math.prod(prudent_p(l, o.edge_shrink) / max(l.p_final, 1e-9) for l in legs)
+    ev_lo = min(p_lo, shrunk) * payout - 1  # interval low end, or the edge cut to what past picks earned, whichever is lower
     dis = float(np.mean([l.model_disagreement for l in legs]))
     div = len({l.competition for l in legs}) / len(legs)
     obj = (o.w_ev * ev + o.w_prob * joint + o.w_div * div - o.w_unc * min(1.0, rel) - o.w_corr * pen - o.w_disagree * dis)

@@ -205,7 +205,9 @@ class MetaSet:
     """The fitted pools, looked up by group, family and whether a market price is available."""
 
     def __init__(self, params: dict[str, dict] | None = None, version: str = "none"):
-        self.params = {k: Pool(**v) for k, v in (params or {}).items()}
+        params = dict(params or {})
+        self.shrink = params.pop("_shrink", None)  # prudent EV: share of the edge past picks earned (see quality.edge_shrink)
+        self.params = {k: Pool(**v) for k, v in params.items()}
         self.version = version
 
     def __bool__(self) -> bool:

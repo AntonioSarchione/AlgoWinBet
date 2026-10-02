@@ -87,6 +87,18 @@ class OptimizerCfg(BaseModel):
         0.04, 0.08, 0.12, 0.17, 0.22, 0.27, 0.32, 0.37, 0.42, 0.48, 0.54, 0.60, 0.67, 0.73, 0.80, 0.87, 0.95, 1.03, 1.11, 1.19,
         1.28, 1.37, 1.46, 1.56, 1.67, 1.77])
     multi_bonus_min_odds: float = 1.25
+    # Prudent EV: share of the model's edge over the sharp market price that is trusted (1 = all of it, 0 = none: the
+    # market is assumed right whenever the model is more optimistic). Set from the weekly replay: the edges of the selections
+    # picked in the past, compared with how often they won (picking the best of thousands inflates their edges).
+    edge_shrink: float = 1.0
+    # Slip profiles shown together on the dashboard: objective weights per profile (every profile keeps the same hard limits,
+    # minimum slip EV included). The published slips and the stakes use `profile`.
+    profile: str = "equilibrata"
+    profiles: dict[str, dict[str, float]] = Field(default_factory=lambda: {
+        "probabilita": {"w_ev": 0.5, "w_prob": 3.0, "w_unc": 1.0},
+        "equilibrata": {},
+        "value": {"w_ev": 2.0, "w_prob": 0.1},
+    })
     w_ev: float = 1.0
     w_prob: float = 0.5
     w_div: float = 0.1
@@ -123,6 +135,14 @@ class Config(BaseModel):
         if path and Path(path).exists():
             return cls.model_validate(json.loads(Path(path).read_text()))
         return cls()
+
+    def with_slip_profile(self, name: str) -> "Config":
+        """A copy whose optimizer weights are those of slip profile `name` (Massima probabilità, Equilibrata, Value)."""
+        c = self.model_copy(deep=True)
+        for k, v in self.optimizer.profiles.get(name, {}).items():
+            setattr(c.optimizer, k, v)
+        c.optimizer.profile = name
+        return c
 
     def apply_profile(self) -> "Config":
         """Risk profile presets: conservative | balanced | dynamic (spec 17.1)."""

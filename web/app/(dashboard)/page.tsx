@@ -1,10 +1,11 @@
 import Link from "next/link";
 import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
-  Layers, ListOrdered, Percent, Search, ShieldCheck, Target, Trophy, TrendingUp,
+  Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
 } from "lucide-react";
 import { lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
-import { explainSlip, optimize, type OptOpp, type OptSettings } from "@/lib/optimizer";
+import { explainSlip, legMinOdds, optimize, withProfile, type OptOpp, type OptResult, type OptSettings } from "@/lib/optimizer";
+import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
 import { OppTable } from "@/app/_components/OppTable";
@@ -32,7 +33,29 @@ const MIN_EVENTS = [
   ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => ({ v: String(k), l: k === 5 ? "Almeno 5 (bonus Sisal)" : `Almeno ${k}` })),
 ];
 
-type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; nmin?: string; comp?: string | string[] };
+const LEG_PROB = [{ v: "", l: "Qualsiasi" }, ...[30, 40, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
+const EV_MIN = [
+  { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" }, { v: "0", l: "Almeno 0% (pari)" }, { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" },
+];
+// "maximum risk" = the lowest chance of winning the slip that is still accepted
+const RISK = [
+  { v: "", l: "Nessun limite" },
+  { v: "50", l: "Basso · vince ≥ 50%" },
+  { v: "30", l: "Medio · vince ≥ 30%" },
+  { v: "15", l: "Alto · vince ≥ 15%" },
+  { v: "5", l: "Molto alto · vince ≥ 5%" },
+];
+const PROFILE_LABEL: Record<string, string> = { probabilita: "Massima probabilità", equilibrata: "Equilibrata", value: "Value" };
+const PROFILE_HINT: Record<string, string> = {
+  probabilita: "la schedina più probabile tra quelle con valore",
+  equilibrata: "equilibrio tra probabilità e valore atteso",
+  value: "il valore atteso più alto, anche se meno probabile",
+};
+
+type SP = {
+  min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; nmin?: string; comp?: string | string[];
+  p?: string; pmin?: string; ev?: string; risk?: string; mk?: string | string[];
+};
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -56,6 +79,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const qMax = Number(sp.max) || 0;
   const lMin = Number(sp.lmin) || 0;
   const lMax = Number(sp.lmax) || 0;
+  const legProb = LEG_PROB.some((x) => x.v === sp.pmin) ? Number(sp.pmin || 0) / 100 : 0;
+  const riskMin = RISK.some((x) => x.v === sp.risk) ? Number(sp.risk || 0) / 100 : 0;
+  const pickedMk = new Set([sp.mk ?? []].flat().filter((m) => (MARKET_GROUPS as readonly string[]).includes(m)));
+  const allMk = !pickedMk.size || pickedMk.size === MARKET_GROUPS.length;
   // Competitions: several can be ticked; none in the URL (or all of them) means every competition.
   const picked = new Set([sp.comp ?? []].flat().filter(Boolean));
   const settings = parseJSON<OptSettings | null>(run.optimizer, null);
@@ -72,16 +99,34 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
   type Cand = OptOpp & OppRow;
-  const legs: Cand[] = cands.map((o) => ({
-    ...o, sel_key: o.sel_key ?? "", home: o.home ?? "", away: o.away ?? "", p_struct: o.p_struct ?? o.p_final,
-    score: o.score ?? 0, disagreement: o.disagreement ?? 0, dq_lineup: o.dq_lineup ?? 0,
-  }));
-  const result = settings
-    ? optimize(legs, {
-        ...settings,
-        optimizer: { ...settings.optimizer, max_legs: maxEvents, min_legs: minEvents, odds_min: qMin || settings.optimizer.odds_min, odds_max: qMax || settings.optimizer.odds_max },
-      })
-    : { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0 };
+  const legs: Cand[] = cands
+    .map((o) => ({
+      ...o, sel_key: o.sel_key ?? "", home: o.home ?? "", away: o.away ?? "", p_struct: o.p_struct ?? o.p_final,
+      score: o.score ?? 0, disagreement: o.disagreement ?? 0, dq_lineup: o.dq_lineup ?? 0,
+    }))
+    .filter((o) => allMk || pickedMk.has(marketGroup(o.sel_key)));
+  const evMin = EV_MIN.some((x) => x.v === sp.ev) ? Number(sp.ev) / 100 : (settings?.optimizer.min_slip_ev ?? 0);
+  const profileNames = settings?.optimizer.profiles ? Object.keys(settings.optimizer.profiles) : ["equilibrata"];
+  const results: Record<string, OptResult<Cand>> = {};
+  for (const name of profileNames) {
+    results[name] = settings
+      ? optimize(legs, {
+          ...settings,
+          optimizer: withProfile({
+            ...settings.optimizer, max_legs: maxEvents, min_legs: minEvents, odds_min: qMin || settings.optimizer.odds_min,
+            odds_max: qMax || settings.optimizer.odds_max, min_leg_probability: legProb, min_slip_ev: evMin, min_probability: riskMin,
+          }, name),
+        })
+      : { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0, evaluated: 0 };
+  }
+  const profile = sp.p && results[sp.p] ? sp.p : results[settings?.optimizer.profile ?? ""] ? (settings?.optimizer.profile as string) : profileNames[0];
+  const result = results[profile];
+  const profileHref = (name: string) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp)) for (const x of [v ?? []].flat()) if (k !== "p" && x) q.append(k, x);
+    q.set("p", name);
+    return `/?${q.toString()}`;
+  };
   const sl = result.slips;
   const best = sl[0];
   const statusCounts = parseJSON<Record<string, number>>(run.status_counts, {});
@@ -96,7 +141,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
     .filter((f) => new Date(f.kickoff).getTime() >= now)
     .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
     .map(explorerMatch);
-  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10") || (sp.nmin && sp.nmin !== "1"));
+  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10") || (sp.nmin && sp.nmin !== "1") || sp.pmin || sp.ev || sp.risk || !allMk);
+  const mkLabel = allMk ? "Tutti i mercati" : pickedMk.size === 1 ? [...pickedMk][0] : `${pickedMk.size} mercati`;
+  const discarded = (statusCounts.AVOID ?? 0) + (statusCounts.NEUTRAL ?? 0) + (statusCounts.INVALID ?? 0);
+  const candidates = (statusCounts.STRONG ?? 0) + (statusCounts.CANDIDATE ?? 0) + (statusCounts.FAIR ?? 0) + (statusCounts.WATCH ?? 0);
   const allComps = !picked.size || comps.every((c) => picked.has(c));
   const compLabel = allComps ? "Tutti i campionati" : picked.size === 1 ? [...picked][0] : `${picked.size} campionati`;
 
@@ -164,6 +212,54 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             </select>
           </div>
         </div>
+        <div className="field">
+          <label htmlFor="pmin">Probabilità minima per evento</label>
+          <div className="control">
+            <Percent size={17} aria-hidden="true" />
+            <select id="pmin" name="pmin" defaultValue={sp.pmin ?? ""}>
+              {LEG_PROB.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="ev">EV minimo della schedina</label>
+          <div className="control">
+            <Sigma size={17} aria-hidden="true" />
+            <select id="ev" name="ev" defaultValue={EV_MIN.some((x) => x.v === sp.ev) ? sp.ev : String(Math.round(evMin * 100))}>
+              {EV_MIN.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="risk">Rischio massimo</label>
+          <div className="control">
+            <ShieldAlert size={17} aria-hidden="true" />
+            <select id="risk" name="risk" defaultValue={sp.risk ?? ""}>
+              {RISK.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <span className="field-label" id="mk-label">Mercati</span>
+          <details className="multi">
+            <summary className="control" aria-labelledby="mk-label">
+              <Shapes size={17} aria-hidden="true" />
+              <span className="multi-value">{mkLabel}</span>
+            </summary>
+            <fieldset className="multi-panel" aria-labelledby="mk-label">
+              {MARKET_GROUPS.map((m) => (
+                <label key={m} className="check">
+                  <input type="checkbox" name="mk" value={m} defaultChecked={allMk || pickedMk.has(m)} />
+                  {m}
+                </label>
+              ))}
+              <button type="submit" className="btn btn-primary btn-sm" style={{ marginTop: 6 }}>
+                <Filter size={15} aria-hidden="true" /> Applica
+              </button>
+            </fieldset>
+          </details>
+        </div>
+        {sp.p && <input type="hidden" name="p" value={profile} />}
         <div className="field">
           <span className="field-label" id="comp-label">Campionati</span>
           <details className="multi">
@@ -244,19 +340,55 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             </div>
           </section>
 
-          <div className="kpis">
-            <Kpi icon={Layers} label="Partite analizzate" value={fx.length} />
-            <Kpi icon={BarChart3} label="Mercati valutati" value={nMarkets} />
-            <Kpi icon={Target} label="Opportunità" value={nOpp} />
-            <Kpi icon={ShieldCheck} label="Schedine" value={sl.length} />
-          </div>
+          {/* how the slips were found, with real numbers: published analysis first, then the dashboard search with these filters */}
+          <section className="card" aria-labelledby="funnel-title">
+            <div className="card-head"><h2 id="funnel-title">Riepilogo dell&apos;analisi</h2><span className="count">profilo {PROFILE_LABEL[profile] ?? profile}</span></div>
+            <div className="kpis" style={{ padding: 12, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+              <Kpi icon={Layers} label="Partite nel periodo" value={fx.length} />
+              <Kpi icon={BarChart3} label="Mercati valutati" value={nMarkets} />
+              <Kpi icon={XCircle} label="Scartati" value={discarded} />
+              <Kpi icon={Target} label="Candidati" value={candidates} />
+              <Kpi icon={Filter} label="Idonei con i filtri" value={result.eligible} />
+              <Kpi icon={Sigma} label="Combinazioni provate" value={result.evaluated} />
+              <Kpi icon={ShieldCheck} label="Schedine proposte" value={sl.length} />
+            </div>
+            <p className="note card-pad" style={{ paddingTop: 0 }}>
+              Scartati: valore negativo, probabilità sotto il {pct(0.25)} o dati insufficienti. Candidati: selezioni Alta, Media, Equa e Da osservare
+              dell&apos;analisi pubblicata. Idonei: quelli che entrano nella ricerca delle schedine con i filtri scelti.
+            </p>
+          </section>
+
+          {profileNames.length > 1 && (
+            <nav className="profiles" aria-label="Profili di schedina">
+              {profileNames.map((name) => {
+                const r = results[name];
+                const s0 = r.slips[0];
+                return (
+                  <Link key={name} href={profileHref(name)} className={`card profile ${name === profile ? "active" : ""}`} aria-current={name === profile ? "true" : undefined}>
+                    <span className="profile-name">{PROFILE_LABEL[name] ?? name}</span>
+                    <span className="note">{PROFILE_HINT[name] ?? ""}</span>
+                    {s0 ? (
+                      <span className="profile-stats">
+                        <span><small>Quota</small><b className="num">{s0.total_odds.toFixed(2)}</b></span>
+                        <span><small>Vince</small><b className="num">{pct(s0.joint_probability, 1)}</b></span>
+                        <span><small>EV</small><b className={`num ${s0.ev >= 0 ? "pos" : "neg"}`}>{signed(s0.ev)}</b></span>
+                        <span><small>Eventi</small><b className="num">{s0.legs.length}</b></span>
+                      </span>
+                    ) : (
+                      <span className="profile-stats"><span><small>Esito</small><b>No bet</b></span></span>
+                    )}
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
 
           {/* ---------------- slip + why ---------------- */}
           <div className="split">
             <section className="card" aria-labelledby="slip-title">
               <div className="card-head">
                 <h2 id="slip-title">
-                  La tua schedina consigliata {best && <span className="count">{best.legs.length} {best.legs.length === 1 ? "evento" : "eventi"}</span>}
+                  Schedina · {PROFILE_LABEL[profile] ?? profile} {best && <span className="count">{best.legs.length} {best.legs.length === 1 ? "evento" : "eventi"}</span>}
                 </h2>
                 {best && (
                   <span className="muted">
@@ -272,6 +404,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                         <tr>
                           <th>#</th><th>Evento / Mercato</th><th className="num">Quota</th><th className="num">Probabilità</th>
                           <th className="num">EV · Stato</th>
+                          <th className="num" title="Sotto questa quota Sisal l'evento non va più giocato: la schedina scenderebbe sotto l'EV minimo">Gioca se ≥</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -293,6 +426,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                                 <span className={o.ev >= 0 ? "pos" : "neg"}>{signed(o.ev)}</span>
                                 {<span className="sub"><span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span></span>}
                               </td>
+                              <td className="num">{legMinOdds(best, l.odds, evMin).toFixed(2)}</td>
                             </tr>
                           );
                         })}

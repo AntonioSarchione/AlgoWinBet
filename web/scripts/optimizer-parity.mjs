@@ -1,13 +1,15 @@
 // Parity check: web/lib/optimizer.ts must reproduce the Python optimizer on every golden case
 // (scripts/optimizer_golden.py). Run from web/: node scripts/optimizer-parity.mjs  (Node >= 22.18 runs the .ts directly)
 import { readFileSync } from "node:fs";
-import { optimize } from "../lib/optimizer.ts";
+import { optimize, withProfile } from "../lib/optimizer.ts";
 
 const golden = JSON.parse(readFileSync(new URL("./optimizer.golden.json", import.meta.url), "utf8"));
 const close = (a, b, tol = 1e-9) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
 let failures = 0;
 for (const c of golden.cases) {
   const s = structuredClone(golden.settings);
+  if (c.profile) s.optimizer = withProfile(s.optimizer, c.profile);
+  if (c.edge_shrink != null) s.optimizer.edge_shrink = c.edge_shrink;
   s.optimizer.max_legs = c.max_legs;
   if (c.odds_min) s.optimizer.odds_min = c.odds_min;
   if (c.odds_max) s.optimizer.odds_max = c.odds_max;

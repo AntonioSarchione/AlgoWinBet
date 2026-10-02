@@ -32,8 +32,16 @@ CREATE TABLE IF NOT EXISTS paper_legs(id INTEGER PRIMARY KEY, fixture_id TEXT, s
 CREATE INDEX IF NOT EXISTS ix_paper_open ON paper_legs(result, kickoff);
 CREATE TABLE IF NOT EXISTS paper_slips(id INTEGER PRIMARY KEY, slip_key TEXT UNIQUE, run_id INTEGER, created_at TEXT, legs TEXT,
   total_odds REAL, bonus REAL, joint REAL, ev REAL, ev_lower REAL, first_kickoff TEXT, last_kickoff TEXT, result TEXT,
-  payout REAL, settled_at TEXT, clv REAL);
+  payout REAL, settled_at TEXT, clv REAL, profile TEXT);
 """
+
+
+def _migrate(store) -> None:
+    store.db.executescript(SCHEMA)
+    have = {r[1] for r in store.db.execute("PRAGMA table_info(paper_slips)").fetchall()}
+    if "profile" not in have:
+        store.db.execute("ALTER TABLE paper_slips ADD COLUMN profile TEXT")
+        store.db.commit()
 
 
 def _ref(sel_key: str) -> SelectionRef:
@@ -41,9 +49,10 @@ def _ref(sel_key: str) -> SelectionRef:
     return SelectionRef(market_code=code, selection=sel, line=float(line) if line else None)
 
 
-def register(store, run_id: int, res, versions: dict) -> tuple[int, int]:
-    """Records the selections and slips of a published analysis that were never recorded before. Returns (legs, slips) added."""
-    store.db.executescript(SCHEMA)
+def register(store, run_id: int, res, versions: dict, by_profile: dict[str, list] | None = None) -> tuple[int, int]:
+    """Records the selections and slips of a published analysis that were never recorded before (slips of every profile when
+    given, else the analysis' own). Returns (legs, slips) added."""
+    _migrate(store)
     now = datetime.now(timezone.utc).isoformat()
     meta_v = str(versions.get("meta"))
     legs = [(o.fixture_id, o.ref.key, o.competition, f"{o.home} - {o.away}", o.kickoff.isoformat(), o.description, o.status.value,
@@ -52,15 +61,15 @@ def register(store, run_id: int, res, versions: dict) -> tuple[int, int]:
     n_legs = store._bulk("INSERT OR IGNORE INTO paper_legs(fixture_id,sel_key,competition,match,kickoff,market,status,odds,bookmaker,p,"
                          "p_market,ev,run_id,created_at,model_version,meta_version)", legs)
     slips = []
-    for s in res.optimizer.slips:
+    for profile, s in [(p, s) for p, ss in (by_profile or {"": res.optimizer.slips}).items() for s in ss]:
         key = " + ".join(sorted(f"{l.fixture_id}|{l.ref.key}" for l in s.legs))
         detail = [{"fixture_id": l.fixture_id, "sel_key": l.ref.key, "match": f"{l.home} - {l.away}", "market": l.description,
                    "odds": l.odds, "p": round(l.p_final, 5), "status": l.status.value} for l in s.legs]
         kos = sorted(l.kickoff.isoformat() for l in s.legs)
         slips.append((key, run_id, now, json.dumps(detail, ensure_ascii=False), round(s.total_odds, 4), s.bonus, round(s.joint_probability, 6),
-                      round(s.ev, 5), round(s.ev_lower, 5), kos[0], kos[-1]))
+                      round(s.ev, 5), round(s.ev_lower, 5), kos[0], kos[-1], profile or None))
     n_slips = store._bulk("INSERT OR IGNORE INTO paper_slips(slip_key,run_id,created_at,legs,total_odds,bonus,joint,ev,ev_lower,"
-                          "first_kickoff,last_kickoff)", slips)
+                          "first_kickoff,last_kickoff,profile)", slips)
     return n_legs, n_slips
 
 
@@ -86,7 +95,7 @@ def closing_prices(store, fixture_id: str, ref: SelectionRef) -> tuple[float | N
 
 def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     """Settles the recorded selections whose match is over, then the slips whose selections are all settled."""
-    store.db.executescript(SCHEMA)
+    _migrate(store)
     t = now or datetime.now(timezone.utc)
     rows = store.db.execute("SELECT id, fixture_id, sel_key, kickoff FROM paper_legs WHERE result IS NULL AND kickoff <= ?",
                             ((t - SETTLE_AFTER).isoformat(),)).fetchall()

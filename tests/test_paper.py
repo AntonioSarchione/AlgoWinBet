@@ -31,7 +31,10 @@ def test_proposals_are_recorded_once_with_their_first_price():
     s, mock, rid, res = _published()
     n = s.db.execute("SELECT COUNT(*) FROM paper_legs").fetchone()[0]
     assert n > 0 and n == sum(1 for o in res.opportunities if o.status.value in ("STRONG", "CANDIDATE", "FAIR"))
-    assert s.db.execute("SELECT COUNT(*) FROM paper_slips").fetchone()[0] == len(res.optimizer.slips)
+    n_slips = s.db.execute("SELECT COUNT(*) FROM paper_slips").fetchone()[0]
+    assert n_slips >= len(res.optimizer.slips)  # the slips of every profile, each recorded once
+    profiles = {r[0] for r in s.db.execute("SELECT DISTINCT profile FROM paper_slips")}
+    assert profiles <= {"probabilita", "equilibrata", "value"} and (not n_slips or "equilibrata" in profiles)
     first = s.db.execute("SELECT odds, run_id FROM paper_legs ORDER BY id LIMIT 1").fetchone()
     assert register(s, rid + 1, res, {"model": "x", "meta": "y"}) == (0, 0)  # the same proposals again: nothing new
     assert s.db.execute("SELECT odds, run_id FROM paper_legs ORDER BY id LIMIT 1").fetchone() == first

@@ -42,6 +42,9 @@ export type OptimizerCfg = {
   include_fair: boolean;
   multi_bonus: number[];
   multi_bonus_min_odds: number;
+  edge_shrink?: number; // prudent EV: share of the edge over the market trusted (missing in older analyses: 1)
+  profile?: string;
+  profiles?: Record<string, Partial<Record<"w_ev" | "w_prob" | "w_div" | "w_unc" | "w_corr" | "w_disagree", number>>>;
   w_ev: number;
   w_prob: number;
   w_div: number;
@@ -80,7 +83,15 @@ export type Slip<T extends OptOpp = OptOpp> = {
   riskNotes: string[];
 };
 
-export type OptResult<T extends OptOpp = OptOpp> = { slips: Slip<T>[]; noBet: boolean; reasons: string[]; eligible: number };
+export type OptResult<T extends OptOpp = OptOpp> = { slips: Slip<T>[]; noBet: boolean; reasons: string[]; eligible: number; evaluated: number };
+
+// config.py Config.with_slip_profile: the optimizer weights of one slip profile
+export function withProfile(o: OptimizerCfg, name: string): OptimizerCfg {
+  return { ...o, ...(o.profiles?.[name] ?? {}), profile: name };
+}
+
+// optimizer.py prudent_p: only part of the model's edge over the market price is trusted (never above p_final)
+const prudentP = (l: OptOpp, shrink: number) => (l.p_market == null ? l.p_final : Math.min(l.p_final, l.p_market + shrink * (l.p_final - l.p_market)));
 
 const legKey = (l: OptOpp) => `${l.fixture_id}\u0000${l.sel_key}`;
 const pct = (x: number, d = 0) => `${(x * 100).toFixed(d)}%`;
@@ -126,7 +137,9 @@ function makeSlip<T extends OptOpp>(legs: T[], s: OptSettings, C: Map<string, nu
   const bonus = multiBonus(legs, o);
   const payout = 1 + (odds - 1) * (1 + bonus); // what a winning unit returns, bonus on the net winnings included
   const ev = joint * payout - 1;
-  const evLo = pLo * payout - 1;
+  let shrunk = joint;
+  for (const l of legs) shrunk *= prudentP(l, o.edge_shrink ?? 1) / Math.max(l.p_final, 1e-9);
+  const evLo = Math.min(pLo, shrunk) * payout - 1;
   let dis = 0;
   for (const l of legs) dis += l.disagreement;
   dis /= legs.length;
@@ -166,12 +179,12 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
   const reasons: string[] = [];
   if (!elig.length) {
     reasons.push(`Nessuna selezione idonea (con valore${o.include_fair ? " o a quota equa" : ""}) su ${opps.length} con i filtri scelti.`);
-    return { slips: [], noBet: true, reasons, eligible: 0 };
+    return { slips: [], noBet: true, reasons, eligible: 0, evaluated: 0 };
   }
   elig = elig.filter((x) => x.p_final >= o.min_leg_probability);
   if (!elig.length) {
     reasons.push(`Tutte le opportunità hanno probabilità < soglia per leg ${pct(o.min_leg_probability)}.`);
-    return { slips: [], noBet: true, reasons, eligible: 0 };
+    return { slips: [], noBet: true, reasons, eligible: 0, evaluated: 0 };
   }
   // keep the best few candidates per fixture to bound the search space (insertion order = first appearance by score)
   const perFix = new Map<string, T[]>();
@@ -206,6 +219,7 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
   let beam: number[][] = cands.map((_, i) => [i]);
   const seen = new Set<string>();
   let nearest: { slip: Slip<T>; v: string[] } | null = null;
+  let evaluated = 0;
   for (let depth = 1; depth <= o.max_legs; depth++) {
     const scored: [number, number[]][] = [];
     for (const idx of beam) {
@@ -213,6 +227,7 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
       if (seen.has(key)) continue;
       seen.add(key);
       const sl = makeSlip(idx.map((i) => cands[i]), s, C, idx);
+      evaluated += 1;
       if (sl.total_odds > o.odds_max) continue; // odds only grow with more legs: prune branch
       const v = violations(sl, o);
       if (!v.length) pool.set(sl.legs.map(legKey).sort().join("\u0001"), sl);
@@ -236,7 +251,7 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
         `correlazione ≤ ${o.correlation_limit}, EV schedina ≥ ${signedPct(o.min_slip_ev, 0)} e da ${o.min_legs ?? 1} a ${o.max_legs} eventi.`,
     );
     if (nearest) reasons.push(`La più vicina (quota ${nearest.slip.total_odds.toFixed(2)}) viola: ${nearest.v.join("; ")}.`);
-    return { slips: [], noBet: true, reasons, eligible: elig.length };
+    return { slips: [], noBet: true, reasons, eligible: elig.length, evaluated };
   }
   const ranked = [...pool.values()].sort((a, b) => b.objective - a.objective);
   const chosen: Slip<T>[] = [];
@@ -245,7 +260,7 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
     if (chosen.length >= o.output_count) break;
   }
   assignStakes(chosen, s.risk);
-  return { slips: chosen, noBet: false, reasons, eligible: elig.length };
+  return { slips: chosen, noBet: false, reasons, eligible: elig.length, evaluated };
 }
 
 function rawStake(sl: Slip, r: RiskCfg): number {
@@ -281,6 +296,14 @@ export function assignStakes(slips: Slip[], r: RiskCfg): void {
       for (const team of [l.home, l.away]) usedTeam.set(team, (usedTeam.get(team) ?? 0) + stake);
     }
   }
+}
+
+// Odds below which a leg should no longer be played: with the other legs unchanged, the slip would fall under the minimum
+// EV (Sisal bonus kept: it is lost only if the leg drops under the bonus minimum odds).
+export function legMinOdds(sl: Slip, legOdds: number, minEv: number): number {
+  const payout = (1 + minEv) / Math.max(sl.joint_probability, 1e-9);
+  const total = 1 + (payout - 1) / (1 + sl.bonus);
+  return (legOdds * total) / sl.total_odds;
 }
 
 // explain.py explain_slip (the parts the dashboard shows)

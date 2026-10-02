@@ -428,4 +428,13 @@ th.num .th-sort { justify-content: flex-end; }
 
 .refresh { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .refresh .btn { width: 100%; justify-content: center; gap: 6px; }
+.profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.profile { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; text-decoration: none; color: inherit; border: 1px solid var(--line); }
+.profile:hover { border-color: var(--line-strong); }
+.profile.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.profile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.profile-name { font-weight: 700; }
+.profile-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+.profile-stats small { display: block; color: var(--muted); font-size: 12px; }
+.profile-stats b { font-size: 16px; }
 .status-AVOID { background: var(--bad-soft); color: var(--bad); }

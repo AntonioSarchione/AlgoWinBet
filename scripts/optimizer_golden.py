@@ -29,6 +29,9 @@ CASES = [
     {"name": "long", "odds_min": 8.0, "odds_max": 40.0, "max_legs": 6},
     # 5+ legs at odds >= 1.25: the Sisal multiple bonus enters ev, ev_lower and the stake
     {"name": "min-legs", "odds_min": None, "odds_max": None, "max_legs": 6, "min_legs": 3, "min_slip_ev": -0.6},
+    {"name": "profile-probabilita", "odds_min": None, "odds_max": None, "max_legs": 6, "profile": "probabilita"},
+    {"name": "profile-value", "odds_min": None, "odds_max": None, "max_legs": 6, "profile": "value"},
+    {"name": "edge-shrink", "odds_min": None, "odds_max": None, "max_legs": 4, "edge_shrink": 0.3},
     {"name": "bonus", "odds_min": 8.0, "odds_max": 60.0, "max_legs": 8, "min_slip_ev": -0.6,
      "multi_bonus_min_odds": 1.0},
 ]
@@ -58,7 +61,8 @@ def build() -> dict:
     res = Engine(SnapshotProvider(s), cfg).analyze(None, mock.as_of, mock.as_of + timedelta(days=3), mock.as_of)
     out = {"settings": optimizer_settings(cfg), "opportunities": [opp_record(o) for o in res.opportunities], "cases": []}
     for case in CASES:
-        c = cfg.model_copy(deep=True)
+        c = cfg.with_slip_profile(case["profile"]) if case.get("profile") else cfg.model_copy(deep=True)
+        c.optimizer.edge_shrink = case.get("edge_shrink", c.optimizer.edge_shrink)
         c.optimizer.max_legs = case["max_legs"]
         c.optimizer.odds_min = case["odds_min"] or c.optimizer.odds_min
         c.optimizer.odds_max = case["odds_max"] or c.optimizer.odds_max

@@ -125,3 +125,31 @@ def test_pairs_without_an_exact_joint_count_as_fully_dependent(analysis):
     dnb = o.model_copy(update={"ref": SelectionRef(market_code="DRAW_NO_BET", selection="HOME"), "fixture_id": a.state.fixture.id})
     other = o.model_copy(update={"ref": SelectionRef(market_code="MATCH_1X2", selection="AWAY"), "fixture_id": a.state.fixture.id})
     assert pair_dependence(dnb, other, {a.state.fixture.id: a.matrix}, Config().optimizer) == 1.0
+
+
+def test_prudent_ev_trusts_only_part_of_the_edge_over_the_market():
+    from algowinbet.optimizer import prudent_p
+    cfg, res = _value_analysis()
+    leg = next(o for o in res.opportunities if o.p_market is not None and o.p_final > o.p_market)
+    assert prudent_p(leg, 1.0) == pytest.approx(leg.p_final)
+    assert prudent_p(leg, 0.0) == pytest.approx(leg.p_market)
+    assert leg.p_market < prudent_p(leg, 0.5) < leg.p_final
+    cfg.optimizer.edge_shrink = 0.0  # market assumed right: no slip keeps a positive prudent EV
+    out = optimize(res.opportunities, res.analyses, cfg)
+    full = optimize(res.opportunities, res.analyses, _value_analysis()[0])
+    assert all(s.ev_lower <= f.ev_lower + 1e-9 for s, f in zip(out.slips, full.slips) if s.key == f.key)
+
+
+def test_slip_profiles_change_only_the_objective_weights():
+    cfg = Config()
+    p = cfg.with_slip_profile("probabilita")
+    assert p.optimizer.profile == "probabilita" and p.optimizer.w_prob == 3.0
+    assert (p.optimizer.odds_min, p.optimizer.odds_max, p.optimizer.min_slip_ev) == (
+        cfg.optimizer.odds_min, cfg.optimizer.odds_max, cfg.optimizer.min_slip_ev)
+    assert cfg.optimizer.profile == "equilibrata"  # original untouched
+    cfg2, res = _value_analysis()
+    a = optimize(res.opportunities, res.analyses, cfg2.with_slip_profile("probabilita")).slips
+    b = optimize(res.opportunities, res.analyses, cfg2.with_slip_profile("value")).slips
+    if a and b:
+        assert a[0].joint_probability >= b[0].joint_probability - 1e-9
+        assert all(violations(s, cfg2) == [] for s in a + b)

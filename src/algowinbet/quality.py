@@ -168,6 +168,23 @@ def _nested_meta(samples: list[dict], min_n: int = MIN_N) -> None:
                             s["cal"] = {m: c.apply(s["model"]) for m, c in cals.items()}
 
 
+SHRINK_PRIOR, SHRINK_WEIGHT = 0.5, 50  # with few picks the share stays near one half (worth 50 picks)
+
+
+def edge_shrink(bets: list[dict]) -> dict:
+    """Share of the predicted edge over the market price that the picked selections actually earned: least squares of
+    (won - p_market) on (p - p_market) through the origin, pulled toward SHRINK_PRIOR, clipped to [0, 1]. Picking the
+    best edges among thousands inflates them, so the share is usually well below 1."""
+    d = [(b["p"] - b["pm"], (1.0 if b["won"] else 0.0) - b["pm"]) for b in bets if b.get("pm") is not None]
+    if not d:
+        return {"lambda": 1.0, "raw": None, "n": 0}
+    sxx = sum(x * x for x, _ in d)
+    sxy = sum(x * y for x, y in d)
+    mean_sq = sxx / len(d)
+    lam = (sxy + SHRINK_PRIOR * SHRINK_WEIGHT * mean_sq) / (sxx + SHRINK_WEIGHT * mean_sq) if sxx > 0 else SHRINK_PRIOR
+    return {"lambda": float(min(1.0, max(0.0, lam))), "raw": float(sxy / sxx) if sxx > 0 else None, "n": len(d)}
+
+
 def _sisal_vs_sharp(samples: list[dict]) -> dict:
     """How Sisal prices compare with the sharp fair price 2 hours before kickoff, per family: Sisal's margin, how often a
     Sisal price is at or above the fair one (EV >= 0 against Pinnacle / Betfair Exchange) and by how much."""
@@ -275,7 +292,7 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
                 continue
             won = i == k
             close = row.get("close")
-            bets[fam].append({"ev": pe * o - 1, "pnl": (o - 1) if won else -1.0, "won": won, "book": row["book"],
+            bets[fam].append({"ev": pe * o - 1, "pnl": (o - 1) if won else -1.0, "won": won, "book": row["book"], "p": pe, "pm": row["market"][i],
                               "clv": close[i] * o - 1 if close else None, "meta": "meta" in row,
                               "label": f"{row['match']} {sels[i][1]} @{o:.2f} p={pe:.3f} mkt={row['market'][i]:.3f} "
                                        f"mod={row['model'][i]:.3f} prezzi {row['odds']}"})
@@ -326,12 +343,15 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
                           **({"ll_meta": float(np.mean(v["meta"])), "n_meta": len(v["meta"])} if v.get("meta") else {})}
                          for m, v in sorted(monthly.items())]
     report["sisal_vs_sharp"] = _sisal_vs_sharp(samples)
+    report["edge_shrink"] = edge_shrink([b for bs in bets.values() for b in bs])
     params = fit_all(samples, min_n, calib_method)  # what the live analysis will use: fitted on every match of the window
     report["calib_methods"] = {fam: {**sc, "chosen": calib_method[fam]} for fam, sc in calib_scores.items()}
     report["meta"] = {key: {**v, "text": describe(Pool(**v), key.split("|")[1])} for key, v in params.items()}
     report["thresholds"] = {"min_ev": t.min_ev, "min_probability": t.min_probability, "market_prior_sd": cfg.ensemble.market_prior_sd}
     report["n_matches"] = sum(1 for _ in acc.get(("tutte", "1X2"), []))
     report["seconds"] = time.monotonic() - t_start
+    if report["edge_shrink"]["n"]:
+        params["_shrink"] = report["edge_shrink"]
     report["_params"] = params
     return report
 
@@ -358,6 +378,10 @@ def print_quality(report: dict) -> None:
             alone = (f" | senza quote n={m['n_alone']}: modello {m['ll_model_alone']:.4f} calibrato {m['ll_meta_alone']:.4f}"
                      if m.get("n_alone") else "")
             print(f"  {fam:<10} n={m['n']:<5} LL modello {m['ll_model']:.4f} (v1 {m['ll_v1']:.4f})" + same + alone)
+    es = report.get("edge_shrink") or {}
+    if es.get("n"):
+        raw = f"{es['raw']:.2f}" if es.get("raw") is not None else "–"
+        print(f"\nEV prudente: quota del vantaggio sul mercato confermata dai risultati {es['lambda']:.2f} (grezza {raw}, {es['n']} giocate)")
     if report.get("sisal_vs_sharp"):
         print("\nSisal contro prezzo equo Pinnacle (2 ore prima del calcio d'inizio):")
         for fam, v in report["sisal_vs_sharp"].items():

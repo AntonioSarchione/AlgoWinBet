@@ -121,6 +121,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     prov = SnapshotProvider(store)
     from .meta import load_meta
     meta = load_meta(store, cfg.model.version) if cfg.ensemble.use_meta else None
+    if meta is not None and meta.shrink:
+        cfg.optimizer.edge_shrink = float(meta.shrink["lambda"])
     eng = Engine(prov, cfg, use_lineups=True, meta=meta)
     res = eng.analyze(None, t, t + timedelta(days=horizon_days), t)
     _migrate(store)
@@ -170,8 +172,12 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                              ensure_ascii=False),
                   json.dumps(s.explanation, ensure_ascii=False, default=str), None, None) for k, s in enumerate(res.optimizer.slips)])
     store.db.commit()  # a run with no rows would otherwise stay uncommitted on remote libsql
+    from .optimizer import optimize
     from .paper import register
-    register(store, run_id, res, versions)  # paper trading: first appearance of every proposal, never rewritten
+    by_profile = {name: (res.optimizer.slips if name == cfg.optimizer.profile else
+                         optimize(res.opportunities, res.analyses, cfg.with_slip_profile(name)).slips)
+                  for name in cfg.optimizer.profiles}
+    register(store, run_id, res, versions, by_profile)  # paper trading: first appearance of every proposal, never rewritten
     prune(store, keep_days)
     return run_id, res
 
