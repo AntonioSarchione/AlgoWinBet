@@ -3,14 +3,22 @@ import { CalendarDays, Search } from "lucide-react";
 import { latestRun, runFixtures, type FixtureRow } from "@/lib/db";
 import { compShort, dayKey, dayLong, fairOdds, hour, pct } from "@/app/_components/format";
 import { Empty, MatchCell, Split1X2 } from "@/app/_components/ui";
+import { PickBar } from "@/app/_components/PickBar";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Palinsesto" };
 
-export default async function Palinsesto({ searchParams }: { searchParams: Promise<{ q?: string; comp?: string }> }) {
-  const { q = "", comp = "" } = await searchParams;
+const DAYS = 7;
+
+export default async function Palinsesto({ searchParams }: { searchParams: Promise<{ q?: string; comp?: string; fx?: string | string[] }> }) {
+  const { q = "", comp = "", fx } = await searchParams;
   const run = await latestRun();
-  const all = run ? await runFixtures(run.id) : [];
+  // every match of the competitions we follow that has not kicked off yet, up to 7 days ahead
+  const now = Date.now();
+  const all = (run ? await runFixtures(run.id) : []).filter((f) => {
+    const t = new Date(f.kickoff).getTime();
+    return t > now && t <= now + DAYS * 86_400_000;
+  });
   const comps = [...new Set(all.map((f) => f.competition))].sort();
   const needle = q.trim().toLowerCase();
   const rows = all.filter(
@@ -30,7 +38,10 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
       <header className="page-head">
         <div>
           <h1>Palinsesto completo</h1>
-          <p>Probabilità del modello per ogni partita dei prossimi 7 giorni. Passa sopra una percentuale per la quota equa.</p>
+          <p>
+            Probabilità del modello per ogni partita dei prossimi 7 giorni. Passa sopra una percentuale per la quota equa. Spunta le partite
+            che vuoi giocare: il modello costruisce la schedina migliore con quelle.
+          </p>
         </div>
       </header>
 
@@ -71,13 +82,20 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
               <table>
                 <thead>
                   <tr>
-                    <th>Ora</th><th>Partita</th><th className="num">1</th><th className="num">X</th><th className="num">2</th>
+                    <th><span className="sr-only">Scegli</span></th><th>Ora</th><th>Partita</th><th className="num">1</th><th className="num">X</th><th className="num">2</th>
                     <th>Esito</th><th className="num">Over 2.5</th><th className="num">Gol</th><th className="num">Gol attesi</th><th>Info</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map((f) => (
                     <tr key={f.fixture_id}>
+                      <td className="pick-cell">
+                        <input
+                          type="checkbox" form="pick" name="fx" value={f.fixture_id} data-off={f.n_quotes ? "0" : "1"} disabled={!f.n_quotes}
+                          aria-label={`Scegli ${f.home} - ${f.away}`}
+                          title={f.n_quotes ? "Aggiungi alla schedina manuale" : "Nessuna giocata Sisal pubblicata per questa partita"}
+                        />
+                      </td>
                       <td className="num">{hour(f.kickoff)}</td>
                       <td className="wrap">
                         <MatchCell home={f.home} away={f.away} sub={compShort(f.competition)} href={`/partita/${encodeURIComponent(f.fixture_id)}`} />
@@ -104,6 +122,7 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
           </section>
         ))
       )}
+      <PickBar initial={[fx ?? []].flat().filter(Boolean)} />
       <p className="note">
         Legenda barra esito: <span style={{ color: "var(--s1)" }}>■</span> 1 casa · <span style={{ color: "var(--s2)" }}>■</span> X pareggio ·{" "}
         <span style={{ color: "var(--s3)" }}>■</span> 2 ospite.

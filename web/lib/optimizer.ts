@@ -44,6 +44,9 @@ export type OptimizerCfg = {
   multi_bonus_min_odds: number;
   edge_shrink?: number; // prudent EV: share of the edge over the market trusted (missing in older analyses: 1)
   profile?: string;
+  // web only (manual slips): candidates kept per fixture and overall before the search (defaults 3 and 80, as in Python)
+  candidates_per_fixture?: number;
+  max_candidates?: number;
   profiles?: Record<string, Partial<Record<"w_ev" | "w_prob" | "w_div" | "w_unc" | "w_corr" | "w_disagree", number>>>;
   w_ev: number;
   w_prob: number;
@@ -193,9 +196,9 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
     lst.push(x);
     perFix.set(x.fixture_id, lst);
   }
-  let cands = [...perFix.values()].flatMap((lst) => lst.slice(0, Math.max(o.max_legs_per_fixture, 3)));
+  let cands = [...perFix.values()].flatMap((lst) => lst.slice(0, o.candidates_per_fixture ?? Math.max(o.max_legs_per_fixture, 3)));
   cands.sort((a, b) => b.score - a.score);
-  cands = cands.slice(0, 80);
+  cands = cands.slice(0, o.max_candidates ?? 80);
   const n = cands.length;
   const C = new Map<string, number>();
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) C.set(`${i},${j}`, pairDependence(cands[i], cands[j], o));

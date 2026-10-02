@@ -5,7 +5,8 @@ import {
   Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
 } from "lucide-react";
 import { lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
-import { explainSlip, legMinOdds, optimize, withProfile, type OptOpp, type OptResult, type OptSettings } from "@/lib/optimizer";
+import { explainSlip, legMinOdds, type OptSettings } from "@/lib/optimizer";
+import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
@@ -47,57 +48,18 @@ const RISK = [
   { v: "15", l: "Alto · vince ≥ 15%" },
   { v: "5", l: "Molto alto · vince ≥ 5%" },
 ];
-const PROFILE_LABEL: Record<string, string> = { probabilita: "Massima probabilità", equilibrata: "Equilibrata", value: "Value" };
-const PROFILE_HINT: Record<string, string> = {
-  probabilita: "la schedina più probabile tra quelle con valore",
-  equilibrata: "equilibrio tra probabilità e valore atteso",
-  value: "il valore atteso più alto, anche se meno probabile",
-};
-
-type Cand = OptOpp & OppRow;
-type ProfileResult = OptResult<Cand> & { sameAs?: string }; // sameAs: its only slips are those of an earlier profile
 type Knobs = { maxEvents: number; minEvents: number; qMin: number; qMax: number; legProb: number; evMin: number; riskMin: number; markets: string[] };
 
 // The slips of every profile for one set of filters. Cached per run + filters (switching profile tab, going back, or a second
 // visit gets the answer ready), computed once instead of once per profile per request.
 const homeSlips = unstable_cache(
   async (runId: number, filter: Parameters<typeof slipCandidates>[1], statuses: string[], settings: OptSettings, k: Knobs) => {
-    const cands = await slipCandidates(runId, filter, statuses);
     const picked = new Set(k.markets);
-    const legs: Cand[] = cands
-      .map((o) => ({
-        ...o, sel_key: o.sel_key ?? "", home: o.home ?? "", away: o.away ?? "", p_struct: o.p_struct ?? o.p_final,
-        score: o.score ?? 0, disagreement: o.disagreement ?? 0, dq_lineup: o.dq_lineup ?? 0,
-      }))
-      .filter((o) => !picked.size || picked.has(marketGroup(o.sel_key)));
-    const names = settings.optimizer.profiles ? Object.keys(settings.optimizer.profiles) : ["equilibrata"];
-    // the published profile picks first; every other profile shows its best slip that differs from the ones already shown,
-    // so the three cards are never the same slip three times
-    const main = names.includes(settings.optimizer.profile ?? "") ? (settings.optimizer.profile as string) : names[0];
-    const order = [main, ...names.filter((n) => n !== main)];
-    const slipKey = (sl: { legs: Cand[] }) => sl.legs.map((l) => `${l.fixture_id}|${l.sel_key}`).sort().join(" + ");
-    const shown = new Map<string, string>(); // slip key -> profile showing it
-    const out: Record<string, ProfileResult> = {};
-    for (const name of order) {
-      const r: ProfileResult = optimize(legs, {
-        ...settings,
-        optimizer: withProfile({
-          ...settings.optimizer, max_legs: k.maxEvents, min_legs: k.minEvents, odds_min: k.qMin || settings.optimizer.odds_min,
-          odds_max: k.qMax || settings.optimizer.odds_max, min_leg_probability: k.legProb, min_slip_ev: k.evMin, min_probability: k.riskMin,
-        }, name),
-      });
-      const top = r.slips[0];
-      r.slips = r.slips.filter((sl) => !shown.has(slipKey(sl)));
-      if (!r.slips.length && top) {
-        r.sameAs = shown.get(slipKey(top));
-        r.noBet = true;
-        const other = r.sameAs ?? "";
-        r.reasons = [`Con questi filtri la migliore schedina di questo profilo è la stessa di «${PROFILE_LABEL[other] ?? other}»: nessuna alternativa diversa.`];
-      }
-      if (r.slips[0]) shown.set(slipKey(r.slips[0]), name);
-      out[name] = r;
-    }
-    return Object.fromEntries(names.map((n) => [n, out[n]]));
+    const legs = toLegs(await slipCandidates(runId, filter, statuses)).filter((o) => !picked.size || picked.has(marketGroup(o.sel_key)));
+    return runProfiles(legs, settings, {
+      max_legs: k.maxEvents, min_legs: k.minEvents, odds_min: k.qMin || settings.optimizer.odds_min, odds_max: k.qMax || settings.optimizer.odds_max,
+      min_leg_probability: k.legProb, min_slip_ev: k.evMin, min_probability: k.riskMin,
+    });
   },
   ["homeSlips"],
   { revalidate: 6 * 3600 },

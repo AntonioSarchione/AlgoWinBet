@@ -209,6 +209,16 @@ export const slipCandidates = persist(async (runId: number, f: OppFilter, status
   ).then(withMatch);
 }, "slipCandidates", RUN_TTL);
 
+// manual slips: every published selection of the chosen matches (all statuses shown on the site)
+export const fixtureCandidates = persist(async (runId: number, ids: string[]) => {
+  if (!ids.length) return [] as OppRow[];
+  return all<OppRow>(
+    `SELECT ${OPP_COLS}, sel_key, home, away, score, disagreement, dq_lineup FROM pub_opportunities ` +
+      `WHERE run_id = ? AND fixture_id IN (${ids.map(() => "?").join(",")}) AND sel_key IS NOT NULL`,
+    [runId, ...ids],
+  ).then(withMatch);
+}, "fixtureCandidates", RUN_TTL);
+
 export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
 
 export const usage = persist(async () => {
