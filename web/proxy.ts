@@ -19,5 +19,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|logos/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|logos/|api/tick).*)"], // /api/tick checks its own secret
 };

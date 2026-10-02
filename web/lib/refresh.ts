@@ -4,3 +4,12 @@
 export const REPO = "AntonioSarchione/AlgoWinBet";
 export const WORKFLOW = "collect.yml";
 export const MANUAL_MONTHLY = 5;
+
+// Same hours as the cron of .github/workflows/collect.yml (UTC): keeps the Actions minutes within the monthly budget.
+export function inCollectionHours(d: Date): boolean {
+  const h = d.getUTCHours();
+  const day = d.getUTCDay(); // 0 = Sunday
+  if (h === 6 && d.getUTCMinutes() < 20) return true; // daily run: fixtures, results, closing lines, daily snapshot
+  if ([5, 6, 0, 1].includes(day)) return h >= 9 && h <= 20; // Fri-Mon: domestic leagues
+  return h >= 15 && h <= 19; // Tue-Thu: Champions / Europa League and midweek rounds
+}

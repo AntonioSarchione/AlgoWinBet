@@ -3,7 +3,8 @@
 #
 # Budget of Actions minutes (private repo, 2,000 min/month): every job is billed in whole minutes (a tick takes about
 # 1 minute including setup), so the cron only covers the hours when lineups and pre-kickoff prices matter:
-# ~200 runs/week, ~850/month. GitHub may start scheduled runs several minutes late: the tick logic tolerates it.
+# ~200 runs/week, ~850/month. GitHub starts most scheduled runs hours late or drops them: the real ticks come from an
+# external pinger calling the dashboard route /api/tick (web/app/api/tick/route.ts, same hours); this cron is a fallback.
 name: collect
 
 on:
