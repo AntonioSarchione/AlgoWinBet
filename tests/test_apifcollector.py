@@ -52,8 +52,30 @@ class FakeApi:
         return 200, {"x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": str(100 - len(self.calls))}, body
 
 
+class _Cursor:
+    """Like the libSQL driver's cursor (Turso): not iterable, rows only through fetchall/fetchone."""
+
+    def __init__(self, cur):
+        self._cur = cur
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
+class _Conn:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, *a):
+        return _Cursor(self._conn.execute(*a))
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 def _setup(fake, daily=100, reserve=0):
     s = SnapshotStore(":memory:")
+    s.db = _Conn(s.db)
     s.save_fixtures("goal", [Fixture(id="g1", competition="Serie A", home="Milan", away="Inter", kickoff=KO),
                              Fixture(id="g2", competition="UEFA Champions League", home="Real Madrid", away="Bayern München",
                                      kickoff=KO + timedelta(minutes=10))], NOW - timedelta(days=1))

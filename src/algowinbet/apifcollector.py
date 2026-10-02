@@ -96,10 +96,10 @@ class ApiFootballCollector:
 
     def _links(self) -> dict[str, str]:
         """our fixture id -> API-Football fixture id"""
-        return {fid: ext for ext, fid in self.store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,))}
+        return {fid: ext for ext, fid in self.store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall()}
 
     def _team_names(self) -> dict[int, str]:
-        return {tid: name for tid, name in self.store.db.execute("SELECT team_id, name FROM apif_teams WHERE name IS NOT NULL")}
+        return {tid: name for tid, name in self.store.db.execute("SELECT team_id, name FROM apif_teams WHERE name IS NOT NULL").fetchall()}
 
     def _domestic(self, competition: str) -> bool:
         """Names may differ in spacing or case between the config and the calendar source."""
@@ -200,7 +200,7 @@ class ApiFootballCollector:
         t = self.now()
         links = self._links()
         have = {}
-        for fid, team in self.store.db.execute("SELECT fixture_id, team FROM lineups WHERE source=? AND status='confirmed'", (SOURCE,)):
+        for fid, team in self.store.db.execute("SELECT fixture_id, team FROM lineups WHERE source=? AND status='confirmed'", (SOURCE,)).fetchall():
             have.setdefault(fid, set()).add(team)
         out = []
         for f in self.provider.list_fixtures(None, t - LINEUP_UNTIL, t + LINEUP_FROM):
@@ -273,7 +273,7 @@ class ApiFootballCollector:
         """Squads give the official role; a lineup only adds players a squad does not list yet (new signings, youth)."""
         if keep_position:
             known = {r[0] for r in self.store.db.execute(
-                f"SELECT id FROM players WHERE id IN ({','.join('?' * len(players))})", [p.id for p in players])}
+                f"SELECT id FROM players WHERE id IN ({','.join('?' * len(players))})", [p.id for p in players]).fetchall()}
             players = [p for p in players if p.id not in known]
         if players:
             self.store.save_players(SOURCE, list({p.id: p for p in players}.values()), self.now())
@@ -298,6 +298,8 @@ class ApiFootballCollector:
             st.errors.append(str(e))
         except ApiFootballError as e:
             st.errors.append(str(e))
+        except Exception as e:  # a bug here must never cost the rest of the tick (odds, history, publication)
+            st.errors.append(f"errore interno api-football: {type(e).__name__}: {e}")
         st.requests = self.client.requests_sent - before
         return st
 
@@ -305,7 +307,7 @@ class ApiFootballCollector:
         t = self.now()
         end = datetime.combine(t.date() + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
         done: dict[str, set] = {}
-        for fid, team in self.store.db.execute("SELECT fixture_id, team FROM lineups WHERE source=? AND status='confirmed'", (SOURCE,)):
+        for fid, team in self.store.db.execute("SELECT fixture_id, team FROM lineups WHERE source=? AND status='confirmed'", (SOURCE,)).fetchall():
             done.setdefault(fid, set()).add(team)
         return sum(1 for f in self.provider.list_fixtures(None, t, end)
                    if self._domestic(f.competition) and not {f.home, f.away} <= done.get(f.id, set()))
