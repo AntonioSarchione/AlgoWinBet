@@ -389,6 +389,12 @@ def cmd_results_day(a) -> None:
                 "GROUP BY fixture_id, bookmaker, kind", (lo, hi)).fetchall():
             quotes[fid] = (quotes.get(fid, "") + f" {book}/{kind}={n}").strip()
         print(f"{a.day} {a.comp or 'tutte le competizioni'}: {len(fxs)} partite in calendario, {len(res)} risultati salvati")
+        try:
+            last = store.db.execute("SELECT id, created_at FROM pub_runs ORDER BY id DESC LIMIT 1").fetchone()
+            legs = store.db.execute("SELECT COUNT(*), SUM(result IS NOT NULL) FROM paper_legs").fetchone()
+            print(f"ultima analisi pubblicata: run {last[0]} ({last[1][:16]}) · registro: {legs[0]} selezioni, {legs[1] or 0} chiuse")
+        except Exception:  # noqa: BLE001 - tables not created yet
+            pass
         seen = set()
         for fid, comp, home, away, ko, status in fxs:
             r = res.get(fid)
