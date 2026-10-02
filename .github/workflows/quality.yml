@@ -29,10 +29,18 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
+      - name: restore database replica  # the collect runs keep it fresh: only the latest changes are synced
+        uses: actions/cache/restore@v4
+        with:
+          path: data/turso-replica.db*
+          key: turso-replica-quality-${{ github.run_id }}
+          restore-keys: turso-replica-
       - name: run
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
+          TURSO_MODE: replica
+          TURSO_REPLICA_PATH: data/turso-replica.db
           WEEKS: ${{ inputs.weeks }}
         run: algowinbet quality --db turso --weeks "${WEEKS:-60}" --save
