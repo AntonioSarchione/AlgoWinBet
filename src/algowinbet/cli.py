@@ -408,6 +408,31 @@ def cmd_results_day(a) -> None:
         store.close()
 
 
+def cmd_raw_last(a) -> None:
+    """Latest saved raw responses of an endpoint (no API request): when, status, and the field structure of the newest."""
+    import json as _json
+    from .providers.goalapi import shape_summary
+    store = SnapshotStore(a.db)
+    rows = store.db.execute("SELECT id, endpoint, params, fetched_at, status FROM raw_requests WHERE source LIKE ? AND endpoint LIKE ? "
+                            "ORDER BY id DESC LIMIT ?", (f"%{a.source}%", f"%{a.endpoint}%", a.n)).fetchall()
+    if not rows:
+        print(f"nessuna risposta salvata per {a.source} {a.endpoint}")
+        return
+    for rid, ep, params, at, status in rows:
+        print(f"#{rid} {at} {status} {ep} {params}")
+    body = store.raw_body(rows[0][0])
+    try:
+        data = _json.loads(body)
+    except ValueError:
+        print(body[:2000].decode("utf-8", "replace"))
+        return
+    print(f"\nstruttura della più recente (#{rows[0][0]}, {len(body)} byte):")
+    for line in shape_summary(data)[: a.max_lines]:
+        print("  " + line)
+    if a.dump:
+        print("\n" + _json.dumps(data, ensure_ascii=False)[: a.dump])
+
+
 def cmd_inspect(a) -> None:
     """Debug a fixture's goal-total prices from the stored raw payloads (no API request): for each total-goals market of the
     catalogue, the raw OddsPapi row (market id, name, type, line, period, outcome, price) next to what we stored."""
@@ -1033,6 +1058,14 @@ def build_parser() -> argparse.ArgumentParser:
     ins.add_argument("--db", default="algowinbet.db")
     ins.add_argument("--all-markets", action="store_true")
     ins.set_defaults(fn=cmd_inspect)
+    rl = sub.add_parser("raw-last", help="ultime risposte grezze salvate di un endpoint e loro struttura (nessuna richiesta API)")
+    rl.add_argument("endpoint", help="parte del path, es. /lineups")
+    rl.add_argument("--source", default="goal")
+    rl.add_argument("--n", type=int, default=10)
+    rl.add_argument("--max-lines", type=int, default=120)
+    rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
+    rl.add_argument("--db", default="algowinbet.db")
+    rl.set_defaults(fn=cmd_raw_last)
     tm = sub.add_parser("teams", help="elenco squadre nel database (nessuna richiesta API)")
     tm.add_argument("--db", default="turso")
     tm.set_defaults(fn=cmd_teams)
