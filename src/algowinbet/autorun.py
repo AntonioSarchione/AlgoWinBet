@@ -45,6 +45,7 @@ class League:
     goal: str | None = None       # GOAL league id (goal leagues "...")
     oddspapi: int | None = None   # OddsPapi tournamentId (odds tournaments "...")
     fd: str | None = None         # football-data.co.uk division (I1, E0...): season CSVs
+    apif: int | None = None       # API-Football league id (lineups, injuries, squads)
 
 
 @dataclass
@@ -73,6 +74,9 @@ class AutoConfig:
     divisions: dict[str, str] = field(default_factory=dict)  # football-data division -> competition
     dataset_refresh_days: float = 3
     international: bool = False  # weekly international results (national-team Elo), public CSV, no key
+    apif_daily_limit: int = 100   # API-Football free plan
+    apif_reserve: int = 3
+    apif_squads_per_day: int = 20
 
     @classmethod
     def load(cls, path: str | Path) -> "AutoConfig":
@@ -225,6 +229,8 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         steps.append("lineups")  # costs nothing when no fixture is inside the window
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
             steps.append("backfill")  # one league per tick until every league has its multi-season history
+    if any(l.apif for l in cfg.leagues):
+        steps.append("apif")  # decides by itself: requests only for what is due (see apifcollector)
     if cfg.oddspapi_tournaments:
         cost = odds_cost or len(cfg.bookmakers)
         if manual:
@@ -272,7 +278,7 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
              max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
              manual: bool = False, history: bool = False, datasets: FootballDataCollector | None = None,
-             skip: tuple[str, ...] = ()) -> list[CollectStats]:
+             skip: tuple[str, ...] = (), apif=None) -> list[CollectStats]:
     """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
     whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
@@ -303,6 +309,8 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if s in ("odds", "history", "closing") and odds is None:
             continue
         if s == "datasets" and datasets is None and not cfg.international:
+            continue
+        if s == "apif" and apif is None:
             continue
         if s == "fixtures":
             out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
@@ -335,6 +343,8 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 out.append(odds.sync_prematch_history(only=history_due(store, cfg, t), max_seconds=left))
         elif s == "closing":
             out.append(odds.sync_closing())
+        elif s == "apif":
+            out.append(apif.run())
         elif s == "datasets":
             # capped; the first load spreads over a few ticks. The CLI skips it here and runs it after the publication.
             left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
@@ -350,5 +360,6 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
 def should_publish(results: list[CollectStats], last_pub: datetime | None, now: datetime, max_age: timedelta = timedelta(hours=6)) -> bool:
     """Re-analyse when this tick brought prices or lineups, or when the published analysis is older than max_age. Closing
     lines belong to matches already started: they feed CLV and the quality report, not the analysis of upcoming ones."""
-    fresh = any((r.saved.get("quotes") and r.mode != "closing") or r.saved.get("lineups") for r in results)
+    fresh = any((r.saved.get("quotes") and r.mode != "closing") or r.saved.get("lineups") or r.saved.get("player status")
+                for r in results)
     return fresh or last_pub is None or now - last_pub >= max_age

@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS news_items(id TEXT PRIMARY KEY, source TEXT, level TE
   team TEXT, fixture_id TEXT);
 CREATE TABLE IF NOT EXISTS match_stats(fixture_id TEXT, period TEXT, stat TEXT, home REAL, away REAL, observed_at TEXT, source TEXT,
   raw_id INTEGER, PRIMARY KEY(fixture_id, period, stat, source));
+CREATE TABLE IF NOT EXISTS player_status(id INTEGER PRIMARY KEY, source TEXT, fixture_id TEXT, team TEXT, player_id TEXT,
+  player_name TEXT, status TEXT, reason TEXT, observed_at TEXT, UNIQUE(source, fixture_id, player_id, status, reason));
+CREATE INDEX IF NOT EXISTS ix_status_fx ON player_status(fixture_id);
 CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY, done_at TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRIMARY KEY(source, period));
 """
@@ -421,7 +424,13 @@ class SnapshotProvider:
         return {q.market_code for q in self.get_quotes(fixture_id)}
 
     def get_events(self, fixture_id: str) -> list[InformationEvent]:
-        return []
+        """Structured player availability (API-Football injuries and suspensions) for this fixture."""
+        rows = self.store.db.execute("SELECT source, team, player_id, player_name, status, reason, observed_at FROM player_status "
+                                     "WHERE fixture_id=?", (fixture_id,)).fetchall()
+        return [InformationEvent(id=f"{src}:{fixture_id}:{p}:{st}", fixture_id=fixture_id, team=team, player=p, event_type="PLAYER_STATUS",
+                                 source_level="A", published_at=_dt(at), observed_at=_dt(at), confidence=0.95 if st != "DOUBTFUL" else 0.9,
+                                 payload={"status": st, "reason": reason, "name": name, "source": src})
+                for src, team, p, name, st, reason, at in rows]
 
     def _lineup(self, r) -> LineupSnapshot:
         return LineupSnapshot(fixture_id=r[0], team=r[1], status=r[2], formation=r[3], starters=json.loads(r[4]), bench=json.loads(r[5]),

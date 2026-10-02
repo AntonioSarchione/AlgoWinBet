@@ -71,7 +71,9 @@ def build_availability(team: str, roster: list[Player], base: dict[str, float], 
                        lineups: list[LineupSnapshot], cutoff: datetime, fixture_id: str) -> TeamAvailability:
     ids = {p.id for p in roster}
     by_id = {p.id: p for p in roster}
-    mine = [l for l in lineups if l.team == team and l.fixture_id == fixture_id and l.observed_at <= cutoff]
+    # a lineup is usable only if its player ids belong to the roster (sources number players differently)
+    mine = [l for l in lineups if l.team == team and l.fixture_id == fixture_id and l.observed_at <= cutoff
+            and len(set(l.starters) & ids) >= 7]
     confirmed = sorted((l for l in mine if l.status == "confirmed"), key=lambda l: l.observed_at)
     probable = sorted((l for l in mine if l.status == "probable"), key=lambda l: l.observed_at)
     notes: list[str] = []

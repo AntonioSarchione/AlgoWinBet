@@ -1,5 +1,5 @@
 # Online data collection: one scheduler tick per run (see src/algowinbet/autorun.py). Nothing runs on the user's PC.
-# Secrets (Settings > Secrets and variables > Actions): GOAL_API_KEY (or GOALAPI_KEY), ODDSPAPI_API_KEY, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN.
+# Secrets (Settings > Secrets and variables > Actions): GOAL_API_KEY (or GOALAPI_KEY), ODDSPAPI_API_KEY, APIFOOTBALL_KEY, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN.
 #
 # Budget of Actions minutes (private repo, 2,000 min/month): every job is billed in whole minutes (a tick takes about
 # 1 minute including setup), so the cron only covers the hours when lineups and pre-kickoff prices matter:
@@ -56,6 +56,7 @@ jobs:
       - name: collect-auto
         env:
           GOALAPI_KEY: ${{ secrets.GOAL_API_KEY || secrets.GOALAPI_KEY }}
+          APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

@@ -724,6 +724,13 @@ def cmd_collect_auto(a) -> None:
     if cfg.oddspapi_tournaments and (os.environ.get("ODDSPAPI_API_KEY") or os.environ.get("ODDSPAPI_KEY")):
         oc = OddsPapiClient(store=store, budget=BudgetGuard(store, "oddspapi", monthly=cfg.oddspapi_monthly_limit, reserve=cfg.oddspapi_reserve))
         odds = OddsCollector(oc, store, cfg.oddspapi_tournaments, cfg.bookmakers, names, history_books=cfg.history_bookmakers)
+    apif = None
+    if any(l.apif for l in cfg.leagues) and os.environ.get("APIFOOTBALL_KEY"):
+        from .apifcollector import ApifLeague, ApiFootballCollector
+        from .providers.apifootball import ApiFootballClient
+        ac = ApiFootballClient(store=store, budget=BudgetGuard(store, "api-football", daily=cfg.apif_daily_limit, reserve=cfg.apif_reserve))
+        apif = ApiFootballCollector(ac, store, [ApifLeague(l.apif, l.name, bool(l.fd)) for l in cfg.leagues if l.apif], names,
+                                    squads_per_day=cfg.apif_squads_per_day)
     from .fdcollector import FootballDataCollector
     datasets = FootballDataCollector(store, cfg.divisions, names) if cfg.divisions else None  # public files, no key
     t0 = time.monotonic()
@@ -734,7 +741,7 @@ def cmd_collect_auto(a) -> None:
     try:
         # season files and international results run after the publication: they are never worth a late analysis
         results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history,
-                           datasets=datasets, skip=("datasets",))
+                           datasets=datasets, skip=("datasets",), apif=apif)
         if not results:
             print("tick: niente da fare")
         from .autorun import should_publish
@@ -763,7 +770,7 @@ def cmd_collect_auto(a) -> None:
                 by_comp[f.competition] = by_comp.get(f.competition, 0) + 1
             print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
-                                     for s in ("goal-api", "oddspapi")))
+                                     for s in ("goal-api", "oddspapi", "api-football")))
     finally:
         store.close()
 

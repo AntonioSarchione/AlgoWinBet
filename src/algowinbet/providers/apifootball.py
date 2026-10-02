@@ -13,7 +13,7 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from ..snapshots import SnapshotStore
+from ..snapshots import BudgetGuard, SnapshotStore
 from .goalapi import Transport, urllib_transport
 
 SOURCE = "api-football"
@@ -29,13 +29,14 @@ class ApiFootballError(RuntimeError):
 
 
 class ApiFootballClient:
-    def __init__(self, api_key: str | None = None, store: SnapshotStore | None = None, transport: Transport | None = None,
+    def __init__(self, api_key: str | None = None, store: SnapshotStore | None = None, budget: BudgetGuard | None = None,
+                 transport: Transport | None = None,
                  sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), base_url: str = BASE_URL):
         self._key = (api_key or os.environ.get("APIFOOTBALL_KEY") or "").strip().strip("\"'")
         if not self._key:
             raise ApiFootballError("chiave mancante: imposta APIFOOTBALL_KEY (mai nel repo, mai come argomento)")
-        self.store, self.transport = store, transport or urllib_transport(timeout=30.0)
+        self.store, self.budget, self.transport = store, budget, transport or urllib_transport(timeout=30.0)
         self.sleep, self.clock, self.now, self.base = sleep, clock, now, base_url
         self._last = -1e9
         self.requests_sent = 0
@@ -48,6 +49,8 @@ class ApiFootballClient:
     def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict:
         """One request. Returns the JSON envelope ({get, parameters, errors, results, paging, response})."""
         params = {k: v for k, v in (params or {}).items() if v is not None}
+        if self.budget and endpoint not in FREE_ENDPOINTS:
+            self.budget.check(1)  # raises BudgetExceeded before anything is sent
         wait = MIN_INTERVAL_S - (self.clock() - self._last)
         if wait > 0:
             self.sleep(wait)
@@ -58,6 +61,13 @@ class ApiFootballClient:
         counted = endpoint not in FREE_ENDPOINTS and status == 200
         self.counted_sent += int(counted)
         self.remaining = {k: v for k, v in headers.items() if k.startswith("x-ratelimit")}
+        if self.budget and counted:
+            self.budget.add(1)
+            try:  # the provider's own daily counter wins when it is higher (requests made elsewhere, errors billed)
+                lim, left = int(headers["x-ratelimit-requests-limit"]), int(headers["x-ratelimit-requests-remaining"])
+                self.budget.sync_from_headers(lim, left, "DAILY")
+            except (KeyError, ValueError):
+                pass
         if self.store:
             self.store.put_raw(SOURCE, endpoint, params, status, body.replace(self._key.encode(), b"***"), self.now(), cost=int(counted))
         if status in (401, 403):
