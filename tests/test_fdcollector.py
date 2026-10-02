@@ -189,3 +189,25 @@ def test_config_maps_divisions():
     cfg = AutoConfig.load("configs/collect.json")
     assert cfg.divisions == {"I1": "Serie A", "E0": "Premier League", "D1": "Bundesliga", "F1": "Ligue 1", "SP1": "LaLiga",
                              "P1": "Liga Portugal", "N1": "Eredivisie"}
+
+
+def test_a_finished_match_without_result_triggers_the_results_step_early():
+    from algowinbet.autorun import AutoConfig, League, late_result_leagues, plan_tick
+    from algowinbet.domain import Fixture, FixtureStatus, MatchResult
+    st = SnapshotStore(":memory:")
+    cfg = AutoConfig(leagues=[League("UEFA Nations League", goal="nl"), League("Serie A", goal="sa")])
+    cfg.goal_leagues = ["nl", "sa"]
+    ko = NOW - timedelta(hours=12)
+    st.save_fixtures("goal-api", [Fixture(id="goal:1", competition="UEFA Nations League", home="Denmark", away="Portugal", kickoff=ko,
+                                          status=FixtureStatus.SCHEDULED)], ko - timedelta(days=2))
+    for lid in ("nl", "sa"):  # daily syncs done 6 hours ago: not stale yet
+        for kind in ("fixtures", "results"):
+            st.db.execute("INSERT INTO raw_requests(source, endpoint, params, status, fetched_at) VALUES('goal-api', ?, '{\"from\": 1}', 200, ?)",
+                          (f"/leagues/{lid}/{kind}", (NOW - timedelta(hours=6)).isoformat()))
+    st.db.commit()
+    assert late_result_leagues(st, cfg, NOW) == ["nl"]
+    assert "results" not in plan_tick(st, cfg, NOW - timedelta(hours=10), None)  # 2 hours after kickoff: not over yet
+    assert "results" in plan_tick(st, cfg, NOW, None)
+    st.save_results("goal-api", [MatchResult(fixture_id="goal:1", competition="UEFA Nations League", home="Denmark", away="Portugal",
+                                             kickoff=ko, home_goals=1, away_goals=1)], NOW)
+    assert late_result_leagues(st, cfg, NOW) == [] and "results" not in plan_tick(st, cfg, NOW, None)

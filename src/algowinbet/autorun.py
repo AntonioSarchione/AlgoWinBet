@@ -181,6 +181,31 @@ def _last_ok(store: SnapshotStore, source: str, endpoint_like: str) -> datetime 
     return datetime.fromisoformat(row[0]) if row and row[0] else None
 
 
+RESULT_DUE = timedelta(hours=2, minutes=30)  # kickoff + 90' + half time + stoppages, with a margin
+RESULT_RETRY = timedelta(hours=2)  # a match still missing its result is asked again at most this often
+
+
+def late_result_leagues(store: SnapshotStore, cfg: AutoConfig, now: datetime) -> list[str]:
+    """GOAL leagues with a match that kicked off 2.5h to 3 days ago, is not postponed or cancelled, and still has no result:
+    their results are fetched on the next tick instead of waiting for the daily sync (yesterday evening's matches would
+    otherwise reach the model up to 20 hours late)."""
+    rows = store.db.execute(
+        "SELECT DISTINCT f.competition FROM fixtures f WHERE f.source = 'goal-api' AND f.kickoff >= ? AND f.kickoff <= ? "
+        "AND f.observed_at = (SELECT MAX(observed_at) FROM fixtures g WHERE g.fixture_id = f.fixture_id) "
+        "AND f.status NOT IN ('POSTPONED', 'CANCELLED') "
+        "AND NOT EXISTS (SELECT 1 FROM results r WHERE r.fixture_id = f.fixture_id)",
+        ((now - timedelta(days=3)).isoformat(), (now - RESULT_DUE).isoformat())).fetchall()
+    comps = {norm_comp(r[0]) for r in rows}
+    if not comps:
+        return []
+    ids = [l.goal for l in cfg.leagues if l.goal and norm_comp(l.name) in comps]
+    return ids or list(cfg.goal_leagues)  # a competition named differently: ask every league rather than miss it
+
+
+def norm_comp(name: str) -> str:
+    return " ".join(str(name).lower().split())
+
+
 def _stale(last: datetime | None, now: datetime, age: timedelta) -> bool:
     return last is None or now - last >= age
 
@@ -194,7 +219,8 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         stale = lambda kind: any(_stale(_last_ok(store, "goal-api", f"/leagues/{lid}/{kind}"), now, timedelta(hours=20)) for lid in cfg.goal_leagues)
         if stale("fixtures"):
             steps.append("fixtures")
-        if stale("results"):
+        late = late_result_leagues(store, cfg, now)
+        if stale("results") or (late and _stale(_last_ok(store, "goal-api", "/leagues/%/results"), now, RESULT_RETRY)):
             steps += ["results", "stats"]
         steps.append("lineups")  # costs nothing when no fixture is inside the window
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
@@ -281,7 +307,9 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if s == "fixtures":
             out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
         elif s == "results":
-            out.append(goal.sync_results(leagues=goal.stale_leagues("results")))
+            due = goal.stale_leagues("results")
+            due += [lid for lid in late_result_leagues(store, cfg, t) if lid not in due]
+            out.append(goal.sync_results(leagues=due))
         elif s == "stats":
             out.append(goal.sync_stats(3))
         elif s == "lineups":
