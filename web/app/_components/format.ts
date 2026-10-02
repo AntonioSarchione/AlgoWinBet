@@ -21,7 +21,9 @@ export function ago(iso: string | null, now = Date.now()) {
   return h < 48 ? `${h} h fa` : `${Math.round(h / 24)} giorni fa`;
 }
 
-export const STATUS_LABEL: Record<string, string> = { STRONG: "Alta", CANDIDATE: "Media", FAIR: "Equa", WATCH: "Da osservare" };
+export const STATUS_LABEL: Record<string, string> = {
+  STRONG: "Alta", CANDIDATE: "Media", FAIR: "Equa", WATCH: "Da osservare", NEUTRAL: "Senza valore", AVOID: "Da evitare",
+};
 
 export const COMP_SHORT: Record<string, string> = {
   "Serie A": "Serie A",

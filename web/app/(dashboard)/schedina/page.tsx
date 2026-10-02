@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
-import { ArrowLeft, CircleSlash, ListChecks, Percent, Sigma } from "lucide-react";
-import { fixtureCandidates, latestRun, parseJSON, runFixtures } from "@/lib/db";
+import { ArrowLeft, CircleSlash, Gauge, ListChecks, Percent, Sigma, Target } from "lucide-react";
+import { fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type BookSel, type OppRow } from "@/lib/db";
 import { legMinOdds, type OptSettings } from "@/lib/optimizer";
-import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
+import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, MatchCell } from "@/app/_components/ui";
 import { MAX_PICK } from "@/lib/pick";
@@ -17,17 +17,58 @@ const EV_MIN = [
 ];
 const LEG_PROB = [{ v: "", l: "Qualsiasi" }, ...[30, 40, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 
-// Every chosen match enters the slip with exactly one selection: the search runs over all their published selections
-// (Alta, Media, Equa, Da osservare), with no slip-odds window, so the only limits are the ones chosen on this page.
+const ALL_STATUSES = ["STRONG", "CANDIDATE", "FAIR", "WATCH", "NEUTRAL", "AVOID"];
+const PER_FIXTURE = 6; // kept per match and per criterion (value score, probability, EV) before the search
+
+type Limits = { evMin: number; legProb: number; qMin: number; qMax: number; lMin: number; lMax: number };
+
+// The candidates of the chosen matches: every playable Sisal selection (pub_book, any status) where the run has it, else
+// the published opportunities. Per match the best few by value score, by probability and by EV, so every profile finds
+// its kind of selection.
+async function candidates(runId: number, ids: string[], now: string, k: Limits): Promise<Cand[]> {
+  const [fixtures, book] = await Promise.all([runFixtures(runId), fixtureBook(runId, ids)]);
+  const fx = new Map(fixtures.map((f) => [f.fixture_id, f]));
+  const rows: OppRow[] = [];
+  for (const b of book) {
+    const f = fx.get(b.fixture_id);
+    if (!f) continue;
+    for (const x of parseJSON<BookSel[]>(b.sels, [])) {
+      rows.push({
+        fixture_id: f.fixture_id, kickoff: f.kickoff, competition: f.competition, match: `${f.home} - ${f.away}`, home: f.home, away: f.away,
+        market: x.m, bookmaker: x.b, odds: x.o, fair_odds: 1 / x.p, p_final: x.p, p_market: x.pm, ev: x.e, ev_lower: x.e, uncertainty: x.u,
+        data_quality: 1, status: x.st, odds_stale: 0, lineup_state: f.lineup_state, p_struct: x.s, sel_key: x.k, score: x.sc,
+        disagreement: x.d, dq_lineup: x.l,
+      } as OppRow);
+    }
+  }
+  const inBook = new Set(book.map((b) => b.fixture_id));
+  const rest = ids.filter((id) => !inBook.has(id));
+  if (rest.length) rows.push(...(await fixtureCandidates(runId, rest)));
+  const legs = toLegs(rows).filter(
+    (o) => o.kickoff > now && o.p_final >= k.legProb && (!k.lMin || o.odds >= k.lMin) && (!k.lMax || o.odds <= k.lMax),
+  );
+  const out: Cand[] = [];
+  for (const id of ids) {
+    const mine = legs.filter((l) => l.fixture_id === id);
+    const pick = new Set<Cand>();
+    for (const by of [(l: Cand) => l.score, (l: Cand) => l.p_final, (l: Cand) => l.ev]) {
+      for (const l of [...mine].sort((a, b) => by(b) - by(a)).slice(0, PER_FIXTURE)) pick.add(l);
+    }
+    out.push(...pick);
+  }
+  return out;
+}
+
+// Every chosen match enters the slip with exactly one selection; the only limits are the ones chosen on this page.
 const manualSlips = unstable_cache(
-  async (runId: number, ids: string[], settings: OptSettings, evMin: number, legProb: number, now: string) => {
-    const legs = toLegs(await fixtureCandidates(runId, ids)).filter((o) => o.kickoff > now && o.p_final >= legProb);
+  async (runId: number, ids: string[], settings: OptSettings, k: Limits, now: string) => {
+    const legs = await candidates(runId, ids, now, k);
     const n = new Set(legs.map((l) => l.fixture_id)).size;
     if (!n) return { n, results: null };
     const results = runProfiles(legs, settings, {
-      min_legs: n, max_legs: n, max_legs_per_competition: n, odds_min: 1, odds_max: 1e9, min_probability: 0,
-      min_leg_probability: legProb, min_slip_ev: evMin, include_watch: true, include_fair: true,
-      candidates_per_fixture: 8, max_candidates: 8 * MAX_PICK,
+      min_legs: n, max_legs: n, max_legs_per_competition: n, odds_min: k.qMin || 1, odds_max: k.qMax || 1e9, min_probability: 0,
+      min_leg_probability: k.legProb, min_slip_ev: k.evMin, statuses: ALL_STATUSES,
+      candidates_per_fixture: 3 * PER_FIXTURE, max_candidates: 3 * PER_FIXTURE * MAX_PICK,
     });
     return { n, results };
   },
@@ -35,7 +76,7 @@ const manualSlips = unstable_cache(
   { revalidate: 6 * 3600 },
 );
 
-type SP = { fx?: string | string[]; p?: string; ev?: string; pmin?: string };
+type SP = { fx?: string | string[]; p?: string; ev?: string; pmin?: string; min?: string; max?: string; lmin?: string; lmax?: string };
 
 export default async function Schedina({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -54,10 +95,12 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
   const settings = parseJSON<OptSettings | null>(run.optimizer, null);
   const evMin = EV_MIN.some((x) => x.v === sp.ev) && sp.ev ? Number(sp.ev) / 100 : -1; // -100% = no limit
   const legProb = LEG_PROB.some((x) => x.v === sp.pmin) ? Number(sp.pmin || 0) / 100 : 0;
+  const num = (x?: string) => (Number(x) > 1 ? Number(x) : 0);
+  const limits: Limits = { evMin, legProb, qMin: num(sp.min), qMax: num(sp.max), lMin: num(sp.lmin), lMax: num(sp.lmax) };
   const nowIso = new Date().toISOString().slice(0, 16); // minute precision: equal choices share the cache
   const [fixtures, computed] = await Promise.all([
     runFixtures(run.id),
-    settings ? manualSlips(run.id, ids, settings, evMin, legProb, nowIso) : Promise.resolve({ n: 0, results: null }),
+    settings ? manualSlips(run.id, ids, settings, limits, nowIso) : Promise.resolve({ n: 0, results: null }),
   ]);
   const byId = new Map(fixtures.map((f) => [f.fixture_id, f]));
   const results: Record<string, ProfileResult> = computed.results ?? {};
@@ -69,8 +112,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
   const left = ids.filter((id) => !inSlip.has(id));
   const href = (p: string) => {
     const q = new URLSearchParams(ids.map((id) => ["fx", id]));
-    if (sp.ev) q.set("ev", sp.ev);
-    if (sp.pmin) q.set("pmin", sp.pmin);
+    for (const key of ["ev", "pmin", "min", "max", "lmin", "lmax"] as const) if (sp[key]) q.set(key, sp[key]!);
     q.set("p", p);
     return `/schedina?${q}`;
   };
@@ -81,16 +123,34 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
         <div>
           <h1>Schedina manuale</h1>
           <p>
-            {ids.length} {ids.length === 1 ? "partita scelta" : "partite scelte"} da te: per ognuna il modello sceglie l&apos;esito che rende migliore la
-            schedina. Uso personale, solo paper trading: queste schedine non entrano nel Registro.
+            {ids.length} {ids.length === 1 ? "partita scelta" : "partite scelte"} da te: per ognuna il modello sceglie, tra tutte le quote Sisal con
+            probabilità almeno del 25%, l&apos;esito che rende migliore la schedina. Uso personale, solo paper trading: queste schedine non entrano nel Registro.
           </p>
         </div>
         <Link href={back} className="btn"><ArrowLeft size={17} aria-hidden="true" /> Modifica la scelta</Link>
       </header>
 
-      <form className="card filters" method="get" aria-label="Limiti della schedina manuale">
+      <form key={JSON.stringify(sp)} className="card filters" method="get" aria-label="Limiti della schedina manuale">
         {ids.map((id) => <input key={id} type="hidden" name="fx" value={id} />)}
         {sp.p && <input type="hidden" name="p" value={sp.p} />}
+        <div className="field">
+          <label htmlFor="min">Quota schedina (min – max)</label>
+          <div className="control">
+            <Gauge size={17} aria-hidden="true" />
+            <input id="min" name="min" type="number" inputMode="decimal" step="0.05" min="1" placeholder="nessuna" defaultValue={sp.min} aria-label="Quota minima della schedina" />
+            <span className="dash">–</span>
+            <input name="max" type="number" inputMode="decimal" step="0.05" min="1" placeholder="nessuna" defaultValue={sp.max} aria-label="Quota massima della schedina" />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="lmin">Quota singolo evento (min – max)</label>
+          <div className="control">
+            <Target size={17} aria-hidden="true" />
+            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1" placeholder="nessuna" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
+            <span className="dash">–</span>
+            <input name="lmax" type="number" inputMode="decimal" step="0.05" min="1" placeholder="nessuna" defaultValue={sp.lmax} aria-label="Quota massima del singolo evento" />
+          </div>
+        </div>
         <div className="field">
           <label htmlFor="ev">EV minimo della schedina</label>
           <div className="control">
@@ -218,7 +278,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
                       ? "non è nell'ultima analisi pubblicata (già iniziata o fuori dai 7 giorni)."
                       : new Date(f.kickoff).getTime() <= Date.now()
                         ? "già iniziata."
-                        : "nessun esito Sisal con valore o a quota equa, oppure sotto la probabilità minima scelta. Il modello non la metterebbe in schedina."}
+                        : "nessuna quota Sisal dentro i limiti scelti (quota del singolo evento, probabilità minima) o nessuna quota Sisal per questa partita."}
                   </span>
                 </li>
               );

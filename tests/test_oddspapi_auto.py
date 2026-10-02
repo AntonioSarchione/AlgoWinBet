@@ -436,6 +436,16 @@ def test_publish_writes_dashboard_tables_and_prunes():
     books = [json.loads(b) for (b,) in s.db.execute("SELECT book FROM pub_fixtures WHERE run_id=? AND book IS NOT NULL", (rid,))]
     assert books and all(v["odds"] > 1 and 0 < v["pf"] < 1 for b in books for v in b.values())
     assert set().union(*books) <= {"p_home", "p_draw", "p_away", "p_over25", "p_btts"}
+    # manual slips: every playable selection with p >= min_probability, whatever its status (also the ones not shown)
+    book = {f: json.loads(j) for f, j in s.db.execute("SELECT fixture_id, sels FROM pub_book WHERE run_id=?", (rid,)).fetchall()}
+    sels = [x for v in book.values() for x in v]
+    want = [o for o in res.opportunities if o.status.value != "INVALID" and o.p_final >= cfg.thresholds.min_probability]
+    assert len(sels) == len(want) > 0 and all(x["p"] >= cfg.thresholds.min_probability and x["o"] > 1 for x in sels)
+    assert {x["st"] for x in sels} >= {o.status.value for o in want}
+    rid2, _ = analyze_and_publish(s, cfg, now=mock.as_of)
+    rid3, _ = analyze_and_publish(s, cfg, now=mock.as_of)
+    kept = {r for (r,) in s.db.execute("SELECT DISTINCT run_id FROM pub_book").fetchall()}
+    assert kept == {rid2, rid3}  # only the last two runs keep the book
 
 
 def test_publish_adds_new_columns_to_an_existing_database():

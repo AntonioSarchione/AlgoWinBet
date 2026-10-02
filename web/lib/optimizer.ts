@@ -46,6 +46,7 @@ export type OptimizerCfg = {
   profile?: string;
   // web only (manual slips): candidates kept per fixture and overall before the search (defaults 3 and 80, as in Python)
   candidates_per_fixture?: number;
+  statuses?: string[]; // statuses that may enter a slip (default: STRONG, CANDIDATE + WATCH/FAIR by include_*)
   max_candidates?: number;
   profiles?: Record<string, Partial<Record<"w_ev" | "w_prob" | "w_div" | "w_unc" | "w_corr" | "w_disagree", number>>>;
   w_ev: number;
@@ -177,7 +178,7 @@ function overlap(a: Slip, b: Slip): number {
 export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult<T> {
   const o = s.optimizer;
   if (o.max_legs_per_fixture !== 1) throw new Error("optimizer.ts supporta solo una leg per partita (max_legs_per_fixture = 1)");
-  const ok = new Set(["STRONG", "CANDIDATE", ...(o.include_watch ? ["WATCH"] : []), ...(o.include_fair ? ["FAIR"] : [])]);
+  const ok = new Set(o.statuses ?? ["STRONG", "CANDIDATE", ...(o.include_watch ? ["WATCH"] : []), ...(o.include_fair ? ["FAIR"] : [])]);
   let elig = opps.filter((x) => ok.has(x.status));
   const reasons: string[] = [];
   if (!elig.length) {

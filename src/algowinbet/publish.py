@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS pub_opportunities(run_id INTEGER, fixture_id TEXT, ki
   data_quality REAL, status TEXT, odds_stale INTEGER, lineup_state TEXT);
 CREATE TABLE IF NOT EXISTS pub_slips(run_id INTEGER, rank INTEGER, total_odds REAL, joint_probability REAL, ev REAL, ev_lower REAL,
   stake REAL, legs TEXT, explanation TEXT, PRIMARY KEY(run_id, rank));
+-- manual slips: every playable selection of a match (any status, probability >= min_probability), one row per match; kept
+-- for the last two runs only
+CREATE TABLE IF NOT EXISTS pub_book(run_id INTEGER, fixture_id TEXT, sels TEXT, PRIMARY KEY(run_id, fixture_id));
 CREATE INDEX IF NOT EXISTS ix_pubfx ON pub_fixtures(run_id);
 CREATE INDEX IF NOT EXISTS ix_pubop ON pub_opportunities(run_id);
 """
@@ -109,6 +112,16 @@ def book_prices(ops: list) -> str | None:
     return json.dumps(out) if out else None
 
 
+def book_rows(ops: list, min_probability: float) -> str | None:
+    """All playable selections of one match for the dashboard's manual slips, compact: the optimizer fields and what the
+    page shows. Selections below min_probability are left out (never proposed, see Thresholds.min_probability)."""
+    out = [{"k": o.ref.key, "m": o.description, "o": o.odds, "b": o.bookmaker, "p": round(o.p_final, 4), "s": round(o.p_struct, 4),
+            "pm": None if o.p_market is None else round(o.p_market, 4), "e": round(o.ev, 4), "u": round(o.uncertainty, 4),
+            "sc": round(o.score, 6), "d": round(o.model_disagreement, 6), "l": o.data_quality_parts.get("lineup", 0.0), "st": o.status.value}
+           for o in ops if o.status != OpportunityStatus.INVALID and o.p_final >= min_probability]
+    return json.dumps(out, ensure_ascii=False, separators=(",", ":")) if out else None
+
+
 def optimizer_settings(cfg: Config) -> dict:
     """Everything web/lib/optimizer.ts needs to reproduce optimize() + assign_stakes() on the published opportunities."""
     return {"optimizer": cfg.optimizer.model_dump(), "z": cfg.thresholds.z, "risk": cfg.risk.model_dump()}
@@ -165,6 +178,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                   json.dumps({k: explain_leg(o)[k] for k in ("positive_factors", "negative_factors")}, ensure_ascii=False),
                   o.ref.key, o.home, o.away, round(o.score, 6), round(o.model_disagreement, 6), o.data_quality_parts.get("lineup", 0.0))
                  for o in res.opportunities if o.status in SHOWN])
+    book = [(run_id, fid, js) for fid, ops in by_fx.items() if (js := book_rows(ops, cfg.thresholds.min_probability))]
+    store._bulk("INSERT OR REPLACE INTO pub_book(run_id,fixture_id,sels)", book)
     store._bulk("INSERT INTO pub_slips(run_id,rank,total_odds,joint_probability,ev,ev_lower,stake,legs,explanation,horizon_h,max_legs)",
                 [(run_id, k + 1, round(s.total_odds, 3), round(s.joint_probability, 4), round(s.ev, 4), round(s.ev_lower, 4), round(s.stake, 2),
                   json.dumps([{"match": f"{o.home} - {o.away}", "competition": o.competition, "kickoff": o.kickoff.isoformat(),
@@ -191,7 +206,9 @@ def data_version(store: SnapshotStore) -> dict:
 
 
 def prune(store: SnapshotStore, keep_days: int = 14) -> None:
-    """Keep the last `keep_days` of published runs (and always the latest one)."""
+    """Keep the last `keep_days` of published runs (and always the latest one); the manual-slip book only for the last two."""
+    store.db.execute("DELETE FROM pub_book WHERE run_id NOT IN (SELECT id FROM pub_runs ORDER BY id DESC LIMIT 2)")
+    store.db.commit()
     limit = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
     old = [r[0] for r in store.db.execute("SELECT id FROM pub_runs WHERE created_at < ? AND id < (SELECT MAX(id) FROM pub_runs)",
                                           (limit,)).fetchall()]

@@ -491,4 +491,5 @@ th.num .th-sort { justify-content: flex-end; }
 .profile-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
 .profile-stats small { display: block; color: var(--muted); font-size: 12px; }
 .profile-stats b { font-size: 16px; }
+.status-NEUTRAL { background: var(--card-2); color: var(--muted); }
 .status-AVOID { background: var(--bad-soft); color: var(--bad); }

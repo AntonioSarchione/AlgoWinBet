@@ -219,6 +219,16 @@ export const fixtureCandidates = persist(async (runId: number, ids: string[]) =>
   ).then(withMatch);
 }, "fixtureCandidates", RUN_TTL);
 
+// manual slips: every playable selection of the chosen matches (pub_book, any status; missing on runs before it existed)
+export type BookSel = { k: string; m: string; o: number; b: string; p: number; s: number; pm: number | null; e: number; u: number; sc: number; d: number; l: number; st: string };
+export const fixtureBook = persist(async (runId: number, ids: string[]) => {
+  if (!ids.length) return [] as { fixture_id: string; sels: string }[];
+  return all<{ fixture_id: string; sels: string }>(
+    `SELECT fixture_id, sels FROM pub_book WHERE run_id = ? AND fixture_id IN (${ids.map(() => "?").join(",")})`,
+    [runId, ...ids],
+  ).catch((e) => (/no such table/i.test(String(e)) ? [] : Promise.reject(e)));
+}, "fixtureBook", RUN_TTL);
+
 export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
 
 export const usage = persist(async () => {
