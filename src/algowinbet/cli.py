@@ -408,6 +408,49 @@ def cmd_results_day(a) -> None:
         store.close()
 
 
+def cmd_db_bench(a) -> None:
+    """Time of writes on Turso: embedded replica vs direct connection, one commit per statement vs one transaction."""
+    import time as _t
+    import libsql
+    url, tok = os.environ["TURSO_DATABASE_URL"], os.environ.get("TURSO_AUTH_TOKEN", "")
+    rows = [(f"k{i}", "x" * 50) for i in range(a.rows)]
+
+    def run(conn, label):
+        conn.execute("CREATE TABLE IF NOT EXISTS bench(k TEXT PRIMARY KEY, v TEXT)")
+        conn.commit()
+        t0 = _t.monotonic()
+        for i in range(5):
+            conn.execute("INSERT OR REPLACE INTO bench VALUES(?, ?)", (f"one{i}", "x"))
+            conn.commit()
+        t1 = _t.monotonic()
+        conn.execute("BEGIN")
+        for i in range(5):
+            conn.execute("INSERT OR REPLACE INTO bench VALUES(?, ?)", (f"tx{i}", "x"))
+        conn.execute("COMMIT")
+        t2 = _t.monotonic()
+        values = ",".join(["(?,?)"] * len(rows))
+        conn.execute(f"INSERT OR REPLACE INTO bench VALUES {values}", [v for r in rows for v in r])
+        conn.commit()
+        t3 = _t.monotonic()
+        conn.execute("SELECT COUNT(*) FROM bench").fetchall()
+        t4 = _t.monotonic()
+        print(f"{label}: 5 scritture con commit {(t1 - t0) / 5:.2f}s ciascuna · 5 in una transazione {t2 - t1:.2f}s in tutto · "
+              f"{len(rows)} righe in 1 istruzione {t3 - t2:.2f}s · 1 lettura {t4 - t3:.3f}s", flush=True)
+
+    t = _t.monotonic()
+    rep = libsql.connect(a.replica, sync_url=url, auth_token=tok)
+    rep.sync()
+    print(f"sync iniziale della replica {_t.monotonic() - t:.1f}s", flush=True)
+    run(rep, "replica")
+    t = _t.monotonic()
+    rep.sync()
+    print(f"sync dopo le scritture {_t.monotonic() - t:.2f}s", flush=True)
+    run(libsql.connect(database=url, auth_token=tok), "diretta")
+    rem = libsql.connect(database=url, auth_token=tok)
+    rem.execute("DROP TABLE IF EXISTS bench")
+    rem.commit()
+
+
 def cmd_raw_last(a) -> None:
     """Latest saved raw responses of an endpoint (no API request): when, status, and the field structure of the newest."""
     import json as _json
@@ -1136,6 +1179,10 @@ def build_parser() -> argparse.ArgumentParser:
     ins.add_argument("--db", default="algowinbet.db")
     ins.add_argument("--all-markets", action="store_true")
     ins.set_defaults(fn=cmd_inspect)
+    bn = sub.add_parser("db-bench", help="tempi di scrittura su Turso (replica locale contro connessione diretta)")
+    bn.add_argument("--replica", default="data/turso-replica.db")
+    bn.add_argument("--rows", type=int, default=80)
+    bn.set_defaults(fn=cmd_db_bench)
     rl = sub.add_parser("raw-last", help="ultime risposte grezze salvate di un endpoint e loro struttura (nessuna richiesta API)")
     rl.add_argument("endpoint", help="parte del path, es. /lineups")
     rl.add_argument("--source", default="goal")
