@@ -719,11 +719,12 @@ def cmd_collect_auto(a) -> None:
         if left >= 60:
             run_datasets(store, cfg, datasets, datetime.now(timezone.utc), left, on_step=show)
         now = datetime.now(timezone.utc)
-        print("Riepilogo database: " + ", ".join(f"{k}={v}" for k, v in store.stats().items()))
-        by_comp: dict[str, int] = {}
-        for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=cfg.fixtures_days)):
-            by_comp[f.competition] = by_comp.get(f.competition, 0) + 1
-        print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
+        if a.summary:  # row counts over the whole database: about a minute on Turso, so not on every tick
+            print("Riepilogo database: " + ", ".join(f"{k}={v}" for k, v in store.stats().items()))
+            by_comp: dict[str, int] = {}
+            for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=cfg.fixtures_days)):
+                by_comp[f.competition] = by_comp.get(f.competition, 0) + 1
+            print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
                                      for s in ("goal-api", "oddspapi")))
     finally:
@@ -1033,6 +1034,7 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--manual", action="store_true",
                     help="aggiornamento manuale: fotografia Sisal adesso (richieste conteggiate, massimo manual_monthly al mese) + storico gratuito")
     ca.add_argument("--history", action="store_true", help="storico prezzi gratuito /historical-odds di tutte le partite future")
+    ca.add_argument("--summary", action="store_true", help="conteggio righe del database e partite in calendario (circa 1 minuto su Turso)")
     ca.set_defaults(fn=cmd_collect_auto)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")
