@@ -27,7 +27,31 @@ def test_elo_updates_and_reads_only_known_results():
     assert tl.at("A", T0 - timedelta(seconds=1)) is None
     assert tl.at("A", T0) == 1500 + 20 * 1.5 * 0.5 and tl.at("B", T0) == 1500 - 15
     assert goal_multiplier(1) == 1 and goal_multiplier(-2) == 1.5 and goal_multiplier(4) == 15 / 8
-    assert tournament_k("FIFA World Cup") == 60 and tournament_k("UEFA Euro qualification") == 40 and tournament_k("Friendly") == 20
+    assert tournament_k("FIFA World Cup") == 65 and tournament_k("UEFA Euro qualification") == 45 and tournament_k("Friendly") == 10
+    assert tournament_k("UEFA Nations League") == 60 and tournament_k("Oceania Nations Cup") == 60
+    assert tournament_k("FIFA Series") == 10 and tournament_k("Gulf Cup") == 20
+
+
+def test_national_matches_weigh_importance_and_their_own_half_life():
+    from algowinbet.domain import MatchResult
+    from algowinbet.elo import nation_weights
+    from algowinbet.models.dixon_coles import DixonColes
+    imp = {"world_cup": 1.0, "continental": 0.95, "qualification": 0.7, "other": 0.25, "friendly": 0.1}
+    club = MatchResult(fixture_id="c", competition="Serie A", home="Inter", away="Milan", kickoff=T0, home_goals=1, away_goals=0)
+    nl = MatchResult(fixture_id="n", competition="UEFA Nations League", home="Italy", away="Spain", kickoff=T0, home_goals=1, away_goals=1)
+    fr = MatchResult(fixture_id="f", competition="Nazionali · amichevoli", home="Italy", away="Wales", kickoff=T0, home_goals=2,
+                     away_goals=0, kind="friendly")
+    out = nation_weights([club, nl, fr], imp, 730.0)
+    assert out[0] is club and (out[1].weight, out[1].half_life_days) == (0.95, 730.0) and out[2].weight == 0.1
+    assert nation_weights([club, nl], None, None) == [club, nl]
+    # in the fit: a friendly played today counts like a full-weight match 3.3 half-lives old (0.1 = 0.5^3.32)
+    rows = [MatchResult(fixture_id=f"m{i}", competition="X", home=f"T{i % 5}", away=f"T{(i + 1) % 5}", kickoff=T0,
+                        home_goals=i % 3, away_goals=1, weight=0.1 if i == 0 else 1.0) for i in range(12)]
+    a = DixonColes().fit([rows[0].model_copy(update={"weight": 0.0, "home_goals": 9})] + rows[1:], T0 + timedelta(days=1))
+    b = DixonColes().fit(rows[1:], T0 + timedelta(days=1))
+    assert np.allclose(a.attack, b.attack, atol=1e-4)  # a weight-0 match changes nothing, however extreme
+    c = DixonColes().fit([rows[0].model_copy(update={"home_goals": 9})] + rows[1:], T0 + timedelta(days=1))
+    assert not np.allclose(c.attack, b.attack, atol=1e-3)
 
 
 def test_national_ratings_from_the_international_csv():

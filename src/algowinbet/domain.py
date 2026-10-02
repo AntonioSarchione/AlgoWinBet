@@ -51,6 +51,11 @@ class MatchResult(BaseModel):
     home_goals: int
     away_goals: int
     neutral: bool = False  # played on neutral ground: no home advantage (international tournaments)
+    # goal-model fit: importance of the match (1 = full weight) and its own time-decay half-life (None = the model's);
+    # kind = tournament class of an international result (elo.tournament_kind), None for our own feed
+    weight: float = 1.0
+    half_life_days: float | None = None
+    kind: str | None = None
 
     @property
     def available_at(self) -> datetime:

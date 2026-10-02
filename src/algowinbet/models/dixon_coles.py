@@ -63,7 +63,9 @@ class DixonColes:
         x = np.array([r.home_goals for r in results], dtype=float)
         y = np.array([r.away_goals for r in results], dtype=float)
         age = np.array([(as_of - r.kickoff).total_seconds() / 86400.0 for r in results])
-        w = np.exp(-self.xi * np.clip(age, 0, None))
+        # weight = importance x 0.5^(age / half-life): the match's own half-life when it has one (national teams), else xi
+        xi = np.array([math.log(2) / r.half_life_days if getattr(r, "half_life_days", None) else self.xi for r in results])
+        w = np.exp(-xi * np.clip(age, 0, None)) * np.array([getattr(r, "weight", 1.0) for r in results])
         comps = sorted({r.competition for r in results}) if self.comp_mu else ["*"]
         cidx = {c: k for k, c in enumerate(comps)}
         C = len(comps)

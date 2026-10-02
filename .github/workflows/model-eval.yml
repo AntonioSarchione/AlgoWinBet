@@ -9,7 +9,7 @@ on:
         required: false
         default: "52"
       variants:
-        description: "varianti separate da spazio (vuoto = tutte): base senza-elo-nazionali senza-storico-nazionali storico-nazionali-2 storico-nazionali-6 elo-nazionali-0.08 elo-nazionali-0.25 campionati elo-club emivita-180 emivita-540 tutto"
+        description: "varianti separate da spazio (vuoto = tutte): base senza-elo-nazionali senza-storico-nazionali storico-nazionali-2 storico-nazionali-6 elo-nazionali-0.08 elo-nazionali-0.25 campionati elo-club emivita-180 emivita-540 tutto nazionali-prima nazionali-emivita-548 nazionali-emivita-730 nazionali-emivita-1095"
         required: false
         default: ""
 

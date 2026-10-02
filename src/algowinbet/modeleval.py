@@ -40,6 +40,13 @@ VARIANTS: dict[str, dict] = {
     "emivita-180": {"xi_half_life_days": 180.0},
     "emivita-540": {"xi_half_life_days": 540.0},
     "tutto": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0, "club_elo_per_100": 0.10},
+    # national teams, 2026-10-02: the configuration before the importance tables (reference), then the national half-life
+    # (base = 365 days, the clubs' one)
+    "nazionali-prima": {"nation_k": {"world_cup": 60.0, "continental": 50.0, "qualification": 40.0, "other": 30.0,
+                                     "friendly": 20.0}, "nation_importance": None, "nation_half_life_days": None},
+    "nazionali-emivita-548": {"nation_half_life_days": 548.0},
+    "nazionali-emivita-730": {"nation_half_life_days": 730.0},
+    "nazionali-emivita-1095": {"nation_half_life_days": 1095.0},
 }
 
 

@@ -93,25 +93,33 @@ def club_timeline(results, names: TeamNames | None = None) -> EloTimeline:
 
 
 # ------------------------------------------------------------------------ national teams
-def tournament_k(name: str) -> float:
-    """World Football Elo weights: World Cup 60, continental finals 50, qualifiers and major tournaments 40, other
-    tournaments 30, friendlies 20."""
-    t = name.lower()
-    if "qualification" in t:
-        return 40.0
-    if t == "fifa world cup":
-        return 60.0
-    if t in ("uefa euro", "copa américa", "copa america", "african cup of nations", "afc asian cup", "gold cup",
-             "confederations cup", "ofc nations cup"):
-        return 50.0
-    if "nations league" in t:
-        return 40.0
-    if t == "friendly":
-        return 20.0
-    return 30.0
+# K per tournament class (user's table, 2026-10-02): World Cup 65, continental finals and Nations League 60, qualifiers 45,
+# other tournaments 20, friendlies 10
+NATION_K = {"world_cup": 65.0, "continental": 60.0, "qualification": 45.0, "other": 20.0, "friendly": 10.0}
+CONTINENTAL = ("uefa euro", "copa américa", "copa america", "african cup of nations", "afc asian cup", "gold cup",
+               "confederations cup", "oceania nations cup", "ofc nations cup")
+FRIENDLY = ("friendly", "fifa series", "concacaf series")  # the two "series" are friendlies arranged in the FIFA windows
 
 
-def parse_international(body: bytes, names: TeamNames | None = None) -> list[EloMatch]:
+def tournament_kind(name: str) -> str:
+    """world_cup | continental (finals and every Nations League) | qualification | friendly | other."""
+    t = name.strip().lower()
+    if "qualification" in t or "qualif" in t:
+        return "qualification"
+    if t == "fifa world cup" or t == "world cup":
+        return "world_cup"
+    if t in CONTINENTAL or "nations league" in t:
+        return "continental"
+    if t in FRIENDLY or "friendl" in t:
+        return "friendly"
+    return "other"
+
+
+def tournament_k(name: str, table: dict[str, float] | None = None) -> float:
+    return (table or NATION_K)[tournament_kind(name)]
+
+
+def parse_international(body: bytes, names: TeamNames | None = None, k: dict[str, float] | None = None) -> list[EloMatch]:
     names = names or TeamNames()
     out = []
     for row in csv.DictReader(io.StringIO(body.decode("utf-8-sig", errors="replace"))):
@@ -122,7 +130,7 @@ def parse_international(body: bytes, names: TeamNames | None = None) -> list[Elo
             continue
         neutral = str(row.get("neutral", "")).strip().upper() == "TRUE"
         out.append(EloMatch(day + timedelta(days=1), names.canon(row["home_team"]), names.canon(row["away_team"]), hg, ag,
-                            tournament_k(row.get("tournament", "")), 0.0 if neutral else 100.0))
+                            tournament_k(row.get("tournament", ""), k), 0.0 if neutral else 100.0))
     return out
 
 
@@ -143,9 +151,11 @@ def international_results(body: bytes, names: TeamNames | None = None) -> list:
         except (KeyError, ValueError):
             continue
         h, a = names.canon(row["home_team"]), names.canon(row["away_team"])
-        comp = INTL_FRIENDLY if row.get("tournament", "").strip().lower() == "friendly" else INTL_OFFICIAL
+        kind = tournament_kind(row.get("tournament", ""))
+        comp = INTL_FRIENDLY if kind == "friendly" else INTL_OFFICIAL
         out.append(MatchResult(fixture_id=f"intl:{row['date']}:{h}:{a}", competition=comp, home=h, away=a, kickoff=day,
-                               home_goals=hg, away_goals=ag, neutral=str(row.get("neutral", "")).strip().upper() == "TRUE"))
+                               home_goals=hg, away_goals=ag, neutral=str(row.get("neutral", "")).strip().upper() == "TRUE",
+                               kind=kind))
     return out
 
 
@@ -164,8 +174,24 @@ def national_history(intl: list, ours: list, nations: set[str], since: datetime,
     return out
 
 
-def national_timeline(body: bytes | None, names: TeamNames | None = None) -> EloTimeline:
-    return EloTimeline(parse_international(body, names) if body else [])
+def national_timeline(body: bytes | None, names: TeamNames | None = None, k: dict[str, float] | None = None) -> EloTimeline:
+    return EloTimeline(parse_international(body, names, k) if body else [])
+
+
+def nation_weights(rows: list, importance: dict[str, float] | None, half_life_days: float | None) -> list:
+    """National-team matches of a fit with their importance (by tournament class) and the national half-life. Rows are
+    international results (kind set) or our own national competitions; club rows are returned unchanged."""
+    if not importance and not half_life_days:
+        return rows
+    from .meta import group_of
+    out = []
+    for r in rows:
+        kind = r.kind or (tournament_kind(r.competition) if group_of(r.competition) == "nazionali" else None)
+        if kind is None:
+            out.append(r)
+            continue
+        out.append(r.model_copy(update={"weight": (importance or {}).get(kind, 1.0), "half_life_days": half_life_days}))
+    return out
 
 
 # ------------------------------------------------------------------------ prior for the goal model

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from .calibration import CalibrationSet
 from .meta import MetaSet
-from .elo import EloTimeline, club_timeline, elo_prior, national_timeline
+from .elo import EloTimeline, club_timeline, elo_prior, nation_weights, national_timeline
 from .config import Config
 from .domain import Fixture, InformationEvent, Opportunity, OpportunityStatus, Player, SelectionRef
 from .explain import explain_slip
@@ -93,7 +93,8 @@ class Engine:
             key = ("*", cutoff)
             if key not in self._models:
                 hist = history_at(self.provider, None, cutoff, m.history_seasons)
-                self._models[key] = self._fit_hist(hist + self.national_extra(hist, cutoff), cutoff, comp_mu=True)
+                rows = nation_weights(hist + self.national_extra(hist, cutoff), m.nation_importance, m.nation_half_life_days)
+                self._models[key] = self._fit_hist(rows, cutoff, comp_mu=True)
             pooled = self._models[key]
             if pooled is None or competition not in pooled[0].mu_comp:
                 return None  # no history for this competition at all: no model, no bet
@@ -116,7 +117,7 @@ class Engine:
                 from .names import TeamNames
                 fn = getattr(self.provider, "international_results", None)
                 body = fn() if fn else None
-                nations = national_timeline(body, TeamNames.load(m.aliases_path)) if body else None
+                nations = national_timeline(body, TeamNames.load(m.aliases_path), m.nation_k) if body else None
             self._elo = (clubs, nations)
         return self._elo
 

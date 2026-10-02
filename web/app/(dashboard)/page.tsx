@@ -54,6 +54,7 @@ const PROFILE_HINT: Record<string, string> = {
 };
 
 type Cand = OptOpp & OppRow;
+type ProfileResult = OptResult<Cand> & { sameAs?: string }; // sameAs: its only slips are those of an earlier profile
 type Knobs = { maxEvents: number; minEvents: number; qMin: number; qMax: number; legProb: number; evMin: number; riskMin: number; markets: string[] };
 
 // The slips of every profile for one set of filters. Cached per run + filters (switching profile tab, going back, or a second
@@ -69,17 +70,33 @@ const homeSlips = unstable_cache(
       }))
       .filter((o) => !picked.size || picked.has(marketGroup(o.sel_key)));
     const names = settings.optimizer.profiles ? Object.keys(settings.optimizer.profiles) : ["equilibrata"];
-    const out: Record<string, OptResult<Cand>> = {};
-    for (const name of names) {
-      out[name] = optimize(legs, {
+    // the published profile picks first; every other profile shows its best slip that differs from the ones already shown,
+    // so the three cards are never the same slip three times
+    const main = names.includes(settings.optimizer.profile ?? "") ? (settings.optimizer.profile as string) : names[0];
+    const order = [main, ...names.filter((n) => n !== main)];
+    const slipKey = (sl: { legs: Cand[] }) => sl.legs.map((l) => `${l.fixture_id}|${l.sel_key}`).sort().join(" + ");
+    const shown = new Map<string, string>(); // slip key -> profile showing it
+    const out: Record<string, ProfileResult> = {};
+    for (const name of order) {
+      const r: ProfileResult = optimize(legs, {
         ...settings,
         optimizer: withProfile({
           ...settings.optimizer, max_legs: k.maxEvents, min_legs: k.minEvents, odds_min: k.qMin || settings.optimizer.odds_min,
           odds_max: k.qMax || settings.optimizer.odds_max, min_leg_probability: k.legProb, min_slip_ev: k.evMin, min_probability: k.riskMin,
         }, name),
       });
+      const top = r.slips[0];
+      r.slips = r.slips.filter((sl) => !shown.has(slipKey(sl)));
+      if (!r.slips.length && top) {
+        r.sameAs = shown.get(slipKey(top));
+        r.noBet = true;
+        const other = r.sameAs ?? "";
+        r.reasons = [`Con questi filtri la migliore schedina di questo profilo è la stessa di «${PROFILE_LABEL[other] ?? other}»: nessuna alternativa diversa.`];
+      }
+      if (r.slips[0]) shown.set(slipKey(r.slips[0]), name);
+      out[name] = r;
     }
-    return out;
+    return Object.fromEntries(names.map((n) => [n, out[n]]));
   },
   ["homeSlips"],
   { revalidate: 6 * 3600 },
@@ -133,7 +150,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
     new Date(isoTime).getTime() <= now + hours * 3600_000 && (!picked.size || picked.has(comp));
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
-  const results: Record<string, OptResult<Cand>> = computed ?? {
+  const results: Record<string, ProfileResult> = computed ?? {
     equilibrata: { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0, evaluated: 0 },
   };
   const profileNames = Object.keys(results);
@@ -392,6 +409,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                         <span><small>EV</small><b className={`num ${s0.ev >= 0 ? "pos" : "neg"}`}>{signed(s0.ev)}</b></span>
                         <span><small>Eventi</small><b className="num">{s0.legs.length}</b></span>
                       </span>
+                    ) : r.sameAs ? (
+                      <span className="profile-stats"><span><small>Esito</small><b>Stessa di «{PROFILE_LABEL[r.sameAs] ?? r.sameAs}»</b></span></span>
                     ) : (
                       <span className="profile-stats"><span><small>Esito</small><b>No bet</b></span></span>
                     )}

@@ -24,10 +24,18 @@ class ModelCfg(BaseModel):
     # national teams: years of international results (every friendly and competitive match, github martj42) added to the
     # history of the national teams our competitions involve (0 = only our own results)
     national_history_years: float = 4.0  # model-eval 2026-10-01, 190 internationals: 1X2 LL 0.898 -> 0.842, O2.5 0.717 -> 0.664
+    # national teams (2026-10-02, user's tables): Elo K per tournament class, and in the goal model each national match
+    # weighs importance x 0.5^(age / nation_half_life_days) (None = the clubs' xi_half_life_days)
+    nation_k: dict[str, float] = Field(default_factory=lambda: {
+        "world_cup": 65.0, "continental": 60.0, "qualification": 45.0, "other": 20.0, "friendly": 10.0})
+    nation_importance: dict[str, float] | None = Field(default_factory=lambda: {
+        "world_cup": 1.0, "continental": 0.95, "qualification": 0.7, "other": 0.25, "friendly": 0.1})
+    nation_half_life_days: float | None = None
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
-    version: str = "dc-poisson-v3"  # v2: national-team Elo prior; v3: + 4 years of international results
+    version: str = "dc-poisson-v4"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
+    # matches weighted by tournament importance (Elo K and goal model)
 
 
 class EnsembleCfg(BaseModel):
