@@ -1,5 +1,6 @@
-import { BookOpenCheck, Scale, Target, TrendingDown, Wallet } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
+import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
 import { Empty } from "@/app/_components/ui";
 
@@ -8,8 +9,18 @@ export const metadata = { title: "Registro" };
 
 const RESULT_LABEL: Record<string, string> = { won: "Vinta", lost: "Persa", void: "Rimborsata", "non valutabile": "Non valutabile" };
 const RESULT_CLASS: Record<string, string> = { won: "status-STRONG", lost: "status-AVOID", void: "status-WATCH", "non valutabile": "status-WATCH" };
-// pass criterion proposed for paper trading: to be confirmed together before anything is played for real
-const CRITERION = { n: 300, ece: 0.03 };
+const STATE: Record<State, { label: string; cls: string; icon: typeof CheckCircle2 }> = {
+  pass: { label: "Superato", cls: "status-STRONG", icon: CheckCircle2 },
+  fail: { label: "Fallito", cls: "status-AVOID", icon: XCircle },
+  alarm: { label: "Allarme", cls: "status-AVOID", icon: AlertTriangle },
+  open: { label: "In corso", cls: "status-WATCH", icon: Clock },
+};
+const VERDICT: Record<State, string> = {
+  pass: "Criterio superato: il metodo ha mostrato un vantaggio misurabile sui prezzi di chiusura.",
+  fail: "Criterio fallito: dopo 300 giocate il valore alla chiusura è negativo oltre il caso. Il vantaggio non c\u2019è: si cambia strategia e si riparte da zero.",
+  alarm: "Allarme sul rendimento.",
+  open: "In prova: nessuna giocata reale finché il criterio non è superato.",
+};
 
 type Stats = { n: number; open: number; hits: number; roi: number | null; clv: number | null; nClv: number; evClose: number | null; nClose: number; maxDd: number };
 
@@ -35,22 +46,6 @@ function stats(legs: PaperLeg[]): Stats {
     nClose: evc.length,
     maxDd,
   };
-}
-
-// predicted probability against how often it happened, in 10-point bins (settled selections with a winner or a loser)
-function calibration(legs: PaperLeg[]) {
-  const bins = Array.from({ length: 10 }, () => ({ p: 0, y: 0, n: 0 }));
-  for (const l of legs) {
-    if (l.result !== "won" && l.result !== "lost") continue;
-    const b = bins[Math.min(9, Math.floor(l.p * 10))];
-    b.p += l.p;
-    b.y += l.result === "won" ? 1 : 0;
-    b.n += 1;
-  }
-  const rows = bins.map((b, i) => ({ lo: i / 10, n: b.n, p: b.n ? b.p / b.n : null, y: b.n ? b.y / b.n : null })).filter((r) => r.n > 0);
-  const tot = rows.reduce((s, r) => s + r.n, 0);
-  const ece = tot ? rows.reduce((s, r) => s + Math.abs((r.p ?? 0) - (r.y ?? 0)) * r.n, 0) / tot : null;
-  return { rows, ece };
 }
 
 function StatRow({ label, s }: { label: string; s: Stats }) {
@@ -83,15 +78,12 @@ export default async function Registro() {
   const value = reg.legs.filter((l) => l.status === "STRONG" || l.status === "CANDIDATE");
   const fair = reg.legs.filter((l) => l.status === "FAIR");
   const sv = stats(value);
-  const cal = calibration(reg.legs);
+  const crit = evaluate(reg.legs);
+  const cal = crit.bands;
+  const versions = byVersion(reg.legs);
+  const V = STATE[crit.verdict];
   const settledSlips = reg.slips.filter((s) => s.result && s.result !== "non valutabile");
   const slipPnl = settledSlips.reduce((a, s) => a + (s.payout ?? 0) - 1, 0);
-  const checks = [
-    { label: `Almeno ${CRITERION.n} giocate di valore chiuse`, ok: sv.n >= CRITERION.n, now: `${sv.n}/${CRITERION.n}` },
-    { label: "CLV medio sulla chiusura Sisal positivo", ok: sv.clv != null && sv.clv > 0, now: signed(sv.clv) },
-    { label: "EV medio alla chiusura Pinnacle positivo", ok: sv.evClose != null && sv.evClose > 0, now: signed(sv.evClose) },
-    { label: `Scarto di calibrazione medio ≤ ${pct(CRITERION.ece)}`, ok: cal.ece != null && cal.ece <= CRITERION.ece, now: cal.ece == null ? "–" : pct(cal.ece, 1) },
-  ];
 
   return (
     <>
@@ -128,39 +120,84 @@ export default async function Registro() {
         </div>
       </div>
 
+      <section className="card" aria-labelledby="crit-title">
+        <div className="card-head">
+          <h2 id="crit-title">Criterio di passaggio</h2>
+          <span className={`status ${V.cls}`}><V.icon size={14} aria-hidden="true" /> {V.label}</span>
+        </div>
+        <p className="card-pad" style={{ paddingBottom: 0 }}>
+          {VERDICT[crit.verdict]}
+          {crit.missing > 0 && (
+            <span className="muted">
+              {" "}Mancano {crit.missing} giocate di valore chiuse
+              {crit.weeksLeft != null ? `: al ritmo attuale (${crit.perWeek?.toFixed(1)} a settimana) circa ${crit.weeksLeft} settimane.` : "."}
+            </span>
+          )}
+        </p>
+        <ul className="crit-list">
+          {crit.checks.map((c) => {
+            const S = STATE[c.state];
+            return (
+              <li key={c.key}>
+                <S.icon size={18} aria-hidden="true" className={`crit-${c.state}`} />
+                <div>
+                  <div className="crit-head"><b>{c.label}</b><span className="num">{c.now}</span></div>
+                  <div className="note">{c.detail}</div>
+                </div>
+                <span className={`status ${S.cls}`}>{S.label}</span>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="note card-pad">
+          Superato solo quando i primi tre punti sono superati insieme e il rendimento non è in allarme. Contano solo le proposte registrate alla prima
+          comparsa: nessuna scelta a posteriori. Gli intervalli trattano le giocate come indipendenti; selezioni della stessa partita non lo sono, quindi
+          sono un po&apos; ottimisti.
+        </p>
+      </section>
+
       <div className="split">
         <section className="card">
-          <div className="card-head"><h2>Criterio di passaggio</h2><span className="count">proposta, da confermare</span></div>
+          <div className="card-head"><h2>Per versione del modello</h2><span className="count">giocate di valore</span></div>
           <div className="table-wrap">
             <table className="compact">
+              <thead><tr><th>Versione</th><th className="num">Chiuse</th><th className="num">EV chiusura Pinnacle</th><th className="num">CLV Sisal</th><th className="num">Rendimento</th></tr></thead>
               <tbody>
-                {checks.map((c) => (
-                  <tr key={c.label}>
-                    <td>{c.label}</td>
-                    <td className="num">{c.now}</td>
-                    <td><span className={`status ${c.ok ? "status-STRONG" : "status-WATCH"}`}>{c.ok ? "Raggiunto" : "Non ancora"}</span></td>
+                {versions.map((r) => (
+                  <tr key={r.version}>
+                    <td>{r.version}</td>
+                    <td className="num">{r.n}</td>
+                    <td className="num">{signed(r.ev.mean)}{r.ev.lo != null && <span className="muted"> ({signed(r.ev.lo)} / {signed(r.ev.hi)})</span>}</td>
+                    <td className="num">{signed(r.clv.mean)}</td>
+                    <td className="num">{signed(r.roi.mean)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="note card-pad">Finché i quattro punti non sono raggiunti insieme, il tool resta in prova.</p>
+          <p className="note card-pad">Tra parentesi l&apos;intervallo al 95%. Ogni miglioramento del modello cambia la versione: i risultati restano separati.</p>
         </section>
         <section className="card">
           <div className="card-head"><h2>Calibrazione reale</h2><span className="count">probabilità prevista contro esito</span></div>
           <div className="table-wrap">
             <table className="compact">
-              <thead><tr><th>Fascia</th><th className="num">Selezioni</th><th className="num">Prevista</th><th className="num">Accaduta</th></tr></thead>
+              <thead><tr><th>Fascia</th><th className="num">Selezioni</th><th className="num">Prevista</th><th className="num">Accaduta</th><th className="num">Errori standard</th></tr></thead>
               <tbody>
                 {cal.rows.map((r) => (
                   <tr key={r.lo}>
                     <td>{pct(r.lo)}–{pct(r.lo + 0.1)}</td><td className="num">{r.n}</td><td className="num">{pct(r.p, 1)}</td><td className="num">{pct(r.y, 1)}</td>
+                    <td className={`num ${r.n < CRITERION.minBand ? "muted" : Math.abs(r.z) > cal.zMax ? "neg" : ""}`}>
+                      {r.n < CRITERION.minBand ? "poche" : `${r.z >= 0 ? "+" : "−"}${Math.abs(r.z).toFixed(1)}`}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="note card-pad">Tutte le selezioni registrate (valore ed eque). Con poche selezioni per fascia le differenze sono soprattutto caso.</p>
+          <p className="note card-pad">
+            Tutte le selezioni registrate (valore ed eque). Una fascia è fuori quando dista dalla previsione più di {cal.zMax.toFixed(1)} errori standard:
+            con {cal.tested} fasce controllate, un modello ben calibrato resta dentro 95 volte su 100. Fasce con meno di {CRITERION.minBand} selezioni non contano.
+          </p>
         </section>
       </div>
 

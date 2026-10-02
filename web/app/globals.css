@@ -428,6 +428,13 @@ th.num .th-sort { justify-content: flex-end; }
 
 .refresh { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .refresh .btn { width: 100%; justify-content: center; gap: 6px; }
+.crit-list { list-style: none; margin: 0; padding: 8px 16px; display: flex; flex-direction: column; }
+.crit-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.crit-list li:last-child { border-bottom: 0; }
+.crit-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.crit-pass { color: var(--good); }
+.crit-fail, .crit-alarm { color: var(--bad); }
+.crit-open { color: var(--muted); }
 .profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .profile { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; text-decoration: none; color: inherit; border: 1px solid var(--line); }
 .profile:hover { border-color: var(--line-strong); }

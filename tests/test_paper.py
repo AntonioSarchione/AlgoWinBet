@@ -56,8 +56,9 @@ def test_settlement_uses_the_final_score_and_the_closing_prices():
     assert sis == 1.80 and 0.5 < fair < 0.54
     done = settle(s, SnapshotProvider(s), f.kickoff + timedelta(hours=3))
     assert done["won"] >= 1
-    row = s.db.execute("SELECT result, score, close_odds, close_fair FROM paper_legs WHERE fixture_id=? AND sel_key=?", (fid, key)).fetchone()
+    row = s.db.execute("SELECT result, score, close_odds, close_fair, close_sisal_fair FROM paper_legs WHERE fixture_id=? AND sel_key=?", (fid, key)).fetchone()
     assert row[0] == "won" and row[1] == "2-1" and row[2] == 1.80 and abs(row[3] - fair) < 1e-9
+    assert 0.5 < row[4] < 0.55 and row[4] != row[3]  # Sisal closing without margin, its own estimate
     away = s.db.execute("SELECT result FROM paper_legs WHERE fixture_id=? AND sel_key LIKE 'MATCH_1X2|AWAY%'", (fid,)).fetchone()
     assert away is None or away[0] == "lost"
     # other matches have no result yet: still open

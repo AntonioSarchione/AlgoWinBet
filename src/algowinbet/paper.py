@@ -7,6 +7,7 @@ Nothing here can change a proposal after the fact:
   - after the match the selection is settled from the final score; the closing prices come from the free price history:
       CLV Sisal ..... taken odds / Sisal closing odds - 1 (positive: we took a better price than the closing one)
       EV a chiusura . taken odds x Pinnacle closing fair probability - 1 (the sharpest available estimate of real value)
+      Sisal equa .... Sisal closing probability without margin: the benchmark of the log loss in the pass criterion
 Flat stakes of 1 unit, paper only: no bet is ever placed.
 """
 from __future__ import annotations
@@ -28,7 +29,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS paper_legs(id INTEGER PRIMARY KEY, fixture_id TEXT, sel_key TEXT, competition TEXT, match TEXT,
   kickoff TEXT, market TEXT, status TEXT, odds REAL, bookmaker TEXT, p REAL, p_market REAL, ev REAL, run_id INTEGER,
   created_at TEXT, model_version TEXT, meta_version TEXT, result TEXT, settled_at TEXT, score TEXT, close_odds REAL,
-  close_fair REAL, UNIQUE(fixture_id, sel_key));
+  close_fair REAL, close_sisal_fair REAL, UNIQUE(fixture_id, sel_key));
 CREATE INDEX IF NOT EXISTS ix_paper_open ON paper_legs(result, kickoff);
 CREATE TABLE IF NOT EXISTS paper_slips(id INTEGER PRIMARY KEY, slip_key TEXT UNIQUE, run_id INTEGER, created_at TEXT, legs TEXT,
   total_odds REAL, bonus REAL, joint REAL, ev REAL, ev_lower REAL, first_kickoff TEXT, last_kickoff TEXT, result TEXT,
@@ -41,6 +42,13 @@ def _migrate(store) -> None:
     have = {r[1] for r in store.db.execute("PRAGMA table_info(paper_slips)").fetchall()}
     if "profile" not in have:
         store.db.execute("ALTER TABLE paper_slips ADD COLUMN profile TEXT")
+        store.db.commit()
+    have = {r[1] for r in store.db.execute("PRAGMA table_info(paper_legs)").fetchall()}
+    if "close_sisal_fair" not in have:
+        store.db.execute("ALTER TABLE paper_legs ADD COLUMN close_sisal_fair REAL")
+        rows = store.db.execute("SELECT id, fixture_id, sel_key FROM paper_legs WHERE result IN ('won', 'lost', 'void')").fetchall()
+        for lid, fid, key in rows:  # selections settled before the column existed
+            store.db.execute("UPDATE paper_legs SET close_sisal_fair=? WHERE id=?", (sisal_close_fair(store, fid, _ref(key)), lid))
         store.db.commit()
 
 
@@ -93,6 +101,15 @@ def closing_prices(store, fixture_id: str, ref: SelectionRef) -> tuple[float | N
     return sisal.get(ref.selection), fair
 
 
+def sisal_close_fair(store, fixture_id: str, ref: SelectionRef) -> float | None:
+    """Sisal closing probability of the selection without the margin (all outcomes of the market quoted at the close)."""
+    group = complete_group(ref.market_code)
+    prices = {sel: odds for sel, odds, _ in _closing(store, fixture_id, ref, "sisal")}
+    if not group or not set(group) <= set(prices):
+        return None
+    return devig({s: prices[s] for s in group}).get(ref.selection)
+
+
 def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     """Settles the recorded selections whose match is over, then the slips whose selections are all settled."""
     _migrate(store)
@@ -105,7 +122,7 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
         r = provider.result_of(fid)
         if r is None:
             if t - datetime.fromisoformat(ko) > GIVE_UP:
-                updates.append(("non valutabile", t.isoformat(), None, None, None, lid))
+                updates.append(("non valutabile", t.isoformat(), None, None, None, None, lid))
                 done["non valutabile"] += 1
             continue
         ref = _ref(key)
@@ -117,10 +134,10 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
         except UnsupportedMarket:
             res = "non valutabile"  # half-time markets, first/last goal: the final score does not settle them
         close_odds, close_fair = closing_prices(store, fid, ref)
-        updates.append((res, t.isoformat(), f"{r.home_goals}-{r.away_goals}", close_odds, close_fair, lid))
+        updates.append((res, t.isoformat(), f"{r.home_goals}-{r.away_goals}", close_odds, close_fair, sisal_close_fair(store, fid, ref), lid))
         done[res] += 1
     for u in updates:
-        store.db.execute("UPDATE paper_legs SET result=?, settled_at=?, score=?, close_odds=?, close_fair=? WHERE id=?", u)
+        store.db.execute("UPDATE paper_legs SET result=?, settled_at=?, score=?, close_odds=?, close_fair=?, close_sisal_fair=? WHERE id=?", u)
     store.db.commit()
     done["slips"] = _settle_slips(store, t)
     return done
