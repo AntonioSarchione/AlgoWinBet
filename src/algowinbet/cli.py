@@ -383,16 +383,18 @@ def cmd_results_day(a) -> None:
         res = {r[0]: r for r in store.db.execute(
             "SELECT fixture_id, home, away, home_goals, away_goals, observed_at, competition FROM results WHERE kickoff >= ? AND kickoff < ? AND competition LIKE ?",
             (lo, hi, like)).fetchall()}
-        quotes = {r[0]: r[1] for r in store.db.execute(
-            "SELECT fixture_id, COUNT(*) FROM quotes WHERE fixture_id IN (SELECT fixture_id FROM fixtures WHERE kickoff >= ? AND kickoff < ?) GROUP BY fixture_id",
-            (lo, hi)).fetchall()}
+        quotes: dict[str, str] = {}
+        for fid, book, kind, n in store.db.execute(
+                "SELECT fixture_id, bookmaker, kind, COUNT(*) FROM quotes WHERE fixture_id IN (SELECT fixture_id FROM fixtures WHERE kickoff >= ? AND kickoff < ?) "
+                "GROUP BY fixture_id, bookmaker, kind", (lo, hi)).fetchall():
+            quotes[fid] = (quotes.get(fid, "") + f" {book}/{kind}={n}").strip()
         print(f"{a.day} {a.comp or 'tutte le competizioni'}: {len(fxs)} partite in calendario, {len(res)} risultati salvati")
         seen = set()
         for fid, comp, home, away, ko, status in fxs:
             r = res.get(fid)
             seen.add(fid)
             score = f"{r[3]}-{r[4]} (salvato {r[5][:16]})" if r else "NESSUN RISULTATO"
-            print(f"  {ko[11:16]} {comp:<28} {home} - {away}: {score} · stato {status} · {quotes.get(fid, 0)} quote")
+            print(f"  {ko[11:16]} {comp:<28} {home} - {away}: {score} · stato {status} · quote: {quotes.get(fid, 'nessuna')}")
         for fid, r in res.items():
             if fid not in seen:
                 print(f"  (solo risultato) {r[6]} {r[1]} - {r[2]}: {r[3]}-{r[4]}")
