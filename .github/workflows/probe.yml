@@ -64,7 +64,7 @@ jobs:
           if [ "$SOURCE" = "db" ]; then algowinbet teams --db "$DB"; exit 0; fi
           if [ "$SOURCE" = "apif" ]; then
             if [ "$COMMAND" = "probe" ]; then pa=(); for kv in $PARAMS; do pa+=(--param "$kv"); done; algowinbet apif probe "$ARG" "${pa[@]}" --db "$DB"; exit $?; fi
-            if [ "$COMMAND" = "test" ]; then algowinbet apif test ${ARG:+--league "$ARG"} --db "$DB"; exit $?; fi
+            if [ "$COMMAND" = "test" ]; then algowinbet apif test ${ARG:+--league "$ARG"} --past "$(date -u -d yesterday +%F)" --next "$(date -u -d tomorrow +%F)" --db "$DB"; exit $?; fi
             algowinbet apif status --db "$DB"; exit $?
           fi
           args=("$SOURCE" "$COMMAND")
