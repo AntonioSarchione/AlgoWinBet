@@ -47,6 +47,12 @@ VARIANTS: dict[str, dict] = {
     "nazionali-emivita-548": {"nation_half_life_days": 548.0},
     "nazionali-emivita-730": {"nation_half_life_days": 730.0},
     "nazionali-emivita-1095": {"nation_half_life_days": 1095.0},
+    # which part moves the result: the new Elo K alone, the goal-model importance alone, the old setup with a longer half-life
+    "nazionali-solo-k": {"nation_importance": None},
+    "nazionali-solo-importanza": {"nation_k": {"world_cup": 60.0, "continental": 50.0, "qualification": 40.0, "other": 30.0,
+                                               "friendly": 20.0}},
+    "nazionali-prima-1095": {"nation_k": {"world_cup": 60.0, "continental": 50.0, "qualification": 40.0, "other": 30.0,
+                                          "friendly": 20.0}, "nation_importance": None, "nation_half_life_days": 1095.0},
 }
 
 
