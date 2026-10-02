@@ -40,19 +40,11 @@ VARIANTS: dict[str, dict] = {
     "emivita-180": {"xi_half_life_days": 180.0},
     "emivita-540": {"xi_half_life_days": 540.0},
     "tutto": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0, "club_elo_per_100": 0.10},
-    # national teams, 2026-10-02: the configuration before the importance tables (reference), then the national half-life
-    # (base = 365 days, the clubs' one)
-    "nazionali-prima": {"nation_k": {"world_cup": 60.0, "continental": 50.0, "qualification": 40.0, "other": 30.0,
-                                     "friendly": 20.0}, "nation_importance": None, "nation_half_life_days": None},
-    "nazionali-emivita-548": {"nation_half_life_days": 548.0},
+    # national teams (base since 2026-10-02: Elo K table, no importance, 3-year half-life)
     "nazionali-emivita-730": {"nation_half_life_days": 730.0},
-    "nazionali-emivita-1095": {"nation_half_life_days": 1095.0},
-    # which part moves the result: the new Elo K alone, the goal-model importance alone, the old setup with a longer half-life
-    "nazionali-solo-k": {"nation_importance": None},
-    "nazionali-solo-importanza": {"nation_k": {"world_cup": 60.0, "continental": 50.0, "qualification": 40.0, "other": 30.0,
-                                               "friendly": 20.0}},
-    "nazionali-prima-1095": {"nation_k": {"world_cup": 60.0, "continental": 50.0, "qualification": 40.0, "other": 30.0,
-                                          "friendly": 20.0}, "nation_importance": None, "nation_half_life_days": 1095.0},
+    "nazionali-emivita-1460": {"nation_half_life_days": 1460.0},
+    "nazionali-importanza": {"nation_importance": {"world_cup": 1.0, "continental": 0.95, "qualification": 0.7, "other": 0.25,
+                                                   "friendly": 0.1}},
 }
 
 

@@ -24,18 +24,19 @@ class ModelCfg(BaseModel):
     # national teams: years of international results (every friendly and competitive match, github martj42) added to the
     # history of the national teams our competitions involve (0 = only our own results)
     national_history_years: float = 4.0  # model-eval 2026-10-01, 190 internationals: 1X2 LL 0.898 -> 0.842, O2.5 0.717 -> 0.664
-    # national teams (2026-10-02, user's tables): Elo K per tournament class, and in the goal model each national match
-    # weighs importance x 0.5^(age / nation_half_life_days) (None = the clubs' xi_half_life_days)
+    # national teams (2026-10-02): Elo K per tournament class (user's table; model-eval: same scores as the old one); in the
+    # goal model each national match weighs importance x 0.5^(age / nation_half_life_days). model-eval 2026-10-02, 190
+    # internationals: importance off (None) and a 3-year half-life is best on 1X2 / O2.5 / GG (0.8370 / 0.6600 / 0.6766, was
+    # 0.8424 / 0.6635 / 0.6779); importance on (1 / 0.95 / 0.7 / 0.25 / 0.1) was worse on all three (0.8452 / 0.6684 / 0.6845)
     nation_k: dict[str, float] = Field(default_factory=lambda: {
         "world_cup": 65.0, "continental": 60.0, "qualification": 45.0, "other": 20.0, "friendly": 10.0})
-    nation_importance: dict[str, float] | None = Field(default_factory=lambda: {
-        "world_cup": 1.0, "continental": 0.95, "qualification": 0.7, "other": 0.25, "friendly": 0.1})
-    nation_half_life_days: float | None = None
+    nation_importance: dict[str, float] | None = None
+    nation_half_life_days: float | None = 1095.0
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
-    version: str = "dc-poisson-v4"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
-    # matches weighted by tournament importance (Elo K and goal model)
+    version: str = "dc-poisson-v5"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
+    # matches weighted by tournament importance (Elo K and goal model); v5: Elo K table, national half-life 3 years
 
 
 class EnsembleCfg(BaseModel):
