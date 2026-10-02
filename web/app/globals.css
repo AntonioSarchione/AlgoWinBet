@@ -34,8 +34,12 @@
   --font-sans: var(--font-body), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: var(--font-display-face, var(--font-body)), system-ui, sans-serif;
   --font-mono: var(--font-figures), var(--font-body), system-ui, sans-serif;
+  --pitch: #0c1f17;
+  --pitch-line: rgba(255, 255, 255, 0.16);
 }
 :root[data-theme="light"] {
+  --pitch: #e6f1ea;
+  --pitch-line: rgba(20, 70, 40, 0.24);
   color-scheme: light;
   --bg: #f4f7f8;
   --bg-2: #eaf0f2;
@@ -435,6 +439,42 @@ th.num .th-sort { justify-content: flex-end; }
 .crit-pass { color: var(--good); }
 .crit-fail, .crit-alarm { color: var(--bad); }
 .crit-open { color: var(--muted); }
+/* lineups drawn on a pitch: vertical on phones (home on top), horizontal on wide screens (home on the left) */
+.lineups { display: flex; flex-direction: column; gap: 12px; }
+.pitch-heads { display: grid; gap: 12px; }
+.pitch-heads > :nth-child(2) { display: none; } /* phones: the away team is named below the pitch, next to its half */
+.pitch-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.pitch-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.pitch-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.pitch-dot-home { background: var(--s1); }
+.pitch-dot-away { background: var(--s2); }
+.pitch { position: relative; width: 100%; max-width: 560px; margin: 0 auto; aspect-ratio: 68 / 105; background: var(--pitch); border-radius: 14px; overflow: hidden; contain: layout paint; }
+.pitch-lines { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: var(--pitch-line); stroke-width: 0.35; vector-effect: non-scaling-stroke; }
+.pitch-lines * { vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
+.pitch-h { display: none; }
+.pitch-team { list-style: none; margin: 0; padding: 0; }
+.pitch-team li { position: absolute; left: calc(var(--x) * 1%); top: calc(var(--y) * 1%); transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 84px; }
+.shirt { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.pitch-home .shirt { background: var(--s1); }
+.pitch-away .shirt { background: var(--s2); }
+.pname { max-width: 100%; padding: 1px 6px; border-radius: 6px; background: var(--card); color: var(--text); font-size: 12px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bench { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.bench-team { display: flex; align-items: center; gap: 8px; }
+.bench-xi { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+@media (min-width: 900px) {
+  .pitch { max-width: none; aspect-ratio: 105 / 68; }
+  .pitch-v { display: none; }
+  .pitch-h { display: block; }
+  .pitch-team li { left: calc(var(--y) * 1%); top: calc((100 - var(--x)) * 1%); }
+  .pitch-heads { grid-template-columns: 1fr 1fr; gap: 24px; }
+  .pitch-heads > :nth-child(2) { display: flex; flex-direction: row-reverse; } /* away team on the right, like its half */
+  .pitch-foot { display: none; }
+}
+@media (max-width: 480px) {
+  .pitch-team li { width: 64px; }
+  .pname { font-size: 11px; padding: 1px 4px; }
+  .shirt { width: 24px; height: 24px; font-size: 11px; }
+}
 .profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .profile { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; text-decoration: none; color: inherit; border: 1px solid var(--line); }
 .profile:hover { border-color: var(--line-strong); }

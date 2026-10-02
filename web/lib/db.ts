@@ -97,7 +97,7 @@ export type Leg = { match: string; competition: string; kickoff: string; market:
 export type Usage = { source: string; period: string; used: number };
 export type ModelMarket = { g: string; l: string; p: number };
 export type QuotePoint = { selection: string; bookmaker: string; odds: number; observed_at: string };
-export type LineupRow = { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string };
+export type LineupRow = { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string; detail: string | null };
 export type ResultRow = { fixture_id: string; kickoff: string; competition: string; home: string; away: string; home_goals: number; away_goals: number };
 
 // Rows become plain objects keyed by the column names the server reports (never the driver's Row objects, whose named
@@ -255,9 +255,12 @@ async function fixtureDetailUncached(id: string) {
       id,
     ]).then(withMatch),
     all<{ n: number }>("SELECT COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND bookmaker LIKE 'sisal%'", [id]),
-    all<LineupRow>(
-      "SELECT team, status, formation, starters, bench, observed_at FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC",
-      [id],
+    // detail (shirt numbers, pitch positions) arrives with the API-Football collector; older databases lack the column
+    all<LineupRow>("SELECT team, status, formation, starters, bench, observed_at, detail FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC", [id]).catch(
+      (e) =>
+        /no such column/i.test(String(e))
+          ? all<LineupRow>("SELECT team, status, formation, starters, bench, observed_at, NULL AS detail FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC", [id])
+          : Promise.reject(e),
     ),
     teamForm(fx.home, fx.kickoff),
     teamForm(fx.away, fx.kickoff),
@@ -268,7 +271,8 @@ async function fixtureDetailUncached(id: string) {
     ),
   ]);
   const latest = new Map<string, LineupRow>();
-  for (const l of lineups) if (!latest.has(l.team)) latest.set(l.team, l);
+  // newest per team, but a lineup with numbers and positions (API-Football) wins over one without
+  for (const l of lineups) if (!latest.has(l.team) || (!latest.get(l.team)!.detail && l.detail)) latest.set(l.team, l);
   // lineups store player ids: resolve names and roles from the players table
   const ids = [...latest.values()].flatMap((l) => [...parseJSON<string[]>(l.starters, []), ...parseJSON<string[]>(l.bench, [])]);
   const players: Record<string, { name: string; position: string }> = {}; // plain object: the data cache stores JSON

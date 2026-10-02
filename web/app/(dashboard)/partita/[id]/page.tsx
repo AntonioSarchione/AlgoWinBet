@@ -6,6 +6,7 @@ import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel,
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
+import { Lineups } from "@/app/_components/Lineups";
 
 export const dynamic = "force-dynamic";
 
@@ -355,49 +356,6 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
   );
 }
 
-const ROLE: Record<string, string> = { GK: "P", DEF: "D", MID: "C", FWD: "A" };
-
-function Lineups({ lineups, players, home, away }: { lineups: { team: string; status: string; formation: string | null; starters: string; bench: string; observed_at: string }[]; players: Record<string, { name: string; position: string }>; home: string; away: string }) {
-  if (!lineups.length) {
-    return (
-      <Empty icon={Shirt} title="Formazioni non ancora disponibili">
-        Le formazioni ufficiali escono circa un&apos;ora prima del calcio d&apos;inizio e vengono raccolte automaticamente.
-      </Empty>
-    );
-  }
-  const name = (id: string) => players[id]?.name ?? id;
-  const role = (id: string) => ROLE[players[id]?.position ?? ""] ?? "";
-  return (
-    <div className="split" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-      {[home, away].map((team) => {
-        const l = lineups.find((x) => x.team === team);
-        return (
-          <div key={team} className="card" style={{ boxShadow: "none" }}>
-            <div className="card-head">
-              <h3><TeamBadge name={team} /> {team}</h3>
-              {l && <span className={`status ${l.status === "confirmed" ? "status-STRONG" : "status-WATCH"}`}>{l.status === "confirmed" ? "Ufficiale" : "Probabile"}{l.formation ? ` · ${l.formation}` : ""}</span>}
-            </div>
-            {l ? (
-              <div className="card-pad">
-                <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 4 }}>
-                  {parseJSON<string[]>(l.starters, []).map((p) => (
-                    <li key={p}><span className="muted mono" style={{ display: "inline-block", width: 18 }}>{role(p)}</span> {name(p)}</li>
-                  ))}
-                </ol>
-                {parseJSON<string[]>(l.bench, []).length > 0 && (
-                  <p className="note" style={{ marginTop: 12 }}>Panchina: {parseJSON<string[]>(l.bench, []).map(name).join(", ")}</p>
-                )}
-                <p className="note">Rilevata {dayTime(l.observed_at)}</p>
-              </div>
-            ) : (
-              <Empty icon={Shirt} title="Non ancora pubblicata" />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function outcome(r: ResultRow, team: string) {
   const gf = r.home === team ? r.home_goals : r.away_goals;
