@@ -196,7 +196,9 @@ class OddsCollector:
                     continue
                 env = self.client.get("/historical-odds", {"fixtureId": ext_id, "bookmakers": ",".join(books)})
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
-                st.add("quotes", self.store.save_quotes(HIST_SOURCE, m.history(env["data"], fx), raw_id))
+                # thinned like the pre-match path (opening, checkpoints, closing line): a full path is 30-40 thousand rows per
+                # match and saving it took minutes on Turso, enough to push the whole tick past the job time limit
+                st.add("quotes", self.store.save_quotes(HIST_SOURCE, thin_history(m.history(env["data"], fx), fx.kickoff, t), raw_id))
                 done += 1
         self._run(st, work)
         return st
