@@ -93,3 +93,23 @@ def test_meta_is_saved_loaded_and_used_by_the_live_analysis():
                 assert abs(o.p_final - o.p_market / tot) < 1e-6
     other = [o for o in res.opportunities if o.ref.market_code not in ("MATCH_1X2",)]
     assert all(o.calibration_version != meta.version for o in other)  # families without a fit keep the adaptive blend
+
+
+def test_beta_and_isotonic_calibration_correct_an_overconfident_model():
+    from algowinbet.meta import fit_calibrator
+    rng = np.random.default_rng(3)
+    true = rng.uniform(0.2, 0.8, 6000)
+    y = (rng.uniform(size=true.size) < true).astype(int)
+    shown = 1 / (1 + np.exp(-2.0 * np.log(true / (1 - true))))  # the model doubles every log-odds: overconfident
+    pm = np.column_stack([shown, 1 - shown])
+    yk = 1 - y  # outcome index: 0 = the event happened
+    for method in ("beta", "isotonic", "platt"):
+        cal = fit_calibrator(pm, yk, method)
+        assert cal.kind == "calib" and cal.method == method
+        q = cal.apply([0.9, 0.1])
+        assert abs(sum(q) - 1) < 1e-9 and q[0] < 0.85, (method, q)  # pulled back toward the truth (~0.75)
+    three = fit_calibrator(np.array([[0.5, 0.3, 0.2]] * 50 + [[0.2, 0.3, 0.5]] * 50), np.array([0] * 30 + [1] * 20 + [2] * 50), "isotonic")
+    out = three.apply([0.5, 0.3, 0.2])
+    assert len(out) == 3 and abs(sum(out) - 1) < 1e-9
+    restored = Pool(**__import__("dataclasses").asdict(cal))
+    assert restored.apply([0.9, 0.1]) == cal.apply([0.9, 0.1])  # stored on Turso as JSON and read back the same

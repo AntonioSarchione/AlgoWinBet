@@ -17,6 +17,7 @@ const SERIES = [
   { key: "close", label: "Quota di chiusura", color: "var(--s2)", shape: "triangle" },
 ] as const;
 
+const CALIB_LABEL = { platt: "Platt", beta: "Beta", isotonic: "Isotonica" } as const;
 const f4 = (x: number | undefined | null) => (x == null ? "–" : x.toFixed(4));
 const gap = (a?: number, b?: number) => (a == null || b == null ? null : a - b);
 
@@ -188,6 +189,34 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
           calibrazione corregge il modello da solo.
         </p>
       </section>
+
+      {rep.calib_methods && Object.keys(rep.calib_methods).length > 0 && (
+        <section className="card">
+          <div className="card-head"><h2>Calibrazione senza quote</h2><span className="count">log loss fuori campione · più basso = meglio</span></div>
+          <div className="table-wrap">
+            <table className="compact">
+              <thead>
+                <tr><th>Mercato</th><th className="num">Partite</th><th className="num">Platt</th><th className="num">Beta</th><th className="num">Isotonica</th><th>In uso</th></tr>
+              </thead>
+              <tbody>
+                {Object.entries(rep.calib_methods).map(([fm, c]) => (
+                  <tr key={fm}>
+                    <td>{fm}</td><td className="num">{c.n}</td>
+                    {(["platt", "beta", "isotonic"] as const).map((m) => (
+                      <td key={m} className={`num ${c.chosen === m ? "pos" : ""}`}>{f4(c[m])}</td>
+                    ))}
+                    <td>{CALIB_LABEL[c.chosen]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="note card-pad">
+            Partite senza quota Pinnacle (coppe, Gol/NoGol, nazionali): il modello va corretto da solo. Ogni settimana i tre metodi sono adattati solo sulle
+            settimane precedenti; l&apos;analisi live usa quello che sbaglia meno.
+          </p>
+        </section>
+      )}
 
       {metas.length > 0 && (
         <section className="card">

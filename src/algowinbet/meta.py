@@ -10,7 +10,11 @@ For a market family (1X2, Over/Under 2.5, Gol/NoGol) the final probabilities are
            the lean learned against results (draws +12% on the leagues) did not survive the out-of-sample value test
            (negative CLV on 277 bets), so the pool with the market keeps c = 0.
 
-Without a market price the same form with b = 0 calibrates the model alone. Parameters are fitted by maximum likelihood
+Without a market price the model is calibrated alone, by the method that scores best out of sample on the replay:
+  platt ..... the same form with b = 0 (temperature + lean per outcome)
+  beta ...... per outcome, logit q = a log p - b log(1 - p) + c (Kull et al. 2017), then normalised
+  isotonic .. per outcome, a monotone step function of p (pool-adjacent-violators), then normalised
+Parameters are fitted by maximum likelihood
 on the walk-forward replay of finished matches (quality.py), with a weak pull toward a prior (mostly market), per group
 (leagues, cups, national teams) when that group has enough matches, else on all of them. The fit is stored on Turso and
 read by the live analysis; quality.py also refits it week by week on past matches only, to score it honestly.
@@ -25,6 +29,7 @@ from datetime import datetime, timezone
 import numpy as np
 from scipy.optimize import minimize
 
+from .calibration import IsotonicCalibrator
 from .domain import SelectionRef
 
 FAMILY_SELECTIONS = {
@@ -39,6 +44,7 @@ MIN_N = 300  # matches needed to fit a group of its own (else the fit on every g
 PRIOR = {"pool": (0.25, 0.75), "calib": (1.0, 0.0)}  # (a, b) the fit is pulled toward: mostly market / the model as is
 STRENGTH = 4.0  # prior weight, in matches: negligible with hundreds of matches, decisive with a handful
 EPS = 1e-6
+CALIB_METHODS = ("platt", "beta", "isotonic")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta_models(id INTEGER PRIMARY KEY, created_at TEXT, window_start TEXT, window_end TEXT,
@@ -72,8 +78,12 @@ class Pool:
     n: int = 0
     kind: str = "pool"  # "pool" (model + market) or "calib" (model only)
     d: float = 0.0  # weight of the extra feature (price movement), 0 when not fitted
+    method: str = "platt"  # calibration only: "platt" (the pool form), "beta" or "isotonic"
+    extra: list = field(default_factory=list)  # beta: [a, b, c] per outcome; isotonic: [xs, ys] per outcome
 
     def apply(self, p_model: list[float], p_market: list[float] | None = None, x: list[float] | None = None) -> list[float]:
+        if self.kind == "calib" and self.method in ("beta", "isotonic"):
+            return self._per_outcome(np.asarray(p_model, float))
         lm = np.log(np.clip(np.asarray(p_model, float), EPS, 1.0))
         z = self.a * lm + np.asarray(self.c, float)
         if self.kind == "pool":
@@ -85,6 +95,21 @@ class Pool:
         z = z - z.max()
         e = np.exp(z)
         return (e / e.sum()).tolist()
+
+    def _per_outcome(self, p: np.ndarray) -> list[float]:
+        q = []
+        for k, par in enumerate(self.extra):
+            pk = float(np.clip(p[k], EPS, 1 - EPS))
+            if self.method == "beta":
+                a, b, c = par
+                q.append(1 / (1 + math.exp(-(a * math.log(pk) - b * math.log(1 - pk) + c))))
+            else:
+                q.append(float(np.interp(pk, par[0], par[1])))
+        q = [min(max(v, 0.01), 0.99) for v in q]  # a step function can reach 0 or 1: never certain
+        if len(p) == 2:  # binary families fit the first outcome only
+            return [q[0], 1 - q[0]]
+        tot = sum(q)
+        return [v / tot for v in q]
 
 
 def fit_pool(pm: np.ndarray, pk: np.ndarray | None, y: np.ndarray, kind: str = "pool", x: np.ndarray | None = None) -> Pool:
@@ -121,6 +146,32 @@ def fit_pool(pm: np.ndarray, pk: np.ndarray | None, y: np.ndarray, kind: str = "
     return Pool(a=float(a), b=float(b), c=[float(v) for v in c], n=int(n), kind=kind, d=float(d))
 
 
+def _fit_beta(p: np.ndarray, y: np.ndarray) -> list[float]:
+    lp, lq = np.log(np.clip(p, EPS, 1 - EPS)), np.log(np.clip(1 - p, EPS, 1 - EPS))
+
+    def nll(t):
+        z = t[0] * lp - t[1] * lq + t[2]
+        return float(np.sum(np.logaddexp(0, z) - y * z) + STRENGTH * ((t[0] - 1) ** 2 + (t[1] - 1) ** 2 + t[2] ** 2))
+
+    return [float(v) for v in minimize(nll, [1.0, 1.0, 0.0], method="BFGS").x]
+
+
+def fit_calibrator(pm: np.ndarray, y: np.ndarray, method: str = "platt") -> Pool:
+    """Model-only calibration of a family. pm: (n, K) model probabilities; y: (n,) index of the outcome."""
+    if method == "platt":
+        return fit_pool(pm, None, y, "calib")
+    n, k = pm.shape
+    extra = []
+    for j in range(1 if k == 2 else k):
+        yj = (y == j).astype(float)
+        if method == "beta":
+            extra.append(_fit_beta(pm[:, j], yj))
+        else:
+            iso = IsotonicCalibrator.fit(pm[:, j], yj)
+            extra.append([iso.xs.tolist(), iso.ys.tolist()])
+    return Pool(a=1.0, b=0.0, c=[0.0] * k, n=int(n), kind="calib", method=method, extra=extra)
+
+
 def _arrays(rows: list[dict], kind: str):
     sub = [r for r in rows if kind == "calib" or "market" in r]
     if not sub:
@@ -131,9 +182,9 @@ def _arrays(rows: list[dict], kind: str):
     return pm, pk, y
 
 
-def fit_all(samples: list[dict], min_n: int = MIN_N) -> dict[str, dict]:
+def fit_all(samples: list[dict], min_n: int = MIN_N, calib_method: dict[str, str] | None = None) -> dict[str, dict]:
     """samples: {"group", "fam", "k", "model", "market"?}. Returns {"<group>|<fam>|<kind>": Pool as dict} for every
-    (group or "tutte", family, kind) with at least MIN_N matches."""
+    (group or "tutte", family, kind) with at least MIN_N matches; model-only calibration by calib_method[family]."""
     out: dict[str, dict] = {}
     groups = sorted({s["group"] for s in samples}) + ["tutte"]
     for fam in FAMILY_SELECTIONS:
@@ -143,7 +194,10 @@ def fit_all(samples: list[dict], min_n: int = MIN_N) -> dict[str, dict]:
                 arr = _arrays(rows, kind)
                 if arr is None or len(arr[2]) < min_n:
                     continue
-                out[f"{g}|{fam}|{kind}"] = asdict(fit_pool(*arr, kind=kind))
+                if kind == "calib":
+                    out[f"{g}|{fam}|{kind}"] = asdict(fit_calibrator(arr[0], arr[2], (calib_method or {}).get(fam, "platt")))
+                else:
+                    out[f"{g}|{fam}|{kind}"] = asdict(fit_pool(*arr, kind=kind))
     return out
 
 
@@ -194,4 +248,8 @@ def describe(p: Pool, fam: str) -> str:
     lean = ", ".join(f"{n} {math.exp(c) - 1:+.0%}" for n, c in zip(names[1:], p.c[1:]))
     if p.kind == "pool":
         return f"modello {p.a:.2f} · mercato {p.b:.2f} · nitidezza {p.a + p.b:.2f} · correzione {lean} (n={p.n})"
-    return f"modello {p.a:.2f} · correzione {lean} (n={p.n})"
+    if p.method == "beta":
+        return "calibrazione Beta · " + ", ".join(f"{nm} a={a:.2f} b={b:.2f} c={c:+.2f}" for nm, (a, b, c) in zip(names, p.extra)) + f" (n={p.n})"
+    if p.method == "isotonic":
+        return f"calibrazione isotonica · {sum(len(e[0]) for e in p.extra)} gradini (n={p.n})"
+    return f"calibrazione Platt · modello {p.a:.2f} · correzione {lean} (n={p.n})"

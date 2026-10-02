@@ -353,6 +353,7 @@ export type QualityReport = {
   thresholds: { min_ev: number; min_probability: number; market_prior_sd: number };
   n_matches: number;
   meta?: Record<string, QualityMeta>;
+  calib_methods?: Record<string, { n: number; platt: number; beta: number; isotonic: number; chosen: "platt" | "beta" | "isotonic" }>;
 };
 export type QualityRun = { id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: QualityReport };
 

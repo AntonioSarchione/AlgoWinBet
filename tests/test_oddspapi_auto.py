@@ -422,6 +422,9 @@ def test_publish_writes_dashboard_tables_and_prunes():
     assert s.db.execute("SELECT COUNT(*) FROM pub_slips WHERE run_id=?", (rid,)).fetchone()[0] == len(res.optimizer.slips)
     settings = json.loads(s.db.execute("SELECT optimizer FROM pub_runs WHERE id=?", (rid,)).fetchone()[0])
     assert settings["optimizer"]["max_legs"] == cfg.optimizer.max_legs and settings["z"] == cfg.thresholds.z and "kelly_fraction" in settings["risk"]
+    versions = json.loads(s.db.execute("SELECT versions FROM pub_runs WHERE id=?", (rid,)).fetchone()[0])
+    assert versions["model"] == cfg.model.version and versions["meta"] == "spento"  # no meta-model fitted in this database
+    assert versions["data"]["results"] > 0 and versions["data"]["last_result"]
     row = s.db.execute("SELECT sel_key, home, away, score, disagreement FROM pub_opportunities WHERE run_id=? LIMIT 1", (rid,)).fetchone()
     assert row is None or (row[0] and row[1] and row[2] and row[3] is not None)
     xg_h, raw = s.db.execute("SELECT xg_home, markets FROM pub_fixtures WHERE run_id=? LIMIT 1", (rid,)).fetchone()

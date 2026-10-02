@@ -29,7 +29,7 @@ from .config import Config
 from .domain import SelectionRef
 from .engine import Engine
 from .markets import probability
-from .meta import FAMILY_SELECTIONS, MIN_N, OWN_ONLY, Pool, describe, fit_all, fit_pool
+from .meta import CALIB_METHODS, FAMILY_SELECTIONS, MIN_N, OWN_ONLY, Pool, describe, fit_all, fit_calibrator, fit_pool
 from .modeleval import _Frozen, group_of
 from .pricing import devig
 
@@ -143,20 +143,20 @@ def _nested_meta(samples: list[dict], min_n: int = MIN_N) -> None:
                     if len(rows) < min_n:
                         continue
                     pm = np.array([r["model"] for r in rows])
-                    pk = np.array([r["market"] for r in rows]) if kind == "pool" else None
                     y = np.array([r["k"] for r in rows])
-                    pool = fit_pool(pm, pk, y, kind)
-                    mov = None
                     if kind == "pool":
+                        pk = np.array([r["market"] for r in rows])
+                        pool = fit_pool(pm, pk, y, kind)
                         mov = fit_pool(pm, pk, y, kind, np.array([r.get("mov", [0.0] * pm.shape[1]) for r in rows]))
+                        for s in fn:
+                            if s["group"] == g and "market" in s:
+                                s["meta"] = pool.apply(s["model"], s["market"])
+                                s["meta_mov"] = mov.apply(s["model"], s["market"], s.get("mov"))
+                        continue
+                    cals = {m: fit_calibrator(pm, y, m) for m in CALIB_METHODS}
                     for s in fn:
-                        if s["group"] != g:
-                            continue
-                        if kind == "pool" and "market" in s:
-                            s["meta"] = pool.apply(s["model"], s["market"])
-                            s["meta_mov"] = mov.apply(s["model"], s["market"], s.get("mov"))
-                        elif kind == "calib" and "market" not in s:
-                            s["meta"] = pool.apply(s["model"])
+                        if s["group"] == g and "market" not in s:
+                            s["cal"] = {m: c.apply(s["model"]) for m, c in cals.items()}
 
 
 def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: int = MIN_N) -> dict:
@@ -215,6 +215,18 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
                 row["close"] = close[0]
             samples.append(row)
     _nested_meta(samples, min_n)
+    # model-only calibration: per family, the method with the lowest out-of-sample log loss on the matches without a price
+    calib_method: dict[str, str] = {}
+    calib_scores: dict[str, dict[str, float]] = {}
+    for fam in FAMILIES:
+        rows = [s for s in samples if s["fam"] == fam and "cal" in s]
+        if rows:
+            calib_scores[fam] = {m: float(np.mean([_ll(s["cal"][m], s["k"]) for s in rows])) for m in CALIB_METHODS}
+            calib_scores[fam]["n"] = len(rows)
+            calib_method[fam] = min(CALIB_METHODS, key=lambda m: calib_scores[fam][m])
+    for s in samples:
+        if "cal" in s:
+            s["meta"] = s["cal"][calib_method[s["fam"]]]
 
     acc: dict[tuple[str, str], list[dict]] = defaultdict(list)
     bets: dict[str, list[dict]] = defaultdict(list)
@@ -263,6 +275,8 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
             out["n_alone"] = len(alone)
             out["ll_model_alone"] = float(np.mean([_ll(x["model"], x["k"]) for x in alone]))
             out["ll_meta_alone"] = float(np.mean([_ll(x["meta"], x["k"]) for x in alone]))
+            for m in CALIB_METHODS:
+                out[f"ll_{m}_alone"] = float(np.mean([_ll(x["cal"][m], x["k"]) for x in alone]))
         report["groups"].setdefault(g, {})[fam] = out
         if g == "tutte":
             cal = {}
@@ -287,7 +301,8 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
     report["monthly"] = [{"month": m, "n": len(v["model"]), "ll_model": float(np.mean(v["model"])), "ll_close": float(np.mean(v["close"])),
                           **({"ll_meta": float(np.mean(v["meta"])), "n_meta": len(v["meta"])} if v.get("meta") else {})}
                          for m, v in sorted(monthly.items())]
-    params = fit_all(samples, min_n)  # what the live analysis will use: fitted on every match of the window
+    params = fit_all(samples, min_n, calib_method)  # what the live analysis will use: fitted on every match of the window
+    report["calib_methods"] = {fam: {**sc, "chosen": calib_method[fam]} for fam, sc in calib_scores.items()}
     report["meta"] = {key: {**v, "text": describe(Pool(**v), key.split("|")[1])} for key, v in params.items()}
     report["thresholds"] = {"min_ev": t.min_ev, "min_probability": t.min_probability, "market_prior_sd": cfg.ensemble.market_prior_sd}
     report["n_matches"] = sum(1 for _ in acc.get(("tutte", "1X2"), []))
@@ -318,6 +333,10 @@ def print_quality(report: dict) -> None:
             alone = (f" | senza quote n={m['n_alone']}: modello {m['ll_model_alone']:.4f} calibrato {m['ll_meta_alone']:.4f}"
                      if m.get("n_alone") else "")
             print(f"  {fam:<10} n={m['n']:<5} LL modello {m['ll_model']:.4f} (v1 {m['ll_v1']:.4f})" + same + alone)
+    if report.get("calib_methods"):
+        print("\nCalibrazione senza quote (log loss fuori campione, più basso = meglio):")
+        for fam, sc in report["calib_methods"].items():
+            print(f"  {fam:<10} n={sc['n']:<5} " + " · ".join(f"{m} {sc[m]:.4f}" for m in CALIB_METHODS) + f" -> scelta: {sc['chosen']}")
     print("\nMeta-modello (adattato su tutta la finestra, usato dall'analisi live):")
     for key, v in report.get("meta", {}).items():
         print(f"  {key:<32} {v['text']}")

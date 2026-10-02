@@ -44,7 +44,7 @@ EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets
                                        "factors": "TEXT", "sel_key": "TEXT", "home": "TEXT", "away": "TEXT", "score": "REAL",
                                        "disagreement": "REAL", "dq_lineup": "REAL"},
                  "pub_slips": {"horizon_h": "INTEGER", "max_legs": "INTEGER"},
-                 "pub_runs": {"optimizer": "TEXT"}}
+                 "pub_runs": {"optimizer": "TEXT", "versions": "TEXT"}}
 SHOWN = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.FAIR, OpportunityStatus.WATCH}
 
 
@@ -120,7 +120,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     t = now or datetime.now(timezone.utc)
     prov = SnapshotProvider(store)
     from .meta import load_meta
-    eng = Engine(prov, cfg, use_lineups=True, meta=load_meta(store, cfg.model.version) if cfg.ensemble.use_meta else None)
+    meta = load_meta(store, cfg.model.version) if cfg.ensemble.use_meta else None
+    eng = Engine(prov, cfg, use_lineups=True, meta=meta)
     res = eng.analyze(None, t, t + timedelta(days=horizon_days), t)
     _migrate(store)
 
@@ -141,12 +142,13 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
         fx_rows.append((f.id, f.kickoff.isoformat(), f.competition, f.home, f.away, *probs.values(),
                         ops[0].lineup_state if ops else "none", len(ops), *xg, markets, book_prices(ops)))
 
+    versions = {"model": cfg.model.version, "meta": meta.version if meta else "spento", "data": data_version(store)}
     cur = store.db.execute(
-        "INSERT INTO pub_runs(created_at,cutoff,horizon_days,n_fixtures,n_with_quotes,no_bet,reasons,status_counts,notes,optimizer) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id",
+        "INSERT INTO pub_runs(created_at,cutoff,horizon_days,n_fixtures,n_with_quotes,no_bet,reasons,status_counts,notes,optimizer,versions) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
         (datetime.now(timezone.utc).isoformat(), t.isoformat(), horizon_days, len(res.fixtures), len(by_fx), int(res.optimizer.no_bet),
          json.dumps(res.optimizer.reasons, ensure_ascii=False), json.dumps(res.status_counts()), json.dumps(res.notes, ensure_ascii=False),
-         json.dumps(optimizer_settings(cfg))))
+         json.dumps(optimizer_settings(cfg)), json.dumps(versions)))
     run_id = int(cur.fetchall()[0][0])  # not lastrowid: the remote libsql driver does not report it reliably
     store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes,xg_home,xg_away,markets,book)",
                 [(run_id, *r) for r in fx_rows])
@@ -170,6 +172,14 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     store.db.commit()  # a run with no rows would otherwise stay uncommitted on remote libsql
     prune(store, keep_days)
     return run_id, res
+
+
+def data_version(store: SnapshotStore) -> dict:
+    """What the analysis was computed on, cheap to read on Turso: the last stored request (every payload has an id, so the
+    same id means the same inputs), the results known and the latest result."""
+    raw = store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()
+    res = store.db.execute("SELECT COUNT(*), MAX(kickoff) FROM results").fetchone()
+    return {"last_request": raw[0] if raw else None, "results": res[0] if res else 0, "last_result": res[1] if res else None}
 
 
 def prune(store: SnapshotStore, keep_days: int = 14) -> None:
