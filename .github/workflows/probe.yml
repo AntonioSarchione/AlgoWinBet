@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "odds (OddsPapi), goal (GOAL API) oppure db (solo database)"
+        description: "odds (OddsPapi), goal (GOAL API), apif (API-Football) oppure db (solo database)"
         type: choice
-        options: [odds, goal, db]
+        options: [odds, goal, apif, db]
         default: odds
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, datasets, model, results, raw]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, datasets, model, results, raw, status, test]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -42,6 +42,7 @@ jobs:
         env:
           GOALAPI_KEY: ${{ secrets.GOAL_API_KEY || secrets.GOALAPI_KEY }}
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
+          APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
@@ -61,6 +62,11 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "raw" ]; then algowinbet raw-last "$ARG" --source "${PARAMS:-goal}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "inspect" ]; then algowinbet inspect "$ARG" --db "$DB"; exit 0; fi
           if [ "$SOURCE" = "db" ]; then algowinbet teams --db "$DB"; exit 0; fi
+          if [ "$SOURCE" = "apif" ]; then
+            if [ "$COMMAND" = "probe" ]; then pa=(); for kv in $PARAMS; do pa+=(--param "$kv"); done; algowinbet apif probe "$ARG" "${pa[@]}" --db "$DB"; exit $?; fi
+            if [ "$COMMAND" = "test" ]; then algowinbet apif test ${ARG:+--league "$ARG"} --db "$DB"; exit $?; fi
+            algowinbet apif status --db "$DB"; exit $?
+          fi
           args=("$SOURCE" "$COMMAND")
           if [ "$COMMAND" != "account" ]; then args+=("$ARG"); fi
           if [ "$COMMAND" = "probe" ]; then for kv in $PARAMS; do args+=(--param "$kv"); done; fi

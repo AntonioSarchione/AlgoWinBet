@@ -210,9 +210,17 @@ class SnapshotStore:
                            for r in results])
 
     def save_quotes(self, source: str, quotes: list[OddsQuote], raw_id: int | None = None) -> int:
+        rows = [(q.fixture_id, q.market_code, q.selection, q.line, "" if q.line is None else repr(q.line), q.bookmaker, q.odds,
+                 _iso(q.observed_at), q.kind, source, raw_id) for q in quotes]
+        # A refetched price path repeats almost every stored point: drop those before writing. Reads are local (replica),
+        # each write statement is a round trip to the primary, so sending only the new rows is what keeps a tick short.
+        have: set[tuple] = set()
+        for fid in {r[0] for r in rows}:
+            have.update(self.db.execute("SELECT fixture_id, market_code, selection, line_key, bookmaker, observed_at FROM quotes "
+                                        "WHERE fixture_id=? AND source=?", (fid, source)).fetchall())
+        new = [r for r in rows if (r[0], r[1], r[2], r[4], r[5], r[7]) not in have]
         return self._bulk("INSERT OR IGNORE INTO quotes(fixture_id,market_code,selection,line,line_key,bookmaker,odds,observed_at,kind,source,raw_id)",
-                          [(q.fixture_id, q.market_code, q.selection, q.line, "" if q.line is None else repr(q.line), q.bookmaker, q.odds,
-                            _iso(q.observed_at), q.kind, source, raw_id) for q in quotes])
+                          new)
 
     def save_lineups(self, source: str, lineups: list[LineupSnapshot], raw_id: int | None = None) -> int:
         return self._bulk("INSERT OR IGNORE INTO lineups(fixture_id,team,status,formation,starters,bench,published_at,observed_at,source,source_level,raw_id)",

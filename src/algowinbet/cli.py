@@ -768,6 +768,51 @@ def cmd_collect_auto(a) -> None:
         store.close()
 
 
+def cmd_apif(a) -> None:
+    """API-Football: `status` (free), `probe` (1 counted request) or `test` (4 counted requests on one league: finished
+    fixtures, their lineups/players in one batch, injuries, next fixtures)."""
+    from .providers.apifootball import ApiFootballClient, ApiFootballError
+    from .providers.goalapi import shape_summary
+    store = SnapshotStore(a.db)
+    try:
+        c = ApiFootballClient(store=store)
+        print(f"stato: {c.status()}")
+        if a.apif_cmd == "probe":
+            env = c.get(a.path, dict(kv.split("=", 1) for kv in a.param or []))
+            print(f"{a.path}: {env.get('results')} risultati")
+            for line in shape_summary(env.get("response"))[: a.max_lines]:
+                print("  " + line)
+        elif a.apif_cmd == "test":
+            lg, season = a.league, a.season
+            last = c.get("/fixtures", {"league": lg, "season": season, "last": 3})["response"]
+            print(f"\n1) ultime partite lega {lg} stagione {season}: {len(last)}")
+            for f in last:
+                print(f"   {f['fixture']['id']} {f['fixture']['date'][:16]} {f['teams']['home']['name']}-{f['teams']['away']['name']} {f['goals']}")
+            if last:
+                ids = "-".join(str(f["fixture"]["id"]) for f in last)
+                full = c.get("/fixtures", {"ids": ids})["response"]
+                print(f"\n2) dettaglio di {len(full)} partite in 1 richiesta (ids=...):")
+                for f in full:
+                    lu = f.get("lineups") or []
+                    pl = f.get("players") or []
+                    print(f"   {f['teams']['home']['name']}-{f['teams']['away']['name']}: formazioni {len(lu)} squadre "
+                          f"({[len(x.get('startXI') or []) for x in lu]} titolari), statistiche giocatori {sum(len(t.get('players') or []) for t in pl)}, "
+                          f"eventi {len(f.get('events') or [])}, statistiche squadra {len(f.get('statistics') or [])}")
+                for line in shape_summary(full[0].get("lineups"))[:25]:
+                    print("     " + line)
+            inj = c.get("/injuries", {"league": lg, "season": season})["response"]
+            print(f"\n3) infortuni e squalifiche lega {lg}: {len(inj)} righe")
+            for r in inj[:8]:
+                print(f"   {r['fixture']['date'][:10]} {r['team']['name']}: {r['player']['name']} ({r['player'].get('type')}: {r['player'].get('reason')})")
+            nxt = c.get("/fixtures", {"league": lg, "season": season, "next": 3})["response"]
+            print(f"\n4) prossime partite: {len(nxt)}")
+            for f in nxt:
+                print(f"   {f['fixture']['id']} {f['fixture']['date'][:16]} {f['teams']['home']['name']}-{f['teams']['away']['name']}")
+        print(f"\nrichieste conteggiate in questo run: {c.counted_sent} · limiti dalla risposta: {c.remaining}")
+    except ApiFootballError as e:
+        sys.exit(f"errore: {e}")
+
+
 def _goal_client(a, store: SnapshotStore) -> GoalApiClient:
     budget = BudgetGuard(store, "goal-api", daily=a.daily_limit, monthly=None, reserve=a.reserve)
     try:
@@ -959,6 +1004,19 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--minutes-after-lineup", type=int, default=5)
     se.add_argument("--max-rounds", type=int)
     se.set_defaults(fn=cmd_stale_edge)
+    af = sub.add_parser("apif", help="API-Football: status | probe | test (chiave in APIFOOTBALL_KEY)")
+    afs = af.add_subparsers(dest="apif_cmd", required=True)
+    for name in ("status", "probe", "test"):
+        sp = afs.add_parser(name)
+        if name == "probe":
+            sp.add_argument("path")
+            sp.add_argument("--param", action="append")
+            sp.add_argument("--max-lines", type=int, default=80)
+        if name == "test":
+            sp.add_argument("--league", type=int, default=135)  # Serie A
+            sp.add_argument("--season", type=int, default=2026)
+        sp.add_argument("--db", default="algowinbet.db")
+        sp.set_defaults(fn=cmd_apif)
     g = sub.add_parser("goal", help="GOAL API: probe | leagues | collect (chiave in GOALAPI_KEY)")
     gs = g.add_subparsers(dest="goal_cmd", required=True)
 
