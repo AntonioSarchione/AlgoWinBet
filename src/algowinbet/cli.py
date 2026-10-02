@@ -783,31 +783,43 @@ def cmd_apif(a) -> None:
             for line in shape_summary(env.get("response"))[: a.max_lines]:
                 print("  " + line)
         elif a.apif_cmd == "test":
-            lg, season = a.league, a.season
-            last = c.get("/fixtures", {"league": lg, "season": season, "last": 3})["response"]
-            print(f"\n1) ultime partite lega {lg} stagione {season}: {len(last)}")
-            for f in last:
+            # the free plan refuses the current season as a parameter, so everything goes through dates and fixture ids
+            lg = a.league
+            day = c.get("/fixtures", {"date": a.past})["response"]
+            past = [f for f in day if f["league"]["id"] == lg][:3]
+            print(f"\n1) partite del {a.past}: {len(day)} in tutto, {len(past)} della lega {lg} (stagione {past[0]['league']['season'] if past else '?'})")
+            for f in past:
                 print(f"   {f['fixture']['id']} {f['fixture']['date'][:16]} {f['teams']['home']['name']}-{f['teams']['away']['name']} {f['goals']}")
-            if last:
-                ids = "-".join(str(f["fixture"]["id"]) for f in last)
-                full = c.get("/fixtures", {"ids": ids})["response"]
-                print(f"\n2) dettaglio di {len(full)} partite in 1 richiesta (ids=...):")
-                for f in full:
-                    lu = f.get("lineups") or []
-                    pl = f.get("players") or []
-                    print(f"   {f['teams']['home']['name']}-{f['teams']['away']['name']}: formazioni {len(lu)} squadre "
-                          f"({[len(x.get('startXI') or []) for x in lu]} titolari), statistiche giocatori {sum(len(t.get('players') or []) for t in pl)}, "
-                          f"eventi {len(f.get('events') or [])}, statistiche squadra {len(f.get('statistics') or [])}")
-                for line in shape_summary(full[0].get("lineups"))[:25]:
-                    print("     " + line)
-            inj = c.get("/injuries", {"league": lg, "season": season})["response"]
-            print(f"\n3) infortuni e squalifiche lega {lg}: {len(inj)} righe")
-            for r in inj[:8]:
-                print(f"   {r['fixture']['date'][:10]} {r['team']['name']}: {r['player']['name']} ({r['player'].get('type')}: {r['player'].get('reason')})")
-            nxt = c.get("/fixtures", {"league": lg, "season": season, "next": 3})["response"]
-            print(f"\n4) prossime partite: {len(nxt)}")
-            for f in nxt:
-                print(f"   {f['fixture']['id']} {f['fixture']['date'][:16]} {f['teams']['home']['name']}-{f['teams']['away']['name']}")
+            if past:
+                try:
+                    full = c.get("/fixtures", {"ids": "-".join(str(f["fixture"]["id"]) for f in past)})["response"]
+                    print(f"\n2) dettaglio di {len(full)} partite in 1 richiesta (ids=...):")
+                    for f in full:
+                        lu = f.get("lineups") or []
+                        pl = f.get("players") or []
+                        print(f"   {f['teams']['home']['name']}-{f['teams']['away']['name']}: formazioni {len(lu)} squadre "
+                              f"({[len(x.get('startXI') or []) for x in lu]} titolari), statistiche giocatori {sum(len(t.get('players') or []) for t in pl)}, "
+                              f"eventi {len(f.get('events') or [])}, statistiche squadra {len(f.get('statistics') or [])}")
+                    if full:
+                        for line in shape_summary(full[0].get("lineups"))[:20]:
+                            print("     " + line)
+                except ApiFootballError as e:
+                    print(f"\n2) dettaglio per id: {e}")
+            try:
+                inj = c.get("/injuries", {"date": a.next})["response"]
+                mine = [r for r in inj if r["league"]["id"] == lg]
+                print(f"\n3) infortuni e squalifiche del {a.next}: {len(inj)} righe in tutto, {len(mine)} della lega {lg}")
+                for r in mine[:10]:
+                    print(f"   {r['team']['name']}: {r['player']['name']} ({r['player'].get('type')}: {r['player'].get('reason')})")
+            except ApiFootballError as e:
+                print(f"\n3) infortuni per data: {e}")
+            try:
+                nxt = [f for f in c.get("/fixtures", {"date": a.next})["response"] if f["league"]["id"] == lg]
+                print(f"\n4) partite della lega {lg} il {a.next}: {len(nxt)}")
+                for f in nxt[:10]:
+                    print(f"   {f['fixture']['id']} {f['fixture']['date'][:16]} {f['teams']['home']['name']}-{f['teams']['away']['name']}")
+            except ApiFootballError as e:
+                print(f"\n4) partite per data: {e}")
         print(f"\nrichieste conteggiate in questo run: {c.counted_sent} · limiti dalla risposta: {c.remaining}")
     except ApiFootballError as e:
         sys.exit(f"errore: {e}")
@@ -1014,7 +1026,8 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--max-lines", type=int, default=80)
         if name == "test":
             sp.add_argument("--league", type=int, default=135)  # Serie A
-            sp.add_argument("--season", type=int, default=2026)
+            sp.add_argument("--past", default="2026-09-27", help="giornata già giocata (AAAA-MM-GG)")
+            sp.add_argument("--next", default="2026-10-04", help="giornata in arrivo (AAAA-MM-GG)")
         sp.add_argument("--db", default="algowinbet.db")
         sp.set_defaults(fn=cmd_apif)
     g = sub.add_parser("goal", help="GOAL API: probe | leagues | collect (chiave in GOALAPI_KEY)")
