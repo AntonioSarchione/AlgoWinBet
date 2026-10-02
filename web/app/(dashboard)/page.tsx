@@ -36,7 +36,8 @@ const MIN_EVENTS = [
 
 const LEG_PROB = [{ v: "", l: "Qualsiasi" }, ...[30, 40, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 const EV_MIN = [
-  { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" }, { v: "0", l: "Almeno 0% (pari)" }, { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" },
+  { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" }, { v: "0", l: "Almeno 0% (pari)" },
+  { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
 ];
 // "maximum risk" = the lowest chance of winning the slip that is still accepted
 const RISK = [
