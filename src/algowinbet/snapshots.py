@@ -103,8 +103,12 @@ def connect(path: str | Path):
             return libsql.connect(database=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", "")), False
         replica = Path(os.environ.get("TURSO_REPLICA_PATH", "data/turso-replica.db"))
         replica.parent.mkdir(parents=True, exist_ok=True)
+        import time
+        t0, had = time.monotonic(), replica.exists()
         conn = libsql.connect(str(replica), sync_url=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))
         conn.sync()
+        size = replica.stat().st_size / 1e6 if replica.exists() else 0.0
+        print(f"replica del database: {'aggiornata' if had else 'scaricata da zero'} in {time.monotonic() - t0:.0f}s ({size:.0f} MB)", flush=True)
         return conn, True
     if p != ":memory:":
         Path(p).parent.mkdir(parents=True, exist_ok=True)
