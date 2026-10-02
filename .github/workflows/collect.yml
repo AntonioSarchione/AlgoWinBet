@@ -40,11 +40,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # uv installs the cached wheels in a couple of seconds (pip took ~12 s): every run is billed by the started minute
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-          cache: pip
-      - run: pip install -e ".[turso]"
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - run: uv pip install -e ".[turso]"
       # Local copy of the Turso database (libSQL embedded replica): reads are local instead of one network round trip each,
       # writes still go to Turso. The copy is kept between runs in the Actions cache, so a run only downloads what changed.
       - name: restore database replica

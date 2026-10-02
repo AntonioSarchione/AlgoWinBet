@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { inCollectionHours, REPO, WORKFLOW } from "@/lib/refresh";
+import { matchesBetween } from "@/lib/db";
+import { inCollectionHours, isDailySlot, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, REPO, WORKFLOW } from "@/lib/refresh";
 
 // Scheduler tick from an external pinger (GitHub's own cron starts most runs hours late or never). The pinger calls this
 // URL every 30 minutes with "Authorization: Bearer <CRON_SECRET>"; inside the collection hours (lib/refresh.ts) it starts one
@@ -36,6 +37,17 @@ async function tick(req: NextRequest) {
       const r = await gh(`/actions/workflows/${WORKFLOW}/runs?status=${status}&per_page=1`);
       if (!r.ok) return NextResponse.json({ error: `GitHub ${r.status}` }, { status: 502 });
       if (((await r.json()) as { total_count: number }).total_count > 0) return NextResponse.json({ skipped: `un run è già ${status}` });
+    }
+    if (!isDailySlot(now) && req.nextUrl.searchParams.get("force") !== "1") {
+      // database unreachable: run anyway (a wasted minute is better than a missed lineup)
+      const near = await matchesBetween(new Date(now.getTime() - MATCH_BEFORE_MS), new Date(now.getTime() + MATCH_AFTER_MS)).catch(() => true);
+      if (!near) {
+        const r = await gh(`/actions/workflows/${WORKFLOW}/runs?status=completed&per_page=1`);
+        const last = r.ok ? ((await r.json()) as { workflow_runs: { created_at: string }[] }).workflow_runs[0]?.created_at : undefined;
+        if (last && now.getTime() - Date.parse(last) < MAX_GAP_MS) {
+          return NextResponse.json({ skipped: "nessuna partita vicina e ultimo run recente" });
+        }
+      }
     }
     const r = await gh(`/actions/workflows/${WORKFLOW}/dispatches`, { method: "POST", body: JSON.stringify({ ref: "main" }) });
     if (r.status !== 204) return NextResponse.json({ error: `GitHub ${r.status}` }, { status: 502 });

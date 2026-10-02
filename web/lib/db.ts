@@ -221,6 +221,15 @@ export const usage = persist(async () => {
 }, "usage", LIVE_TTL);
 
 /** Uncached: the manual refresh button checks the monthly cap right before starting a run. */
+// scheduler gate (/api/tick): is any match kicking off in [from, to]? Uncached on purpose: the answer drives a run.
+export async function matchesBetween(from: Date, to: Date): Promise<boolean> {
+  const rows = await all<{ x: number }>(
+    "SELECT 1 AS x FROM fixtures WHERE kickoff BETWEEN ? AND ? AND status NOT IN ('POSTPONED', 'CANCELLED') LIMIT 1",
+    [from.toISOString().replace("Z", "+00:00"), to.toISOString().replace("Z", "+00:00")],
+  );
+  return rows.length > 0;
+}
+
 export async function manualRefreshesThisMonth(): Promise<number> {
   const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'manual-refresh' AND period = ?", [
     `M${new Date().toISOString().slice(0, 7)}`,
