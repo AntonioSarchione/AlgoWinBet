@@ -129,13 +129,13 @@ class HybridConnection:
     _READS = ("SELECT", "WITH", "PRAGMA", "EXPLAIN")
 
     def __init__(self, replica, remote):
-        self.replica, self.remote, self.dirty = replica, remote, False
+        self.replica, self.remote, self.dirty, self.replica_ok = replica, remote, False, True
 
     def execute(self, sql: str, *args):
         if sql.lstrip()[:7].upper().startswith(self._READS):
             if self.dirty:
                 self.sync()
-            return self.replica.execute(sql, *args)
+            return (self.replica if self.replica_ok else self.remote).execute(sql, *args)
         self.dirty = True
         return self.remote.execute(sql, *args)
 
@@ -151,8 +151,20 @@ class HybridConnection:
         self.remote.commit()
 
     def sync(self) -> None:
-        self.replica.sync()
-        self.dirty = False
+        """Retried: a dropped HTTP connection must not end the run. If the replica cannot catch up, reads go to the primary
+        for the rest of the run (slower, still correct)."""
+        import time
+        for wait in (0.5, 2.0, 5.0, None):
+            try:
+                self.replica.sync()
+                self.dirty = False
+                return
+            except ValueError as e:  # libsql reports sync failures as ValueError("sync error: ...")
+                if wait is None:
+                    print(f"replica non sincronizzata ({e}): letture dal database principale", flush=True)
+                    self.replica_ok, self.dirty = False, False
+                    return
+                time.sleep(wait)
 
     def close(self) -> None:
         self.remote.close()
