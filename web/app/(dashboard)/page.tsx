@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
   Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
@@ -52,6 +53,38 @@ const PROFILE_HINT: Record<string, string> = {
   value: "il valore atteso più alto, anche se meno probabile",
 };
 
+type Cand = OptOpp & OppRow;
+type Knobs = { maxEvents: number; minEvents: number; qMin: number; qMax: number; legProb: number; evMin: number; riskMin: number; markets: string[] };
+
+// The slips of every profile for one set of filters. Cached per run + filters (switching profile tab, going back, or a second
+// visit gets the answer ready), computed once instead of once per profile per request.
+const homeSlips = unstable_cache(
+  async (runId: number, filter: Parameters<typeof slipCandidates>[1], statuses: string[], settings: OptSettings, k: Knobs) => {
+    const cands = await slipCandidates(runId, filter, statuses);
+    const picked = new Set(k.markets);
+    const legs: Cand[] = cands
+      .map((o) => ({
+        ...o, sel_key: o.sel_key ?? "", home: o.home ?? "", away: o.away ?? "", p_struct: o.p_struct ?? o.p_final,
+        score: o.score ?? 0, disagreement: o.disagreement ?? 0, dq_lineup: o.dq_lineup ?? 0,
+      }))
+      .filter((o) => !picked.size || picked.has(marketGroup(o.sel_key)));
+    const names = settings.optimizer.profiles ? Object.keys(settings.optimizer.profiles) : ["equilibrata"];
+    const out: Record<string, OptResult<Cand>> = {};
+    for (const name of names) {
+      out[name] = optimize(legs, {
+        ...settings,
+        optimizer: withProfile({
+          ...settings.optimizer, max_legs: k.maxEvents, min_legs: k.minEvents, odds_min: k.qMin || settings.optimizer.odds_min,
+          odds_max: k.qMax || settings.optimizer.odds_max, min_leg_probability: k.legProb, min_slip_ev: k.evMin, min_probability: k.riskMin,
+        }, name),
+      });
+    }
+    return out;
+  },
+  ["homeSlips"],
+  { revalidate: 6 * 3600 },
+);
+
 type SP = {
   min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; nmin?: string; comp?: string | string[];
   p?: string; pmin?: string; ev?: string; risk?: string; mk?: string | string[];
@@ -89,36 +122,21 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const iso = (t: number) => new Date(t).toISOString().slice(0, 16); // minute precision: equal filters share the data cache
   const filter = { from: iso(now), until: iso(now + hours * 3600_000), comps: [...picked], lmin: lMin, lmax: lMax };
   const statuses = ["STRONG", "CANDIDATE", ...(settings?.optimizer.include_watch ? ["WATCH"] : []), ...(settings?.optimizer.include_fair ? ["FAIR"] : [])];
-  const [fixtures, summary, cands] = await Promise.all([
+  const evMin = EV_MIN.some((x) => x.v === sp.ev) ? Number(sp.ev) / 100 : (settings?.optimizer.min_slip_ev ?? 0);
+  const knobs: Knobs = { maxEvents, minEvents, qMin, qMax, legProb, evMin, riskMin, markets: allMk ? [] : [...pickedMk].sort() };
+  const [fixtures, summary, computed] = await Promise.all([
     runFixtures(run.id),
     oppSummary(run.id, filter),
-    settings ? slipCandidates(run.id, filter, statuses) : Promise.resolve([] as OppRow[]),
+    settings ? homeSlips(run.id, filter, statuses, settings, knobs) : Promise.resolve(null),
   ]);
   const inWindow = (isoTime: string, comp: string) =>
     new Date(isoTime).getTime() <= now + hours * 3600_000 && (!picked.size || picked.has(comp));
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
-  type Cand = OptOpp & OppRow;
-  const legs: Cand[] = cands
-    .map((o) => ({
-      ...o, sel_key: o.sel_key ?? "", home: o.home ?? "", away: o.away ?? "", p_struct: o.p_struct ?? o.p_final,
-      score: o.score ?? 0, disagreement: o.disagreement ?? 0, dq_lineup: o.dq_lineup ?? 0,
-    }))
-    .filter((o) => allMk || pickedMk.has(marketGroup(o.sel_key)));
-  const evMin = EV_MIN.some((x) => x.v === sp.ev) ? Number(sp.ev) / 100 : (settings?.optimizer.min_slip_ev ?? 0);
-  const profileNames = settings?.optimizer.profiles ? Object.keys(settings.optimizer.profiles) : ["equilibrata"];
-  const results: Record<string, OptResult<Cand>> = {};
-  for (const name of profileNames) {
-    results[name] = settings
-      ? optimize(legs, {
-          ...settings,
-          optimizer: withProfile({
-            ...settings.optimizer, max_legs: maxEvents, min_legs: minEvents, odds_min: qMin || settings.optimizer.odds_min,
-            odds_max: qMax || settings.optimizer.odds_max, min_leg_probability: legProb, min_slip_ev: evMin, min_probability: riskMin,
-          }, name),
-        })
-      : { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0, evaluated: 0 };
-  }
+  const results: Record<string, OptResult<Cand>> = computed ?? {
+    equilibrata: { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0, evaluated: 0 },
+  };
+  const profileNames = Object.keys(results);
   const profile = sp.p && results[sp.p] ? sp.p : results[settings?.optimizer.profile ?? ""] ? (settings?.optimizer.profile as string) : profileNames[0];
   const result = results[profile];
   const profileHref = (name: string) => {
@@ -550,6 +568,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <div className="card-head"><h2>Budget richieste API</h2></div>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Calendario, risultati, formazioni, statistiche" />
+              <Meter label="API-Football · oggi" used={use.apifDay} limit={100} hint="Formazioni con posizioni, infortuni e squalifiche, rose. Prima i 7 campionati" />
               <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint="Richieste conteggiate: solo fotografie Sisal. Storico Sisal e Pinnacle con richieste libere" />
               <div className="kv" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 <span>Ultima raccolta</span>

@@ -70,6 +70,7 @@ export default async function Sistema() {
           <div className="card-head"><h2>Budget richieste API</h2></div>
           <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Riserva di 50 richieste mai usata dai giri automatici" />
+            <Meter label="API-Football · oggi" used={use.apifDay} limit={100} hint="Si azzera a mezzanotte UTC. Riserva di 3 richieste; le formazioni dei 7 campionati hanno la precedenza su coppe e nazionali" />
             <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint={`Piano automatico 200 + aggiornamenti manuali (${use.manualMonth}/5 usati); riserva di 20 mai toccata`} />
           </div>
         </section>

@@ -249,7 +249,7 @@ th.num .th-sort { justify-content: flex-end; }
 .sub { display: block; color: var(--muted); font-size: 12px; }
 
 .crest { flex: none; display: inline-block; object-fit: contain; }
-:root:not([data-theme="light"]) img.crest { filter: drop-shadow(0 0 0.6px rgba(255, 255, 255, 0.75)) drop-shadow(0 0 0.6px rgba(255, 255, 255, 0.45)); }
+:root:not([data-theme="light"]) img.crest { filter: drop-shadow(0 0 0.8px rgba(255, 255, 255, 0.85)); /* one pass: cheaper to paint while scrolling long tables */ }
 .crest-lg { width: 52px; height: 52px; }
 :root { --crest-fill: #2a3640; --crest-line: #3b4a55; --crest-ink: #aab7bf; }
 :root[data-theme="light"] { --crest-fill: #dfe6ea; --crest-line: #c3ced4; --crest-ink: #5a6d77; }

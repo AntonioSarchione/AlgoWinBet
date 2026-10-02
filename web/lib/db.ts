@@ -217,7 +217,7 @@ export const usage = persist(async () => {
   const month = `M${now.toISOString().slice(0, 7)}`;
   const rows = await all<Usage>("SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", [day, month]);
   const get = (src: string, kind: "D" | "M") => rows.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
-  return { goalDay: get("goal-api", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D"), manualMonth: get("manual-refresh", "M") };
+  return { goalDay: get("goal-api", "D"), apifDay: get("api-football", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D"), manualMonth: get("manual-refresh", "M") };
 }, "usage", LIVE_TTL);
 
 /** Uncached: the manual refresh button checks the monthly cap right before starting a run. */
