@@ -369,6 +369,37 @@ def cmd_teams(a) -> None:
     store.close()
 
 
+def cmd_results_day(a) -> None:
+    """Fixtures of one day (optionally one competition) and whether their result is stored (no API request)."""
+    store = SnapshotStore(a.db)
+    try:
+        day = datetime.fromisoformat(a.day).replace(tzinfo=timezone.utc)
+        lo, hi = day.isoformat(), (day + timedelta(days=1)).isoformat()
+        like = f"%{a.comp or ''}%"
+        fxs = store.db.execute(
+            "SELECT fixture_id, competition, home, away, kickoff, status FROM fixtures f WHERE kickoff >= ? AND kickoff < ? AND competition LIKE ? "
+            "AND observed_at = (SELECT MAX(observed_at) FROM fixtures g WHERE g.fixture_id = f.fixture_id) ORDER BY kickoff, home",
+            (lo, hi, like)).fetchall()
+        res = {r[0]: r for r in store.db.execute(
+            "SELECT fixture_id, home, away, home_goals, away_goals, observed_at, competition FROM results WHERE kickoff >= ? AND kickoff < ? AND competition LIKE ?",
+            (lo, hi, like)).fetchall()}
+        quotes = {r[0]: r[1] for r in store.db.execute(
+            "SELECT fixture_id, COUNT(*) FROM quotes WHERE fixture_id IN (SELECT fixture_id FROM fixtures WHERE kickoff >= ? AND kickoff < ?) GROUP BY fixture_id",
+            (lo, hi)).fetchall()}
+        print(f"{a.day} {a.comp or 'tutte le competizioni'}: {len(fxs)} partite in calendario, {len(res)} risultati salvati")
+        seen = set()
+        for fid, comp, home, away, ko, status in fxs:
+            r = res.get(fid)
+            seen.add(fid)
+            score = f"{r[3]}-{r[4]} (salvato {r[5][:16]})" if r else "NESSUN RISULTATO"
+            print(f"  {ko[11:16]} {comp:<28} {home} - {away}: {score} · stato {status} · {quotes.get(fid, 0)} quote")
+        for fid, r in res.items():
+            if fid not in seen:
+                print(f"  (solo risultato) {r[6]} {r[1]} - {r[2]}: {r[3]}-{r[4]}")
+    finally:
+        store.close()
+
+
 def cmd_inspect(a) -> None:
     """Debug a fixture's goal-total prices from the stored raw payloads (no API request): for each total-goals market of the
     catalogue, the raw OddsPapi row (market id, name, type, line, period, outcome, price) next to what we stored."""
@@ -979,6 +1010,11 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--book", default="sisal")
     mc.add_argument("--snapshots", type=int, default=4)
     mc.set_defaults(fn=cmd_market_coverage)
+    rd = sub.add_parser("results-day", help="partite di un giorno e risultati salvati (nessuna richiesta API)")
+    rd.add_argument("day", help="AAAA-MM-GG (UTC)")
+    rd.add_argument("--comp", default="")
+    rd.add_argument("--db", default="algowinbet.db")
+    rd.set_defaults(fn=cmd_results_day)
     ins = sub.add_parser("inspect", help="quote grezze OddsPapi vs quote salvate per le partite di una squadra (nessuna richiesta API)")
     ins.add_argument("team")
     ins.add_argument("--db", default="algowinbet.db")
