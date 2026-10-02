@@ -714,6 +714,10 @@ def cmd_collect_auto(a) -> None:
                 print(f"analisi pubblicata (run {rid}): {len(res.fixtures)} partite, {len(res.opportunities)} mercati, "
                       f"{len(res.optimizer.slips)} schedine" + (" — NO BET" if res.optimizer.no_bet else "") +
                       f" ({time.monotonic() - t0:.0f}s dall'inizio)")
+        from .paper import settle
+        paper = settle(store, SnapshotProvider(store))
+        if any(paper.values()):
+            print("registro: chiuse " + ", ".join(f"{v} {k}" for k, v in paper.items() if v), flush=True)
         from .autorun import DATASETS_SECONDS, run_datasets
         left = min(DATASETS_SECONDS, a.max_seconds + 300 - (time.monotonic() - t0))  # the job has 20 minutes
         if left >= 60:

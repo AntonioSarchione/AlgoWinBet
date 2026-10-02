@@ -12,6 +12,7 @@ for (const c of golden.cases) {
   if (c.odds_min) s.optimizer.odds_min = c.odds_min;
   if (c.odds_max) s.optimizer.odds_max = c.odds_max;
   if (c.min_slip_ev != null) s.optimizer.min_slip_ev = c.min_slip_ev;
+  if (c.min_legs != null) s.optimizer.min_legs = c.min_legs;
   if (c.multi_bonus_min_odds != null) s.optimizer.multi_bonus_min_odds = c.multi_bonus_min_odds;
   const r = optimize(golden.opportunities, s);
   const problems = [];

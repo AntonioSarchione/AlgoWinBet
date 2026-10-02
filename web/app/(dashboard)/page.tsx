@@ -27,7 +27,12 @@ const MAX_EVENTS = [
   ...[2, 3, 4, 5, 6, 7, 8, 9].map((k) => ({ v: String(k), l: `Fino a ${k}` })),
 ];
 
-type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; comp?: string | string[] };
+const MIN_EVENTS = [
+  { v: "1", l: "Almeno 1" },
+  ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => ({ v: String(k), l: k === 5 ? "Almeno 5 (bonus Sisal)" : `Almeno ${k}` })),
+];
+
+type SP = { min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; nmin?: string; comp?: string | string[] };
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -46,6 +51,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const now = Date.now();
   const hours = PERIODS.some((p) => p.v === sp.h) ? Number(sp.h) : 168;
   const maxEvents = MAX_EVENTS.some((m) => m.v === sp.n) ? Number(sp.n) : 10;
+  const minEvents = Math.min(MIN_EVENTS.some((m) => m.v === sp.nmin) ? Number(sp.nmin) : 1, maxEvents); // never above the maximum
   const qMin = Number(sp.min) || 0;
   const qMax = Number(sp.max) || 0;
   const lMin = Number(sp.lmin) || 0;
@@ -73,7 +79,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const result = settings
     ? optimize(legs, {
         ...settings,
-        optimizer: { ...settings.optimizer, max_legs: maxEvents, odds_min: qMin || settings.optimizer.odds_min, odds_max: qMax || settings.optimizer.odds_max },
+        optimizer: { ...settings.optimizer, max_legs: maxEvents, min_legs: minEvents, odds_min: qMin || settings.optimizer.odds_min, odds_max: qMax || settings.optimizer.odds_max },
       })
     : { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0 };
   const sl = result.slips;
@@ -90,7 +96,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
     .filter((f) => new Date(f.kickoff).getTime() >= now)
     .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
     .map(explorerMatch);
-  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10"));
+  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10") || (sp.nmin && sp.nmin !== "1"));
   const allComps = !picked.size || comps.every((c) => picked.has(c));
   const compLabel = allComps ? "Tutti i campionati" : picked.size === 1 ? [...picked][0] : `${picked.size} campionati`;
 
@@ -132,6 +138,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <select id="h" name="h" defaultValue={String(hours)}>
               {PERIODS.map((p) => (
                 <option key={p.v} value={p.v}>{p.l}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="nmin">Numero minimo di eventi</label>
+          <div className="control">
+            <ListOrdered size={17} aria-hidden="true" />
+            <select id="nmin" name="nmin" defaultValue={String(minEvents)}>
+              {MIN_EVENTS.map((m) => (
+                <option key={m.v} value={m.v}>{m.l}</option>
               ))}
             </select>
           </div>

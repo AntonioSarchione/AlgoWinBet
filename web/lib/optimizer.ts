@@ -27,6 +27,7 @@ export type OptimizerCfg = {
   odds_max: number;
   min_probability: number;
   max_legs: number;
+  min_legs?: number; // missing in analyses published before it existed: 1
   max_legs_per_fixture: number;
   max_legs_per_competition: number;
   min_leg_probability: number;
@@ -139,6 +140,8 @@ function makeSlip<T extends OptOpp>(legs: T[], s: OptSettings, C: Map<string, nu
 
 function violations(sl: Slip, o: OptimizerCfg): string[] {
   const v: string[] = [];
+  const minLegs = o.min_legs ?? 1;
+  if (sl.legs.length < minLegs) v.push(`${sl.legs.length} eventi < minimo ${minLegs}`);
   if (sl.total_odds < o.odds_min) v.push(`quota ${sl.total_odds.toFixed(2)} < minima ${o.odds_min}`);
   if (sl.total_odds > o.odds_max) v.push(`quota ${sl.total_odds.toFixed(2)} > massima ${o.odds_max}`);
   if (sl.joint_probability < o.min_probability) v.push(`probabilità ${pct(sl.joint_probability, 1)} < minima ${pct(o.min_probability, 1)}`);
@@ -230,7 +233,7 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
   if (!pool.size) {
     reasons.push(
       `${elig.length} opportunità idonee ma nessuna combinazione rispetta insieme quota ${o.odds_min}–${o.odds_max}, ` +
-        `correlazione ≤ ${o.correlation_limit}, EV schedina ≥ ${signedPct(o.min_slip_ev, 0)} e massimo ${o.max_legs} eventi.`,
+        `correlazione ≤ ${o.correlation_limit}, EV schedina ≥ ${signedPct(o.min_slip_ev, 0)} e da ${o.min_legs ?? 1} a ${o.max_legs} eventi.`,
     );
     if (nearest) reasons.push(`La più vicina (quota ${nearest.slip.total_odds.toFixed(2)}) viola: ${nearest.v.join("; ")}.`);
     return { slips: [], noBet: true, reasons, eligible: elig.length };

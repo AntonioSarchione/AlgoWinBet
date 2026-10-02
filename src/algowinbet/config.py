@@ -67,6 +67,7 @@ class OptimizerCfg(BaseModel):
     odds_max: float = 15.0
     min_probability: float = 0.0  # min joint probability of slip
     max_legs: int = 8
+    min_legs: int = 1  # fewer selections than this: not a valid slip (e.g. 5 to always reach the Sisal multiple bonus)
     max_legs_per_fixture: int = 1  # SGP needs a bookmaker combo quote; see joint pricing
     max_legs_per_competition: int = 99
     min_leg_probability: float = 0.0

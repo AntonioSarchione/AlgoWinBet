@@ -170,6 +170,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                              ensure_ascii=False),
                   json.dumps(s.explanation, ensure_ascii=False, default=str), None, None) for k, s in enumerate(res.optimizer.slips)])
     store.db.commit()  # a run with no rows would otherwise stay uncommitted on remote libsql
+    from .paper import register
+    register(store, run_id, res, versions)  # paper trading: first appearance of every proposal, never rewritten
     prune(store, keep_days)
     return run_id, res
 

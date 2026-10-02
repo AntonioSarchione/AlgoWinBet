@@ -159,6 +159,21 @@ def _nested_meta(samples: list[dict], min_n: int = MIN_N) -> None:
                             s["cal"] = {m: c.apply(s["model"]) for m, c in cals.items()}
 
 
+def _sisal_vs_sharp(samples: list[dict]) -> dict:
+    """How Sisal prices compare with the sharp fair price 2 hours before kickoff, per family: Sisal's margin, how often a
+    Sisal price is at or above the fair one (EV >= 0 against Pinnacle / Betfair Exchange) and by how much."""
+    out = {}
+    for fam in FAMILIES:
+        rows = [s for s in samples if s["fam"] == fam and s.get("book") == "sisal" and s.get("ref_book") in ("pinnacle", "betfair-ex")]
+        evs = [o * p - 1 for s in rows for o, p in zip(s["odds"], s["market"])]
+        if not evs:
+            continue
+        out[fam] = {"n_matches": len(rows), "n": len(evs), "margin": float(np.mean([sum(1 / o for o in s["odds"]) - 1 for s in rows])),
+                    "share_fair": float(np.mean([e >= 0 for e in evs])), "share_value": float(np.mean([e >= 0.02 for e in evs])),
+                    "mean_ev": float(np.mean(evs)), "best_ev": float(max(evs))}
+    return out
+
+
 def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: int = MIN_N) -> dict:
     t_start = time.monotonic()
     frozen = _Frozen(provider, end)
@@ -205,7 +220,7 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
                     w = tau2 / (tau2 + s2)
                     ens.append(w * ps + (1 - w) * pq)
                 tot = sum(ens)
-                row["market"], row["ens"] = pm, [x / tot for x in ens]
+                row["market"], row["ens"], row["ref_book"] = pm, [x / tot for x in ens], mkt[1]
                 early = _price(qs, sels, (mkt[1],), r.kickoff - DECISION - MOVE, closing=False, fair=True)
                 row["mov"] = [math.log(max(a, 1e-6) / max(b, 1e-6)) for a, b in zip(pm, early[0])] if early else [0.0] * len(pm)
                 bet_odds = _price(qs, sels, PLAYABLE, r.kickoff - DECISION, closing=False, fair=False)
@@ -301,6 +316,7 @@ def run_quality(provider, cfg: Config, start: datetime, end: datetime, min_n: in
     report["monthly"] = [{"month": m, "n": len(v["model"]), "ll_model": float(np.mean(v["model"])), "ll_close": float(np.mean(v["close"])),
                           **({"ll_meta": float(np.mean(v["meta"])), "n_meta": len(v["meta"])} if v.get("meta") else {})}
                          for m, v in sorted(monthly.items())]
+    report["sisal_vs_sharp"] = _sisal_vs_sharp(samples)
     params = fit_all(samples, min_n, calib_method)  # what the live analysis will use: fitted on every match of the window
     report["calib_methods"] = {fam: {**sc, "chosen": calib_method[fam]} for fam, sc in calib_scores.items()}
     report["meta"] = {key: {**v, "text": describe(Pool(**v), key.split("|")[1])} for key, v in params.items()}
@@ -333,6 +349,11 @@ def print_quality(report: dict) -> None:
             alone = (f" | senza quote n={m['n_alone']}: modello {m['ll_model_alone']:.4f} calibrato {m['ll_meta_alone']:.4f}"
                      if m.get("n_alone") else "")
             print(f"  {fam:<10} n={m['n']:<5} LL modello {m['ll_model']:.4f} (v1 {m['ll_v1']:.4f})" + same + alone)
+    if report.get("sisal_vs_sharp"):
+        print("\nSisal contro prezzo equo Pinnacle (2 ore prima del calcio d'inizio):")
+        for fam, v in report["sisal_vs_sharp"].items():
+            print(f"  {fam:<10} partite {v['n_matches']}, margine Sisal {v['margin']:.1%}, quote >= equa {v['share_fair']:.1%}, "
+                  f">= +2% {v['share_value']:.1%}, EV medio {v['mean_ev']:+.1%}, migliore {v['best_ev']:+.1%}")
     if report.get("calib_methods"):
         print("\nCalibrazione senza quote (log loss fuori campione, più basso = meglio):")
         for fam, sc in report["calib_methods"].items():

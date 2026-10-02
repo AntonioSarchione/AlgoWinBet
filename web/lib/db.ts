@@ -369,3 +369,32 @@ export const latestQuality = persist(async (): Promise<QualityRun | null> => {
     throw e;
   }
 }, "latestQuality", 600);
+
+// ---- paper trading registry (Fase 6): written by the analysis, settled by the collection ticks ----
+export type PaperLeg = {
+  id: number; fixture_id: string; competition: string; match: string; kickoff: string; market: string; status: string;
+  odds: number; p: number; p_market: number | null; ev: number; created_at: string; result: string | null; score: string | null;
+  close_odds: number | null; close_fair: number | null;
+};
+export type PaperSlip = {
+  id: number; created_at: string; legs: string; total_odds: number; bonus: number; joint: number; ev: number; ev_lower: number;
+  first_kickoff: string; last_kickoff: string; result: string | null; payout: number | null; clv: number | null;
+};
+
+export const paperRegistry = persist(async (): Promise<{ legs: PaperLeg[]; slips: PaperSlip[] } | null> => {
+  try {
+    const [legs, slips] = await Promise.all([
+      all<PaperLeg>(
+        "SELECT id, fixture_id, competition, match, kickoff, market, status, odds, p, p_market, ev, created_at, result, score, close_odds, close_fair " +
+          "FROM paper_legs ORDER BY kickoff, id",
+      ),
+      all<PaperSlip>(
+        "SELECT id, created_at, legs, total_odds, bonus, joint, ev, ev_lower, first_kickoff, last_kickoff, result, payout, clv FROM paper_slips ORDER BY id DESC LIMIT 200",
+      ),
+    ]);
+    return { legs, slips };
+  } catch (e) {
+    if (/no such table/i.test(String(e))) return null; // created by the first publish after Fase 6
+    throw e;
+  }
+}, "paperRegistry", 300);

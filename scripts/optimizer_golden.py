@@ -28,6 +28,7 @@ CASES = [
     {"name": "narrow-odds", "odds_min": 3.0, "odds_max": 6.0, "max_legs": 4},
     {"name": "long", "odds_min": 8.0, "odds_max": 40.0, "max_legs": 6},
     # 5+ legs at odds >= 1.25: the Sisal multiple bonus enters ev, ev_lower and the stake
+    {"name": "min-legs", "odds_min": None, "odds_max": None, "max_legs": 6, "min_legs": 3, "min_slip_ev": -0.6},
     {"name": "bonus", "odds_min": 8.0, "odds_max": 60.0, "max_legs": 8, "min_slip_ev": -0.6,
      "multi_bonus_min_odds": 1.0},
 ]
@@ -62,6 +63,7 @@ def build() -> dict:
         c.optimizer.odds_min = case["odds_min"] or c.optimizer.odds_min
         c.optimizer.odds_max = case["odds_max"] or c.optimizer.odds_max
         c.optimizer.min_slip_ev = case.get("min_slip_ev", c.optimizer.min_slip_ev)
+        c.optimizer.min_legs = case.get("min_legs", c.optimizer.min_legs)
         c.optimizer.multi_bonus_min_odds = case.get("multi_bonus_min_odds", c.optimizer.multi_bonus_min_odds)
         r = optimize(res.opportunities, res.analyses, c)
         assign_stakes(r.slips, c.risk)

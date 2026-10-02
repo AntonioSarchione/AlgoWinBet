@@ -5,6 +5,7 @@
    "odds_max": 15.0,
    "min_probability": 0.0,
    "max_legs": 8,
+   "min_legs": 1,
    "max_legs_per_fixture": 1,
    "max_legs_per_competition": 99,
    "min_leg_probability": 0.0,
@@ -2430,6 +2431,86 @@
    "max_legs": 6,
    "no_bet": true,
    "slips": []
+  },
+  {
+   "name": "min-legs",
+   "odds_min": null,
+   "odds_max": null,
+   "max_legs": 6,
+   "min_legs": 3,
+   "min_slip_ev": -0.6,
+   "no_bet": false,
+   "slips": [
+    {
+     "legs": [
+      [
+       "mock-1-20-04",
+       "TOTAL_GOALS|UNDER|3.5"
+      ],
+      [
+       "mock-0-20-03",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-1-20-01",
+       "MATCH_1X2|HOME|"
+      ]
+     ],
+     "total_odds": 2.0140379999999998,
+     "joint_probability": 0.47051326709539026,
+     "ev": -0.05236840056573444,
+     "ev_lower": -0.132285767460378,
+     "objective": 0.13647815157471946,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-0-20-03",
+       "MATCH_1X2|HOME|"
+      ],
+      [
+       "mock-0-20-00",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-01",
+       "MATCH_1X2|HOME|"
+      ]
+     ],
+     "total_odds": 2.031705,
+     "joint_probability": 0.46885705271444506,
+     "ev": -0.047420781714798355,
+     "ev_lower": -0.1279953365994022,
+     "objective": 0.13537703537490173,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-0-20-03",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-0-20-01",
+       "TOTAL_GOALS|OVER|1.5"
+      ],
+      [
+       "mock-1-20-01",
+       "MATCH_1X2|HOME|"
+      ]
+     ],
+     "total_odds": 2.0807800000000003,
+     "joint_probability": 0.457271575555628,
+     "ev": -0.04851845101536034,
+     "ev_lower": -0.1293858650313887,
+     "objective": 0.13082954183097484,
+     "stake": 0.0,
+     "bonus": 0.0
+    }
+   ]
   },
   {
    "name": "bonus",

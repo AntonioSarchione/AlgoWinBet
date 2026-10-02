@@ -50,6 +50,8 @@ def make_slip(legs: list[Opportunity], matrices, cfg: Config, C=None, idx=None) 
 
 def violations(s: Slip, cfg: Config) -> list[str]:
     o, v = cfg.optimizer, []
+    if len(s.legs) < o.min_legs:
+        v.append(f"{len(s.legs)} eventi < minimo {o.min_legs}")
     if s.total_odds < o.odds_min:
         v.append(f"quota {s.total_odds:.2f} < minima {o.odds_min}")
     if s.total_odds > o.odds_max:
@@ -147,7 +149,7 @@ def optimize(opps: list[Opportunity], analyses: dict[str, FixtureAnalysis], cfg:
         reasons.append(
             f"{len(elig)} opportunità idonee ma nessuna combinazione rispetta insieme quota {o.odds_min}-{o.odds_max}, "
             f"probabilità ≥ {o.min_probability:.0%}, correlazione ≤ {o.correlation_limit}, EV schedina ≥ {o.min_slip_ev:+.0%}, "
-            f"max {o.max_legs} leg."
+            f"da {o.min_legs} a {o.max_legs} eventi."
         )
         miss, viol = (None, [])
         if infeasible:
