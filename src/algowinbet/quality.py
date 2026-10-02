@@ -86,6 +86,15 @@ def _quotes(provider, ids: set[str], canon: dict[str, str]) -> dict[str, list[tu
     return out
 
 
+def _brand(book: str) -> str:
+    """OddsPapi slugs carry the country ("sisal.it"): compare brands."""
+    b = book.lower()
+    for suffix in (".it", "-it"):
+        if b.endswith(suffix):
+            return b[: -len(suffix)]
+    return b
+
+
 SANE = 0.12  # a reference price this far (in probability) from the market average is a feed error, not information
 
 
@@ -98,7 +107,7 @@ def _price(qs: list[tuple], family: list[tuple], books: tuple[str, ...], until: 
     for book in books:
         sel_odds = []
         for code, sel, line in family:
-            cand = [q for q in qs if q[0] == code and q[1] == sel and (q[2] or None) == line and q[3] == book
+            cand = [q for q in qs if q[0] == code and q[1] == sel and (q[2] or None) == line and _brand(q[3]) == book
                     and (q[6] == "close" if closing else (q[6] != "close" and (until is None or q[5] <= until)))]
             if not cand:
                 break

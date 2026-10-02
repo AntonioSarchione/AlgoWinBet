@@ -56,3 +56,10 @@ def test_reference_price_far_from_the_market_average_is_skipped():
     avg = _price(qs, fam, ("market-avg",), T0, closing=False, fair=True)[0]
     got = _price(qs, fam, ("betfair-ex", "market-avg"), T0, closing=False, fair=True, anchor=avg)
     assert got[1] == "market-avg"
+
+
+def test_price_matches_the_brand_whatever_the_country_suffix():
+    fam = [("MATCH_1X2", s, None) for s in ("HOME", "DRAW", "AWAY")]
+    qs = [("MATCH_1X2", s, None, "sisal.it", o, T0, "current") for s, o in zip(("HOME", "DRAW", "AWAY"), (2.0, 3.3, 3.8))]
+    got = _price(qs, fam, ("sisal", "market-avg"), T0, closing=False, fair=False)
+    assert got == ([2.0, 3.3, 3.8], "sisal")
