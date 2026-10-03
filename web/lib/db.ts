@@ -414,7 +414,27 @@ export type PaperSlip = {
   first_kickoff: string; last_kickoff: string; result: string | null; payout: number | null; clv: number | null;
 };
 
-export const paperRegistry = persist(async (): Promise<{ legs: PaperLeg[]; slips: PaperSlip[]; lastSettled: string | null } | null> => {
+type Registry = { legs: PaperLeg[]; slips: PaperSlip[]; lastSettled: string | null };
+
+// The registry is cached under its version (last recorded / settled row of selections and slips), read uncached on every
+// request: a time-based cache serves its stale copy to the first visit after it expires, so a settlement could show only
+// on the second visit.
+export const paperRegistry = cache(async (): Promise<Registry | null> => {
+  let version: string;
+  try {
+    const v = await all<{ a: string | null; b: number | null; c: string | null; d: number | null }>(
+      "SELECT (SELECT MAX(settled_at) FROM paper_legs) AS a, (SELECT MAX(id) FROM paper_legs) AS b, " +
+        "(SELECT MAX(settled_at) FROM paper_slips) AS c, (SELECT MAX(id) FROM paper_slips) AS d",
+    );
+    version = [v[0]?.a, v[0]?.b, v[0]?.c, v[0]?.d].join("|");
+  } catch (e) {
+    if (/no such table/i.test(String(e))) return null; // created by the first publish after Fase 6
+    throw e;
+  }
+  return registryAt(version);
+});
+
+const registryAt = persist(async (_version: string): Promise<Registry | null> => {
   try {
     const legSql = (sisal: string) =>
       "SELECT id, fixture_id, sel_key, competition, match, kickoff, market, status, odds, p, p_market, ev, created_at, result, score, close_odds, close_fair, " +
@@ -432,4 +452,4 @@ export const paperRegistry = persist(async (): Promise<{ legs: PaperLeg[]; slips
     if (/no such table/i.test(String(e))) return null; // created by the first publish after Fase 6
     throw e;
   }
-}, "paperRegistry", 60); // settlements land with the collection runs: a minute at most behind them
+}, "paperRegistry", 6 * 3600); // the version in the key changes with every recording / settlement

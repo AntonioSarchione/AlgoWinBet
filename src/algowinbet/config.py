@@ -86,6 +86,8 @@ class OptimizerCfg(BaseModel):
     max_legs_per_fixture: int = 1  # SGP needs a bookmaker combo quote; see joint pricing
     max_legs_per_competition: int = 99
     min_leg_probability: float = 0.0
+    # no selection under these odds enters a slip (user's rule, 2026-10-03): it adds noise and almost nothing to the slip
+    min_leg_odds: float = 1.2
     beam_width: int = 200
     output_count: int = 3
     max_overlap: float = 0.5  # Jaccard overlap allowed between output slips

@@ -172,7 +172,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           <label htmlFor="lmin">Quota singolo evento (min – max)</label>
           <div className="control">
             <Target size={17} aria-hidden="true" />
-            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1" placeholder="1.20" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
+            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1.2" placeholder="1.20" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
             <span className="dash">–</span>
             <input name="lmax" type="number" inputMode="decimal" step="0.05" min="1" placeholder="3.00" defaultValue={sp.lmax} aria-label="Quota massima del singolo evento" />
           </div>

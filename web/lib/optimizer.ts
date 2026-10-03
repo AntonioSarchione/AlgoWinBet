@@ -22,6 +22,9 @@ export type OptOpp = {
   dq_lineup: number;
 };
 
+// user's rule (2026-10-03): no selection under these odds in a slip, whatever the settings (noise, no value added)
+export const MIN_LEG_ODDS = 1.2;
+
 export type OptimizerCfg = {
   odds_min: number;
   odds_max: number;
@@ -31,6 +34,7 @@ export type OptimizerCfg = {
   max_legs_per_fixture: number;
   max_legs_per_competition: number;
   min_leg_probability: number;
+  min_leg_odds?: number; // no selection under these odds enters a slip (missing in older analyses: 1.2)
   beam_width: number;
   output_count: number;
   max_overlap: number;
@@ -185,9 +189,10 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
     reasons.push(`Nessuna selezione idonea (con valore${o.include_fair ? " o a quota equa" : ""}) su ${opps.length} con i filtri scelti.`);
     return { slips: [], noBet: true, reasons, eligible: 0, evaluated: 0 };
   }
-  elig = elig.filter((x) => x.p_final >= o.min_leg_probability);
+  const minLegOdds = Math.max(o.min_leg_odds ?? MIN_LEG_ODDS, MIN_LEG_ODDS);
+  elig = elig.filter((x) => x.p_final >= o.min_leg_probability && x.odds >= minLegOdds);
   if (!elig.length) {
-    reasons.push(`Tutte le opportunità hanno probabilità < soglia per leg ${pct(o.min_leg_probability)}.`);
+    reasons.push(`Tutte le opportunità hanno probabilità < soglia per leg ${pct(o.min_leg_probability)} o quota < ${minLegOdds.toFixed(2)}.`);
     return { slips: [], noBet: true, reasons, eligible: 0, evaluated: 0 };
   }
   // keep the best few candidates per fixture to bound the search space (insertion order = first appearance by score)
@@ -307,7 +312,7 @@ export function assignStakes(slips: Slip[], r: RiskCfg): void {
 export function legMinOdds(sl: Slip, legOdds: number, minEv: number): number {
   const payout = (1 + minEv) / Math.max(sl.joint_probability, 1e-9);
   const total = 1 + (payout - 1) / (1 + sl.bonus);
-  return (legOdds * total) / sl.total_odds;
+  return Math.max((legOdds * total) / sl.total_odds, MIN_LEG_ODDS);
 }
 
 // explain.py explain_slip (the parts the dashboard shows)
