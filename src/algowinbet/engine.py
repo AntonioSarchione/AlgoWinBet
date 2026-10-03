@@ -131,7 +131,7 @@ class Engine:
         out = {}
         for stat in self.cfg.model.stat_models:
             cm = self.count_model(stat, cutoff)
-            if cm is not None and cm.knows(f.home) and cm.knows(f.away):
+            if cm is not None and cm.knows(f.home) and cm.knows(f.away) and cm.sample_size(f.home, f.away) >= self.cfg.model.stat_min_team_matches:
                 out[stat] = (cm.matrix(f.home, f.away, f.competition, getattr(f, "neutral", False)), cm.sample_size(f.home, f.away))
         return out
 

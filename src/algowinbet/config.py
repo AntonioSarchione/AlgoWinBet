@@ -43,6 +43,9 @@ class ModelCfg(BaseModel):
     stat_options: dict[str, dict] = Field(default_factory=lambda: {"cards": {"shared": True, "level_half_life_days": 60.0, "l2": 5.0}})
     stat_markets_off: list[str] = Field(default_factory=lambda: ["CARDS_TOTAL", "CARDS_TEAM_HOME", "CARDS_TEAM_AWAY"])
     stat_min_history: int = 300
+    # each team needs this many matches with the statistic: national teams have a handful (GOAL stats of a few Nations
+    # League matches) and stat-eval missed their corner level by 3 a match, so they are never priced
+    stat_min_team_matches: int = 20
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results

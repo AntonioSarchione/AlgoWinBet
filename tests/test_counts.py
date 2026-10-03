@@ -121,3 +121,35 @@ def test_referee_key_and_factor():
     hs, as_ = cm.expected("A", "B", "L", referee="a strict")
     hn, an = cm.expected("A", "B", "L", referee="nobody")
     assert hs / hn == cm.ref_adj["a strict"] and hn == cm.expected("A", "B", "L")[0]
+
+
+def test_teams_with_few_stat_matches_are_not_priced():
+    from algowinbet.config import Config
+    from algowinbet.domain import Fixture
+    from algowinbet.engine import Engine
+
+    class P:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def stat_counts(self, stat):
+            return {r.fixture_id: (r.home_goals, r.away_goals) for r in self.rows}
+
+    rng = np.random.default_rng(3)
+    rows = _season(rng, size=6.0, n_rounds=40)
+    cfg = Config()
+    cfg.model.stat_min_history = 10
+    eng = Engine.__new__(Engine)
+    eng.cfg, eng.provider, eng._counts, eng._stat_rows = cfg, P(rows), {}, {}
+    import algowinbet.engine as engine_mod
+    engine_mod_history = engine_mod.history_at
+    engine_mod.history_at = lambda prov, comp, cutoff, seasons: rows
+    try:
+        f = Fixture(id="x", competition="L", home="A", away="F", kickoff=T0 + timedelta(days=200))
+        cfg.model.stat_min_team_matches = 5
+        assert "corners" in eng.stat_matrices(f, T0 + timedelta(days=200))
+        cfg.model.stat_min_team_matches = 10_000
+        eng._counts = {}
+        assert eng.stat_matrices(f, T0 + timedelta(days=200)) == {}
+    finally:
+        engine_mod.history_at = engine_mod_history
