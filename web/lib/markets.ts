@@ -12,6 +12,7 @@ export const MARKET_GROUPS = [
   "Risultato e gol esatti",
   "1° e 2° tempo",
   "Primo/ultimo gol",
+  "Corner",
 ] as const;
 export type MarketGroup = (typeof MARKET_GROUPS)[number];
 
@@ -36,6 +37,7 @@ const BY_CODE: Record<string, MarketGroup> = {
 export function marketGroup(selKey: string): MarketGroup {
   const code = selKey.split("|")[0] ?? "";
   const [base, period] = code.split("@");
+  if (base.startsWith("CORNERS_")) return "Corner";
   if (period || base.startsWith("HT_FT") || base.includes("HALF")) return "1° e 2° tempo";
   if (base.startsWith("TEAM_")) return "Gol squadra";
   return BY_CODE[base] ?? "Risultato e gol esatti";
