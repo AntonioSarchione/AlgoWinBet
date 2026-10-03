@@ -477,6 +477,34 @@ def cmd_raw_last(a) -> None:
         print("\n" + _json.dumps(data, ensure_ascii=False)[: a.dump])
 
 
+def cmd_registry_check(a) -> None:
+    """Registry diagnosis (no API request): slips recorded per day and per run, and for the matches of a team its recorded
+    selections, the half-time / goal-order details stored and the API-Football day reads."""
+    store = SnapshotStore(a.db)
+    print("schedine registrate per giorno (ultimi 7):")
+    for day, n in store.db.execute("SELECT substr(created_at, 1, 10) d, COUNT(*) FROM paper_slips GROUP BY d ORDER BY d DESC LIMIT 7").fetchall():
+        print(f"  {day}: {n}")
+    print("ultime pubblicazioni e schedine proposte:")
+    for rid, at in store.db.execute("SELECT id, created_at FROM pub_runs ORDER BY id DESC LIMIT 6").fetchall():
+        keys = store.db.execute("SELECT COUNT(*) FROM pub_slips WHERE run_id = ?", (rid,)).fetchone()[0]
+        mine = store.db.execute("SELECT COUNT(*) FROM paper_slips WHERE run_id = ?", (rid,)).fetchone()[0]
+        print(f"  run {rid} {at}: {keys} proposte, {mine} registrate per la prima volta in questo run")
+    if not a.team:
+        return
+    legs = store.db.execute("SELECT fixture_id, sel_key, kickoff, result, settled_at, score FROM paper_legs WHERE match LIKE ? "
+                            "ORDER BY kickoff DESC LIMIT 40", (f"%{a.team}%",)).fetchall()
+    fids = sorted({l[0] for l in legs})
+    for fid in fids:
+        link = store.db.execute("SELECT ext_id FROM fixture_links WHERE source = 'api-football' AND fixture_id = ?", (fid,)).fetchone()
+        print(f"partita {fid}: api-football {link[0] if link else 'NON COLLEGATA'}; 1H {store.stats_of(fid, '1H')}; "
+              f"FT {store.stats_of(fid, 'FT')}")
+    for fid, key, ko, res, at, score in legs:
+        print(f"  {ko} {key}: {res} ({score}, chiusa {at})")
+    for at, params, status in store.db.execute("SELECT fetched_at, params, status FROM raw_requests WHERE source = 'api-football' "
+                                               "AND endpoint IN ('/fixtures', '/fixtures/events') ORDER BY id DESC LIMIT 10").fetchall():
+        print(f"  api-football {at} {params} {status}")
+
+
 def cmd_inspect(a) -> None:
     """Debug a fixture's goal-total prices from the stored raw payloads (no API request): for each total-goals market of the
     catalogue, the raw OddsPapi row (market id, name, type, line, period, outcome, price) next to what we stored."""
@@ -1242,6 +1270,10 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
     rl.add_argument("--db", default="algowinbet.db")
     rl.set_defaults(fn=cmd_raw_last)
+    rc = sub.add_parser("registry-check", help="diagnosi del registro: schedine per giorno, dettagli di una partita (nessuna richiesta API)")
+    rc.add_argument("team", nargs="?", default="")
+    rc.add_argument("--db", default="turso")
+    rc.set_defaults(fn=cmd_registry_check)
     tm = sub.add_parser("teams", help="elenco squadre nel database (nessuna richiesta API)")
     tm.add_argument("--db", default="turso")
     tm.set_defaults(fn=cmd_teams)
