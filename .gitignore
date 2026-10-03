@@ -7,3 +7,6 @@ __pycache__/
 configs/calibration.json
 /data/
 *.zip
+
+# user-supplied reference documents (not ours to publish)
+docs/*.pdf

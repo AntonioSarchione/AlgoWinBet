@@ -61,3 +61,20 @@ def test_statistic_markets_settle_from_the_counts():
     assert stat_outcome(3, 2, ref) and not stat_outcome(2, 2, ref)
     assert stat_outcome(5, 5, SelectionRef(market_code="CORNERS_1X2", selection="DRAW"))
     assert stat_outcome(2, 4, SelectionRef(market_code="CORNERS_TEAM_AWAY", selection="OVER", line=3.5))
+
+
+def test_shared_factor_finds_correlated_counts():
+    rng = np.random.default_rng(1)
+    rows = []
+    for r in _season(rng, size=None, n_rounds=20):  # one gamma multiplier per match on both sides (referee): k_s = 4
+        g = rng.gamma(4.0, 1 / 4.0)
+        rows.append(r.model_copy(update={"home_goals": int(rng.poisson(2.2 * g)), "away_goals": int(rng.poisson(2.0 * g))}))
+    cm = CountModel("cards", shared=True).fit(rows, T0 + timedelta(days=70))
+    assert 2.5 < cm.shared_size < 6.5
+    m = cm.matrix("A", "B", "L")
+    assert abs(m.sum() - 1) < 1e-9
+    h = np.arange(16)
+    cov = (m * np.outer(h, h)).sum() - (m.sum(1) @ h) * (m.sum(0) @ h)
+    assert cov > 0.5  # the two sides move together
+    plain = CountModel("cards").fit(rows, T0 + timedelta(days=70))
+    assert plain.shared_size == float("inf")

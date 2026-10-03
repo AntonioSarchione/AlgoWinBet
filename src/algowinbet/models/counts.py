@@ -6,6 +6,10 @@ statistic's counts. The counts are over-dispersed (a match with many corners ten
 depend on referee and stakes), so the matrix uses a negative binomial with the dispersion measured on the fit's own
 residuals instead of a Poisson.
 
+Optional shared factor (shared=True): one match-level multiplier G ~ Gamma(k_s, 1/k_s) on both sides (referee, stakes,
+derby): the two counts become positively correlated, which the product of two independent rows cannot express. k_s comes
+from the weighted covariance of the home and away residuals; the totals' spread then follows the data.
+
 Data: football-data season files (every domestic league match, corners, yellow and red cards) and the GOAL match stats.
 Cups and national competitions without stats of their own use the teams' strengths from their leagues and the overall level.
 """
@@ -15,6 +19,7 @@ import math
 from datetime import datetime
 
 import numpy as np
+from scipy.special import gammaln, roots_genlaguerre
 from scipy.stats import nbinom, poisson
 
 from ..domain import MatchResult
@@ -24,11 +29,18 @@ GRID = {"corners": 31, "cards": 16}  # counts 0..30 corners, 0..15 cards per tea
 
 
 class CountModel:
-    def __init__(self, stat: str, xi: float = math.log(2) / 365.0, l2: float = 1.0):
+    def __init__(self, stat: str, xi: float = math.log(2) / 365.0, l2: float = 1.0, shared: bool = False,
+                 level_xi: float | None = None):
         self.stat = stat
         self.grid = GRID[stat]
         self.base = DixonColes(xi=xi, l2=l2, comp_mu=True)
         self.size = math.inf  # negative binomial size k: variance = mu + mu^2 / k (inf = Poisson)
+        self.shared = shared
+        self.shared_size = math.inf  # k_s of the match-level factor (inf = none)
+        # level_xi: the competition level re-measured with this (faster) decay after the fit, as a multiplier on both sides;
+        # a league whose counts drift (new refereeing guidelines) is followed sooner than the team strengths
+        self.level_xi = level_xi
+        self.level_adj: dict[str | None, float] = {}
         self.fitted = False
 
     def fit(self, rows: list[MatchResult], as_of: datetime) -> "CountModel":
@@ -43,8 +55,27 @@ class CountModel:
             y += [r.home_goals, r.away_goals]
             w += [wt, wt]
         mu_a, y_a, w_a = np.array(mu), np.array(y, dtype=float), np.array(w)
+        if self.level_xi is not None:
+            ratio: dict[str | None, list[float]] = {}
+            for i, r in enumerate(rows):
+                age = max((as_of - r.kickoff).total_seconds() / 86400.0, 0.0)
+                wl = math.exp(-self.level_xi * age)
+                acc = ratio.setdefault(r.competition, [0.0, 0.0])
+                acc[0] += wl * (y_a[2 * i] + y_a[2 * i + 1])
+                acc[1] += wl * (mu_a[2 * i] + mu_a[2 * i + 1])
+            self.level_adj = {c: (a / b if b > 0 else 1.0) for c, (a, b) in ratio.items()}
+            adj = np.repeat([self.level_adj.get(r.competition, 1.0) for r in rows], 2)
+            mu_a = mu_a * adj
+        inv_shared = 0.0
+        if self.shared:
+            mh, ma, yh, ya, wm = mu_a[0::2], mu_a[1::2], y_a[0::2], y_a[1::2], w_a[0::2]
+            cov = float(np.sum(wm * (yh - mh) * (ya - ma)))
+            inv_shared = max(cov / float(np.sum(wm * mh * ma)), 0.0)
+            self.shared_size = 1.0 / inv_shared if inv_shared > 0 else math.inf
         excess = float(np.sum(w_a * ((y_a - mu_a) ** 2 - mu_a)))
-        self.size = float(np.sum(w_a * mu_a**2) / excess) if excess > 0 else math.inf  # method of moments
+        # method of moments; with the shared factor, only what it leaves unexplained goes to each side's own dispersion
+        inv = excess / float(np.sum(w_a * mu_a**2)) - inv_shared
+        self.size = 1.0 / inv if inv > 1e-9 else math.inf
         self.fitted = True
         return self
 
@@ -57,7 +88,9 @@ class CountModel:
     def expected(self, home: str, away: str, competition: str | None = None, neutral: bool = False) -> tuple[float, float]:
         """A competition without stats of its own (cups) gets the overall level."""
         comp = competition if competition in self.base.mu_comp else None
-        return self.base.expected_goals(home, away, comp, neutral)
+        lh, la = self.base.expected_goals(home, away, comp, neutral)
+        f = self.level_adj.get(comp, 1.0) if comp is not None else 1.0
+        return lh * f, la * f
 
     def _pmf(self, lam: float) -> np.ndarray:
         g = np.arange(self.grid)
@@ -70,5 +103,11 @@ class CountModel:
 
     def matrix(self, home: str, away: str, competition: str | None = None, neutral: bool = False) -> np.ndarray:
         lh, la = self.expected(home, away, competition, neutral)
-        m = np.outer(self._pmf(lh), self._pmf(la))
+        if math.isinf(self.shared_size):
+            m = np.outer(self._pmf(lh), self._pmf(la))
+        else:  # E over G ~ Gamma(k, 1/k) of the product at (lh G, la G): Gauss-Laguerre nodes
+            k = self.shared_size
+            x, wq = roots_genlaguerre(24, k - 1.0)
+            wq = wq * np.exp(-gammaln(k))
+            m = sum(wi * np.outer(self._pmf(lh * xi / k), self._pmf(la * xi / k)) for xi, wi in zip(x, wq))
         return m / m.sum()
