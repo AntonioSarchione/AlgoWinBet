@@ -144,7 +144,8 @@ def test_mapper_links_fixture_and_maps_goal_markets_only():
     assert qs[("sisal.it", "MATCH_1X2", "HOME", None)] == 2.4 and qs[("sisal.it", "TOTAL_GOALS", "UNDER", 2.5)] == 1.85
     assert qs[("pinnacle", "BTTS", "YES", None)] == 1.9 and ("pinnacle", "BTTS", "NO", None) not in qs  # inactive price
     assert not any(b == "snai.it" for b, *_ in qs)  # suspended bookmaker
-    assert m.report.unmapped_markets == {"Corners Over/Under": 1}
+    assert not m.report.unmapped_markets  # corners are a market of their own since Fase 7, never total goals
+    assert not any(c == "TOTAL_GOALS" and ln == 9.5 for _, c, _, ln in qs)
     assert m.match_fixture(fixture_odds(start="2026-10-11T13:00:00Z"), cal).id == "goal:g1"  # moved by a day: same match
     assert m.match_fixture(fixture_odds(start="2026-10-16T13:00:00Z"), cal) is None and m.report.gaps  # too far apart
     twice = cal + [Fixture(id="goal:g9", competition="Coppa Italia", home="Genoa", away="Fiorentina", kickoff=utc(2026, 10, 13, 19))]
@@ -174,8 +175,8 @@ def test_snapshot_then_free_closing_under_the_goal_fixture_id():
     c, t = mk_client(routes, store)
     col = OddsCollector(c, store, ["17"], ["sisal", "pinnacle", "snai"], NAMES, now=lambda: NOW)
     st = col.sync_odds()
-    # both fixtures linked (Inter Milan / Parma Calcio 1913 by fuzzy names); sisal 5+5, pinnacle 4+4, snai suspended
-    assert st.saved["quotes"] == 18 and not st.errors and c.budget.used()[1] == 6  # markets + bookmakers + participants + 3 books
+    # both fixtures linked (Inter Milan / Parma Calcio 1913 by fuzzy names); sisal 6+6 with corners, pinnacle 4+4, snai suspended
+    assert st.saved["quotes"] == 20 and not st.errors and c.budget.used()[1] == 6  # markets + bookmakers + participants + 3 books
     assert sorted(u.split("bookmaker=")[1].split("&")[0] for u in t.calls if "odds-by-tournaments" in u) == ["pinnacle", "sisal.it", "snai.it"]
     assert {q.bookmaker for q in SnapshotProvider(store).get_quotes("goal:g1")} == {"sisal.it", "pinnacle"}
     assert col.sync_closing().requests == 0  # match not played yet
@@ -555,7 +556,7 @@ def test_bookings_and_corners_totals_are_never_goal_totals():
         {"marketId": 778, "marketName": "Over/Under 2.5", "sportId": 10, "outcomes": []},  # no type, plain goals: still guessed
     ]
     m = OddsPapiMapper(NAMES, cat, PARTICIPANTS)
-    assert m._market(10946) is None and m._market(777) is None and m._market(1200) is None
+    assert m._market(10946) == ("CARDS_TOTAL", 8.5) and m._market(777) is None and m._market(1200) == ("CORNERS_TOTAL", 9.5)
     assert m._market(778) == ("TOTAL_GOALS", 2.5) and m._market(1010) == ("TOTAL_GOALS", 2.5)
 
 

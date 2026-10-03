@@ -8,6 +8,10 @@ Dixon-Coles one). FIRST_GOAL / LAST_GOAL follow from competing Poisson processes
 probability() returns the win probability given no refund and void_probability() the refund probability.
 
 New goal-based market = add a MarketType + a mask rule. Adding it to the registry is what enables it (spec 45.2).
+
+Corners and cards (Fase 7): the same rules over a count grid of that statistic (home x away), priced from its own matrix
+(models/counts.py). Their codes carry the statistic (CORNERS_TOTAL = TOTAL_GOALS over corners); STAT_MARKETS maps each one
+to its goal rule.
 """
 from __future__ import annotations
 
@@ -74,8 +78,47 @@ REGISTRY: dict[str, MarketType] = {
         # order of the goals (competing Poisson processes)
         MarketType("FIRST_GOAL", "Goals", "SEQUENCE", ("HOME", "NONE", "AWAY"), True),
         MarketType("LAST_GOAL", "Goals", "SEQUENCE", ("HOME", "NONE", "AWAY"), True),
+        # corners and cards (count grid of the statistic, see STAT_MARKETS)
+        MarketType("CORNERS_1X2", "Corners", "CORNERS", ("HOME", "DRAW", "AWAY"), True),
+        MarketType("CORNERS_TOTAL", "Corners", "CORNERS", ("OVER", "UNDER"), True, True),
+        MarketType("CORNERS_TEAM_HOME", "Corners", "CORNERS", ("OVER", "UNDER"), True, True),
+        MarketType("CORNERS_TEAM_AWAY", "Corners", "CORNERS", ("OVER", "UNDER"), True, True),
+        MarketType("CARDS_1X2", "Cards", "CARDS", ("HOME", "DRAW", "AWAY"), True),
+        MarketType("CARDS_TOTAL", "Cards", "CARDS", ("OVER", "UNDER"), True, True),
+        MarketType("CARDS_TEAM_HOME", "Cards", "CARDS", ("OVER", "UNDER"), True, True),
+        MarketType("CARDS_TEAM_AWAY", "Cards", "CARDS", ("OVER", "UNDER"), True, True),
     ]
 }
+
+# stat market -> (statistic, goal rule it applies to that statistic's counts)
+STAT_MARKETS: dict[str, tuple[str, str]] = {
+    f"{p}_{k}": (stat, rule) for p, stat in (("CORNERS", "corners"), ("CARDS", "cards"))
+    for k, rule in (("1X2", "MATCH_1X2"), ("TOTAL", "TOTAL_GOALS"), ("TEAM_HOME", "TEAM_TOTAL_HOME"), ("TEAM_AWAY", "TEAM_TOTAL_AWAY"))
+}
+
+
+def stat_of(market_code: str) -> str | None:
+    """'corners' / 'cards' for a statistic market (full time only), None for goal markets."""
+    spec = STAT_MARKETS.get(market_code)
+    return spec[0] if spec else None
+
+
+def stat_probability(matrix: np.ndarray, ref: SelectionRef) -> float:
+    """Probability of a statistic market from that statistic's count grid (any size)."""
+    spec = STAT_MARKETS.get(ref.market_code)
+    if spec is None:
+        raise UnsupportedMarket(f"{ref.market_code}: not a statistic market")
+    n = matrix.shape[0]
+    i, j = np.meshgrid(np.arange(n), np.arange(matrix.shape[1]), indexing="ij")
+    return float(matrix[_rule(spec[1], ref.selection, ref.line, i, j)].sum())
+
+
+def stat_outcome(home: float, away: float, ref: SelectionRef) -> bool:
+    """Settles a statistic market from the final counts."""
+    spec = STAT_MARKETS.get(ref.market_code)
+    if spec is None:
+        raise UnsupportedMarket(f"{ref.market_code}: not a statistic market")
+    return bool(_rule(spec[1], ref.selection, ref.line, np.array([int(home)]), np.array([int(away)]))[0])
 
 PERIODS = ("H1", "H2")
 FIRST_HALF_SHARE = 0.45  # share of the expected goals scored before half-time (to be re-estimated from half-time scores)
@@ -100,9 +143,13 @@ def family_of(market_code: str) -> str:
 
 
 def is_supported(ref: SelectionRef) -> bool:
-    base, _ = split_code(ref.market_code)
+    base, period = split_code(ref.market_code)
     try:
-        if base in SEQUENCE:
+        if base in STAT_MARKETS:
+            if period:
+                raise UnsupportedMarket(ref.market_code)  # first-half corners and cards: not modelled
+            stat_probability(np.ones((2, 2)) / 4, ref)
+        elif base in SEQUENCE:
             if ref.selection not in REGISTRY[base].selections:
                 raise UnsupportedMarket(ref.selection)
         elif _needs_halves(ref.market_code):
@@ -404,6 +451,13 @@ def describe(ref: SelectionRef) -> str:
 
 def _describe(ref: SelectionRef) -> str:
     c, s, ln = ref.market_code, ref.selection, ref.line
+    if c in STAT_MARKETS:
+        what = "corner" if c.startswith("CORNERS") else "cartellini"
+        kind = STAT_MARKETS[c][1]
+        if kind == "MATCH_1X2":
+            return f"1X2 {what}: " + {"HOME": "1 (casa)", "DRAW": "X (pari)", "AWAY": "2 (ospite)"}[s]
+        who = {"TOTAL_GOALS": "totale", "TEAM_TOTAL_HOME": "squadra casa", "TEAM_TOTAL_AWAY": "squadra ospite"}[kind]
+        return f"{'Over' if s == 'OVER' else 'Under'} {ln} {what} {who}"
     if c == "DRAW_NO_BET":
         return f"Draw no bet: {'1 (casa)' if s == 'HOME' else '2 (ospite)'}"
     if c in ("TEAM_ODD_EVEN_HOME", "TEAM_ODD_EVEN_AWAY"):

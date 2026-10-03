@@ -129,3 +129,26 @@ def test_detail_that_never_arrives_closes_as_not_settleable_and_reopens_later():
     s.save_stats("api-football", [MatchStat(fixture_id=f.id, period="1H", stat="goals", home=1, away=0, observed_at=f.kickoff)])
     settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=4))
     assert get() == "won"  # reopened within the week once the half-time score is known
+
+
+def test_corner_and_card_selections_settle_from_the_match_stats():
+    from algowinbet.domain import MatchStat
+    s, mock, rid, res = _published()
+    f = res.fixtures[2]
+    keys = ["CORNERS_TOTAL|OVER|9.5", "CARDS_TOTAL|UNDER|4.5", "CORNERS_1X2|AWAY|"]
+    for k in keys:
+        s.db.execute("INSERT INTO paper_legs(fixture_id, sel_key, competition, match, kickoff, market, status, odds, bookmaker, p, ev, run_id, "
+                     "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (f.id, k, f.competition, "x", f.kickoff.isoformat(), k, "FAIR", 1.9, "sisal", 0.5, 0.0, rid, "x"))
+    s.db.commit()
+    s.save_results("mock", [MatchResult(fixture_id=f.id, competition=f.competition, home=f.home, away=f.away, kickoff=f.kickoff,
+                                        home_goals=1, away_goals=0)], f.kickoff + timedelta(hours=3))
+    get = lambda k: s.db.execute("SELECT result FROM paper_legs WHERE fixture_id=? AND sel_key=?", (f.id, k)).fetchone()[0]
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=1))
+    assert all(get(k) is None for k in keys)  # season file not in yet: wait
+    at = f.kickoff + timedelta(days=2)
+    s.save_stats("football-data", [MatchStat(fixture_id=f.id, period="FT", stat="corners", home=4, away=7, observed_at=at),
+                                   MatchStat(fixture_id=f.id, period="FT", stat="yellow_cards", home=2, away=1, observed_at=at),
+                                   MatchStat(fixture_id=f.id, period="FT", stat="red_cards", home=0, away=1, observed_at=at)])
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=2))
+    assert [get(k) for k in keys] == ["won", "won", "won"]  # 11 corners, 4 cards (2 + 1 + a red), away more corners

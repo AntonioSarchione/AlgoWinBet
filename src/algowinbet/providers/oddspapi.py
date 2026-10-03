@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..domain import Fixture, OddsQuote, SelectionRef
-from ..markets import is_supported, split_code
+from ..markets import is_supported, split_code, STAT_MARKETS
 from ..names import TeamNames, normalize
 from ..snapshots import BudgetGuard, SnapshotStore
 from .goalapi import MappingReport, Transport, parse_dt, urllib_transport
@@ -225,14 +225,19 @@ class OddsPapiMapper:
         "highestscoringh-team2": "HIGHEST_HALF_AWAY", "toscoreinbh-team1": "SCORE_BOTH_HALVES_HOME",
         "toscoreinbh-team2": "SCORE_BOTH_HALVES_AWAY", "winbothh-team1": "WIN_BOTH_HALVES_HOME", "winbothh-team2": "WIN_BOTH_HALVES_AWAY",
         "wineitherh-team1": "WIN_EITHER_HALF_HOME", "wineitherh-team2": "WIN_EITHER_HALF_AWAY",
+        # Fase 7: corners and bookings (cards), full time only (first-half lines are dropped by is_supported)
+        "1x2-corners": "CORNERS_1X2", "totals-corners": "CORNERS_TOTAL", "teamtotals-corners-team1": "CORNERS_TEAM_HOME",
+        "teamtotals-corners-team2": "CORNERS_TEAM_AWAY", "1x2-bookings": "CARDS_1X2", "totals-bookings": "CARDS_TOTAL",
+        "teamtotals-bookings-team1": "CARDS_TEAM_HOME", "teamtotals-bookings-team2": "CARDS_TEAM_AWAY",
     }
-    # catalogue period -> our suffix; markets over both halves carry no period. Corners, bookings and player props are other
-    # marketTypes and never reach this table.
+    # catalogue period -> our suffix; markets over both halves carry no period. Player props and the corner/booking types not
+    # listed above are other marketTypes and never reach this table.
     PERIOD_SUFFIX = {"fulltime": "", "full time": "", "ft": "", "": "", "none": "", "p1": "@H1", "p2": "@H2"}
     WHOLE_MATCH_ONLY = {"FIRST_GOAL", "LAST_GOAL", "HT_FT", "HIGHEST_HALF", "HIGHEST_HALF_HOME", "HIGHEST_HALF_AWAY",
                         "SCORE_BOTH_HALVES_HOME", "SCORE_BOTH_HALVES_AWAY", "WIN_BOTH_HALVES_HOME", "WIN_BOTH_HALVES_AWAY",
                         "WIN_EITHER_HALF_HOME", "WIN_EITHER_HALF_AWAY"}
-    LINE_CODES = {"TOTAL_GOALS", "TEAM_TOTAL_HOME", "TEAM_TOTAL_AWAY", "ASIAN_HANDICAP", "EURO_HANDICAP"}
+    LINE_CODES = {"TOTAL_GOALS", "TEAM_TOTAL_HOME", "TEAM_TOTAL_AWAY", "ASIAN_HANDICAP", "EURO_HANDICAP", "CORNERS_TOTAL",
+                  "CORNERS_TEAM_HOME", "CORNERS_TEAM_AWAY", "CARDS_TOTAL", "CARDS_TEAM_HOME", "CARDS_TEAM_AWAY"}
 
     def _market(self, mid: int) -> tuple[str, float | None] | None:
         """(market_code, line) for full-time goal markets; None for anything else (counted as unmapped)."""
@@ -290,6 +295,8 @@ class OddsPapiMapper:
 
     def _selection(self, code: str, mid: int, oid: int, fixture: Fixture) -> str | None:
         code = split_code(code)[0]
+        if code in STAT_MARKETS:  # corners / cards: the outcome names of the goal market they mirror
+            code = STAT_MARKETS[code][1]
         label = self.markets.get(mid, {}).get("_out", {}).get(oid, "")
         t = label.strip().lower()
         if code == "MATCH_1X2":

@@ -449,6 +449,29 @@ class SnapshotProvider:
         return sorted((r for r in self._unique_results()[0] if (not competitions or r.competition in competitions) and r.available_at <= until),
                       key=lambda r: (r.kickoff, r.fixture_id))
 
+    def stat_counts(self, stat: str) -> dict[str, tuple[float, float]]:
+        """Full-time (home, away) counts of 'corners' or 'cards' (yellow + red) per match, under the canonical result id.
+        GOAL lists red cards only when there is one: with the yellow cards known, a missing red count is 0."""
+        names = ("corners",) if stat == "corners" else ("yellow_cards", "red_cards")
+        marks = ",".join("?" * len(names))
+        rows = self.store.db.execute(f"SELECT fixture_id, stat, home, away FROM match_stats WHERE period='FT' AND stat IN ({marks})",
+                                     names).fetchall()
+        canon = self._unique_results()[1]
+        got: dict[str, dict[str, tuple]] = {}
+        for fid, name, h, a in rows:
+            got.setdefault(canon.get(fid, fid), {})[name] = (h, a)
+        out = {}
+        for fid, d in got.items():
+            first = d.get(names[0])
+            if not first or first[0] is None or first[1] is None:
+                continue
+            h, a = first
+            if stat == "cards":
+                red = d.get("red_cards") or (0, 0)
+                h, a = h + (red[0] or 0), a + (red[1] or 0)
+            out[fid] = (float(h), float(a))
+        return out
+
     def international_results(self) -> bytes | None:
         """Latest international results CSV (national-team Elo), downloaded weekly by the scheduler."""
         if not hasattr(self, "_intl"):

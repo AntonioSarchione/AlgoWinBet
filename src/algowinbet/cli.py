@@ -571,6 +571,19 @@ def cmd_stat_coverage(a) -> None:
         store.close()
 
 
+def cmd_stat_eval(a) -> None:
+    """Fase 7: walk-forward log loss of the corners / cards models against simple baselines (no request)."""
+    from .stateval import evaluate_stat, print_stat_report
+    store = SnapshotStore(a.db)
+    try:
+        prov = SnapshotProvider(store)
+        end = datetime.now(timezone.utc)
+        for stat in a.stats:
+            print_stat_report(stat, evaluate_stat(prov, stat, end - timedelta(weeks=a.weeks), end))
+    finally:
+        store.close()
+
+
 def _duplicate_report(store: SnapshotStore, examples: int) -> None:
     """Results stored twice (same clubs, kickoff within 3h, different ids): count, and for a few pairs the raw GOAL rows of
     both ids with the request that returned them, to see where the second id comes from."""
@@ -1171,6 +1184,11 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("--db", default="algowinbet.db")
     rm.add_argument("--aliases", default="configs/team_aliases.json")
     rm.set_defaults(fn=cmd_remap_odds)
+    se = sub.add_parser("stat-eval", help="Fase 7: verifica walk-forward dei modelli corner e cartellini (nessuna richiesta)")
+    se.add_argument("--db", default="turso")
+    se.add_argument("--weeks", type=int, default=26)
+    se.add_argument("--stats", nargs="+", default=["corners", "cards"])
+    se.set_defaults(fn=cmd_stat_eval)
     sc = sub.add_parser("stat-coverage", help="Fase 7: corner e cartellini salvati per fonte e competizione (nessuna richiesta)")
     sc.add_argument("--db", default="turso")
     sc.add_argument("--all", action="store_true", help="tutte le statistiche, non solo corner e cartellini")

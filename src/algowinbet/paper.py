@@ -17,13 +17,15 @@ import math
 from datetime import datetime, timedelta, timezone
 
 from .domain import OpportunityStatus, SelectionRef
-from .markets import UnsupportedMarket, complete_group, needs_goal_order, needs_half_time, outcome, sequence_outcome, void_outcome
+from .markets import (UnsupportedMarket, complete_group, needs_goal_order, needs_half_time, outcome, sequence_outcome, stat_of,
+                      stat_outcome, void_outcome)
 from .pricing import devig
 
 RECORDED = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.FAIR}
 SETTLE_AFTER = timedelta(hours=2, minutes=30)  # from kickoff: the match is over
 GIVE_UP = timedelta(days=7)  # no result after a week (abandoned, unknown id): closed as not settleable
 DETAIL_WAIT = timedelta(days=2)  # half-time score / goal order still missing after this: closed as not settleable
+STAT_WAIT = timedelta(days=6)  # corners / cards: the season files arrive a few days after the match
 SHARP = ("pinnacle", "betfair-ex")
 
 SCHEMA = """
@@ -131,8 +133,14 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
             continue
         ref = _ref(key)
         ht = _half_time(store, fid, r)
+        stat = stat_of(ref.market_code)
         try:
-            if needs_goal_order(ref.market_code):
+            if stat:
+                counts = _stat_count(store, fid, stat)
+                if counts is None:
+                    raise UnsupportedMarket(f"{stat}: counts not known yet")
+                res = "won" if stat_outcome(counts[0], counts[1], ref) else "lost"
+            elif needs_goal_order(ref.market_code):
                 ft = store.stats_of(fid, "FT")
                 won = sequence_outcome(r.home_goals, r.away_goals, ref, ft.get("first_goal_minute"), ft.get("last_goal_minute"))
                 res = "won" if won else "lost"
@@ -141,8 +149,10 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
             else:
                 res = "won" if outcome(r.home_goals, r.away_goals, ref, ht) else "lost"
         except UnsupportedMarket:
-            detail = needs_half_time(ref.market_code) or needs_goal_order(ref.market_code)
-            if before is not None or (detail and t - datetime.fromisoformat(ko) < DETAIL_WAIT):
+            age = t - datetime.fromisoformat(ko)
+            waiting = (stat and age < STAT_WAIT) or (
+                (needs_half_time(ref.market_code) or needs_goal_order(ref.market_code)) and age < DETAIL_WAIT)
+            if before is not None or waiting:
                 continue  # half-time score / goal order may still arrive; already closed as not settleable: leave it
             res = "non valutabile"  # what the scores cannot settle
         close_odds, close_fair = closing_prices(store, fid, ref)
@@ -153,6 +163,18 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     store.db.commit()
     done["slips"] = _settle_slips(store, t)
     return done
+
+
+def _stat_count(store, fixture_id: str, stat: str) -> tuple[float, float] | None:
+    """Full-time corners, or cards (yellow + red: a missing red count is 0 once the yellows are known)."""
+    ft = store.stats_of(fixture_id, "FT")
+    first = ft.get("corners" if stat == "corners" else "yellow_cards")
+    if not first or first[0] is None or first[1] is None:
+        return None
+    if stat == "corners":
+        return first
+    red = ft.get("red_cards") or (0, 0)
+    return first[0] + (red[0] or 0), first[1] + (red[1] or 0)
 
 
 def _half_time(store, fixture_id: str, r) -> tuple[int, int] | None:

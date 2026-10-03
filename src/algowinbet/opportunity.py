@@ -10,7 +10,7 @@ import numpy as np
 from .calibration import CalibrationSet
 from .config import Config
 from .domain import Opportunity, OpportunityStatus, Player, SelectionRef
-from .markets import UnsupportedMarket, family_of, probability, void_probability
+from .markets import UnsupportedMarket, family_of, probability, void_probability, stat_of, stat_probability
 from .meta import FAMILY_SELECTIONS, MetaSet, family_key, group_of
 from .information import Adjustment, PlayerImpactModel, TeamAvailability, build_availability
 from .models import DixonColes
@@ -98,6 +98,7 @@ def analyze_fixture(
     impact: PlayerImpactModel | None = None,
     roster: list[Player] | None = None,
     meta: MetaSet | None = None,
+    stats: dict[str, tuple] | None = None,
 ) -> FixtureAnalysis:
     calib = calib or CalibrationSet()
     f = state.fixture
@@ -149,17 +150,29 @@ def analyze_fixture(
     for v in views:
         if v.best_odds < cfg.thresholds.min_odds:
             continue
+        stat = stat_of(v.ref.market_code)
         try:
-            p_s = probability(matrix, v.ref)
+            if stat:
+                # corners / cards: their own count matrix (models/counts.py); lineups do not move it (yet)
+                if stat not in (stats or {}):
+                    raise UnsupportedMarket(f"{stat}: no model for this match")
+                sm, n_stat = stats[stat]
+                p_s = stat_probability(sm, v.ref)
+            else:
+                p_s = probability(matrix, v.ref)
         except UnsupportedMarket:
             skipped[v.ref.market_code] = skipped.get(v.ref.market_code, 0) + 1
             continue
-        p_blind = probability(matrix_blind, v.ref)
-        effect_sd = abs(probability(m_hi, v.ref) - probability(m_lo, v.ref)) / 2
-        if boot_matrices:
-            std_base = float(np.std([probability(m, v.ref) for m in boot_matrices]))
+        if stat:
+            p_blind, effect_sd = p_s, 0.0
+            std_base = math.sqrt(max(p_s * (1 - p_s), 1e-4) / max(n_stat, 3))
         else:
-            std_base = math.sqrt(max(p_s * (1 - p_s), 1e-4) / n_eff)  # empirical proxy: rmse ~ sqrt(pq/n_matches)
+            p_blind = probability(matrix_blind, v.ref)
+            effect_sd = abs(probability(m_hi, v.ref) - probability(m_lo, v.ref)) / 2
+            if boot_matrices:
+                std_base = float(np.std([probability(m, v.ref) for m in boot_matrices]))
+            else:
+                std_base = math.sqrt(max(p_s * (1 - p_s), 1e-4) / n_eff)  # empirical proxy: rmse ~ sqrt(pq/n_matches)
         std_s = math.sqrt(std_base**2 + effect_sd**2)  # + uncertainty of the lineup/availability adjustment
         stale = bool(info_t is not None and v.best_observed_at < info_t - timedelta(minutes=10) and abs(p_s - p_blind) >= 0.01)
         has_mkt = v.p_market is not None
@@ -200,7 +213,7 @@ def analyze_fixture(
         p_lo, p_hi = max(1e-4, p_fin - z * unc), min(1 - 1e-4, p_fin + z * unc)
         fair = 1 / p_fin
         p_mkt = v.p_market
-        void = void_probability(matrix, v.ref)
+        void = 0.0 if stat else void_probability(matrix, v.ref)
         if void > 0:
             # Draw no bet: everything above is "win given no refund". Keep that for the fair price, then switch to the
             # probability that gives the same expected return at this price (win pays the odds, refund pays 1), so EV, the

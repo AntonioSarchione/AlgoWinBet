@@ -18,6 +18,7 @@ from .models import DixonColes
 from .opportunity import FixtureAnalysis, analyze_fixture
 from .optimizer import OptimizerResult, optimize
 from .risk import assign_stakes
+from .models.counts import CountModel
 from .state import _dedupe, build_state, history_at, season_start
 
 
@@ -76,6 +77,8 @@ class Engine:
         self._rosters: dict[str, list[Player]] = {}
         self._elo: tuple[EloTimeline | None, EloTimeline | None] | None = None
         self._intl: list | None = None
+        self._counts: dict[tuple[str, datetime], CountModel | None] = {}
+        self._stat_rows: dict[str, dict[str, tuple[float, float]]] = {}
 
     # ---------------------------------------------------------------- models
     def roster(self, competition: str) -> list[Player]:
@@ -104,6 +107,30 @@ class Engine:
         if key not in self._models:
             self._models[key] = self._fit_hist(history_at(self.provider, competition, cutoff, m.history_seasons), cutoff, comp_mu=False)
         return self._models[key]
+
+    def count_model(self, stat: str, cutoff: datetime) -> CountModel | None:
+        """Corners / cards model on every match with that statistic known at cutoff (same seasons and decay as goals)."""
+        key = (stat, cutoff)
+        if key not in self._counts:
+            m = self.cfg.model
+            fn = getattr(self.provider, "stat_counts", None)
+            if stat not in self._stat_rows:
+                self._stat_rows[stat] = fn(stat) if fn else {}
+            counts = self._stat_rows[stat]
+            rows = [r.model_copy(update={"home_goals": int(counts[r.fixture_id][0]), "away_goals": int(counts[r.fixture_id][1])})
+                    for r in history_at(self.provider, None, cutoff, m.history_seasons) if r.fixture_id in counts]
+            self._counts[key] = (CountModel(stat, xi=math.log(2) / m.xi_half_life_days, l2=m.l2).fit(rows, cutoff)
+                                 if len(rows) >= m.stat_min_history else None)
+        return self._counts[key]
+
+    def stat_matrices(self, f: Fixture, cutoff: datetime) -> dict[str, tuple]:
+        """statistic -> (count matrix, matches of the less-known team) for one match, for the statistics with a model."""
+        out = {}
+        for stat in self.cfg.model.stat_models:
+            cm = self.count_model(stat, cutoff)
+            if cm is not None and cm.knows(f.home) and cm.knows(f.away):
+                out[stat] = (cm.matrix(f.home, f.away, f.competition, getattr(f, "neutral", False)), cm.sample_size(f.home, f.away))
+        return out
 
     def elo(self) -> tuple[EloTimeline | None, EloTimeline | None]:
         """(clubs, national teams) rating timelines, built once: lookups read the rating known at the cutoff."""
@@ -210,7 +237,8 @@ class Engine:
             state = build_state(self.provider, f, cutoff, roster, quote_window_hours=self.cfg.ensemble.quote_window_hours)
             if extra_events:
                 state.events = _dedupe(state.events + [e for e in extra_events if e.observed_at <= cutoff])
-            a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster, self.meta)
+            a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster, self.meta,
+                                stats=self.stat_matrices(f, mc))
             if markets:
                 a.opportunities = [o for o in a.opportunities if o.ref.market_code in markets]
             if a.opportunities:

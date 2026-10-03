@@ -32,6 +32,9 @@ class ModelCfg(BaseModel):
         "world_cup": 65.0, "continental": 60.0, "qualification": 45.0, "other": 20.0, "friendly": 10.0})
     nation_importance: dict[str, float] | None = None
     nation_half_life_days: float | None = 1095.0
+    # Fase 7: corners and cards from count models (models/counts.py); a statistic with fewer matches than this is not priced
+    stat_models: list[str] = Field(default_factory=list)  # ["corners", "cards"] once the walk-forward check (stat-eval) passes
+    stat_min_history: int = 300
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
