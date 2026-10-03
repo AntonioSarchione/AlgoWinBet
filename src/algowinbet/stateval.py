@@ -40,6 +40,7 @@ def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: 
     scores: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     level: dict[str, list[float]] = defaultdict(list)
     by_comp: dict[str, list[list[float]]] = defaultdict(lambda: [[], []])
+    by_month: dict[str, list[list[float]]] = defaultdict(lambda: [[], []])
     sizes: dict[str, tuple[float, float]] = {}
     monday = start - timedelta(days=start.weekday())
     monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -76,6 +77,9 @@ def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: 
             level["accaduto"].append(h + a)
             by_comp[r.competition][0].append(lh + la)
             by_comp[r.competition][1].append(h + a)
+            best = models.get("tutto", nb)
+            by_month[r.kickoff.strftime("%Y-%m")][0].append(sum(best.expected(r.home, r.away, r.competition)))
+            by_month[r.kickoff.strftime("%Y-%m")][1].append(h + a)
             if "livello" in models:
                 level["previsto livello"].append(sum(models["livello"].expected(r.home, r.away, r.competition)))
             for name, m in mats.items():
@@ -89,7 +93,8 @@ def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: 
     return {"scores": {k: {m: (float(np.mean(v)), len(v)) for m, v in d.items()} for k, d in scores.items()},
             "level": {k: float(np.mean(v)) for k, v in level.items()}, "size": size, "sizes": sizes,
             "by_comp": {c: (float(np.mean(p)), float(np.mean(a)), len(a)) for c, (p, a) in by_comp.items()},
-            "variants": list(VARIANTS[stat])}
+            "variants": list(VARIANTS[stat]),
+            "by_month": {c: (float(np.mean(p)), float(np.mean(a)), len(a)) for c, (p, a) in sorted(by_month.items())}}
 
 
 def print_stat_report(stat: str, rep: dict) -> None:
@@ -106,5 +111,7 @@ def print_stat_report(stat: str, rep: dict) -> None:
               + (f" / previsto con livello recente {lv['previsto livello']:.2f}" if "previsto livello" in lv else ""))
     for c, (p, a, n) in sorted(rep.get("by_comp", {}).items(), key=lambda x: -x[1][2]):
         print(f"    {c}: previsto {p:.2f} / accaduto {a:.2f} ({n} partite)")
+    for c, (p, a, n) in rep.get("by_month", {}).items():
+        print(f"    mese {c}: previsto {p:.2f} / accaduto {a:.2f} ({n} partite)")
     for name, (k, ks) in rep.get("sizes", {}).items():
         print(f"  {name}: dispersione per squadra {k:.1f}, fattore condiviso k_s {ks:.1f}")
