@@ -33,7 +33,10 @@ class ModelCfg(BaseModel):
     nation_importance: dict[str, float] | None = None
     nation_half_life_days: float | None = 1095.0
     # Fase 7: corners and cards from count models (models/counts.py); a statistic with fewer matches than this is not priced
-    stat_models: list[str] = Field(default_factory=list)  # ["corners", "cards"] once the walk-forward check (stat-eval) passes
+    # stat-eval 2026-10-03 (26 weeks, 852 league matches): corners beat the league average (1X2 corners log loss 0.888 vs 0.929,
+    # Over 9.5 0.687 vs 0.695); cards do not (Over 4.5 0.630 vs 0.624, level 4.15 predicted vs 3.85): off until the referee and
+    # Sisal's counting rule are in
+    stat_models: list[str] = Field(default_factory=lambda: ["corners"])
     stat_min_history: int = 300
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0

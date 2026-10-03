@@ -13,7 +13,7 @@ from .config import Config
 from .domain import Fixture, InformationEvent, Opportunity, OpportunityStatus, Player, SelectionRef
 from .explain import explain_slip
 from .information import PlayerImpactModel, base_rates, resolve
-from .markets import family_of
+from .markets import family_of, stat_of
 from .models import DixonColes
 from .opportunity import FixtureAnalysis, analyze_fixture
 from .optimizer import OptimizerResult, optimize
@@ -238,7 +238,7 @@ class Engine:
             if extra_events:
                 state.events = _dedupe(state.events + [e for e in extra_events if e.observed_at <= cutoff])
             a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster, self.meta,
-                                stats=self.stat_matrices(f, mc))
+                                stats=self.stat_matrices(f, mc) if any(stat_of(q.market_code) for q in state.quotes) else None)
             if markets:
                 a.opportunities = [o for o in a.opportunities if o.ref.market_code in markets]
             if a.opportunities:

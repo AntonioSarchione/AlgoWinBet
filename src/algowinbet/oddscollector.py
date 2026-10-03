@@ -211,10 +211,13 @@ class OddsCollector:
         return st
 
 
-def remap_stored_odds(store: SnapshotStore, names: TeamNames | None = None) -> CollectStats:
+def remap_stored_odds(store: SnapshotStore, names: TeamNames | None = None, only_stats: bool = False) -> CollectStats:
     """Rebuild every OddsPapi quote from the raw payloads already stored (no API request). Used after a mapping fix: the
-    old rows are deleted and each snapshot / history payload is mapped again with the current mapper."""
+    old rows are deleted and each snapshot / history payload is mapped again with the current mapper. only_stats: nothing is
+    deleted, only the corner / card quotes are added (the goal quotes stay as they are, a running tick sees no gap)."""
     import json
+    from .markets import stat_of
+    keep = (lambda qs: [q for q in qs if stat_of(q.market_code)]) if only_stats else (lambda qs: qs)
     st = CollectStats("remap")
     markets = store.last_raw(SOURCE, "/markets")
     parts = store.last_raw(SOURCE, "/participants")
@@ -227,10 +230,11 @@ def remap_stored_odds(store: SnapshotStore, names: TeamNames | None = None) -> C
     fixtures = {f.id: f for f in prov.list_fixtures(None, far - timedelta(days=365), far + timedelta(days=60))}
     store.db.executescript(LINKS_SCHEMA)
     links = dict(store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall())
-    before = store.db.execute("SELECT COUNT(*) FROM quotes WHERE source IN (?, ?)", (SOURCE, HIST_SOURCE)).fetchone()[0]
-    store.db.execute("DELETE FROM quotes WHERE source IN (?, ?)", (SOURCE, HIST_SOURCE))
-    store.db.commit()
-    st.skipped.append(f"cancellate {before} quote mappate con la versione precedente")
+    if not only_stats:
+        before = store.db.execute("SELECT COUNT(*) FROM quotes WHERE source IN (?, ?)", (SOURCE, HIST_SOURCE)).fetchone()[0]
+        store.db.execute("DELETE FROM quotes WHERE source IN (?, ?)", (SOURCE, HIST_SOURCE))
+        store.db.commit()
+        st.skipped.append(f"cancellate {before} quote mappate con la versione precedente")
     raws = store.db.execute("SELECT id, endpoint, params, fetched_at FROM raw_requests WHERE source=? AND status=200 AND endpoint IN "
                             "('/odds-by-tournaments', '/historical-odds') ORDER BY id", (SOURCE,)).fetchall()
     calendar = list(fixtures.values())
@@ -241,14 +245,14 @@ def remap_stored_odds(store: SnapshotStore, names: TeamNames | None = None) -> C
             for row in body if isinstance(body, list) else [body]:
                 fx = fixtures.get(links.get(str(row.get("fixtureId")), "")) or m.match_fixture(row, calendar)
                 if fx is not None:
-                    st.add("quotes", store.save_quotes(SOURCE, m.odds(row, fx, at), rid))
+                    st.add("quotes", store.save_quotes(SOURCE, keep(m.odds(row, fx, at)), rid))
         else:
             fx = fixtures.get(links.get(str(json.loads(params or "{}").get("fixtureId")), ""))
             if fx is None:
                 continue
             if at > fx.kickoff:  # fetched after kickoff: closing line
-                st.add("quotes", store.save_quotes(HIST_SOURCE, m.history(body, fx), rid))
+                st.add("quotes", store.save_quotes(HIST_SOURCE, keep(m.history(body, fx)), rid))
             else:
-                st.add("quotes", store.save_quotes(SOURCE, thin_history(m.history(body, fx, closing=False), fx.kickoff, at), rid))
+                st.add("quotes", store.save_quotes(SOURCE, keep(thin_history(m.history(body, fx, closing=False), fx.kickoff, at)), rid))
     st.report = m.report
     return st

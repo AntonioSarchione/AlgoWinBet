@@ -768,7 +768,7 @@ def cmd_remap_odds(a) -> None:
     """Re-map every stored OddsPapi payload with the current mapper (no API request)."""
     from .oddscollector import remap_stored_odds
     store = SnapshotStore(a.db)
-    _print_stats(remap_stored_odds(store, TeamNames.load(a.aliases)))
+    _print_stats(remap_stored_odds(store, TeamNames.load(a.aliases), only_stats=a.only_stats))
     store.close()
 
 
@@ -1183,6 +1183,7 @@ def build_parser() -> argparse.ArgumentParser:
     rm = sub.add_parser("remap-odds", help="ricostruisce le quote OddsPapi dai dati grezzi salvati (nessuna richiesta API)")
     rm.add_argument("--db", default="algowinbet.db")
     rm.add_argument("--aliases", default="configs/team_aliases.json")
+    rm.add_argument("--only-stats", action="store_true", help="aggiunge solo le quote corner e cartellini, non cancella nulla")
     rm.set_defaults(fn=cmd_remap_odds)
     se = sub.add_parser("stat-eval", help="Fase 7: verifica walk-forward dei modelli corner e cartellini (nessuna richiesta)")
     se.add_argument("--db", default="turso")
