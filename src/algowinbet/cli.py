@@ -502,6 +502,31 @@ def cmd_analysis_preview(a) -> None:
         store.close()
 
 
+def cmd_registry_purge_stats(a) -> None:
+    """One-off cleanup (user's decision, 2026-10-03): corner / card selections recorded for matches outside the club
+    competitions (national teams, priced before the 20-match rule) and the slips that contain them. Dry run unless --apply."""
+    import json as _json
+    store = SnapshotStore(a.db)
+    try:
+        cfg = AutoConfig.load(a.config)
+        clubs = {l.name for l in cfg.leagues if l.fd} | {"UEFA Champions League", "UEFA Europa League"}
+        legs = [r for r in store.db.execute("SELECT id, fixture_id, sel_key, competition, match, result FROM paper_legs "
+                                            "WHERE sel_key LIKE 'CORNERS_%' OR sel_key LIKE 'CARDS_%'").fetchall() if r[3] not in clubs]
+        keys = {f"{fid}|{key}" for _, fid, key, *_ in legs}
+        slips = [(sid, res) for sid, legs_json, res in store.db.execute("SELECT id, legs, result FROM paper_slips").fetchall()
+                 if any(f"{l['fixture_id']}|{l['sel_key']}" in keys for l in _json.loads(legs_json))]
+        for _, _, key, comp, match, res in legs:
+            print(f"  {comp} | {match} | {key} | {res}")
+        print(f"giocate da cancellare: {len(legs)}; schedine che le contengono: {len(slips)} {[s for s, _ in slips]}")
+        if a.apply and legs:
+            store.db.executemany("DELETE FROM paper_legs WHERE id = ?", [(r[0],) for r in legs])
+            store.db.executemany("DELETE FROM paper_slips WHERE id = ?", [(s,) for s, _ in slips])
+            store.db.commit()
+            print("cancellate")
+    finally:
+        store.close()
+
+
 def cmd_referees_backfill(a) -> None:
     """Referees of past matches from payloads already stored (football-data season files, API-Football day reads)."""
     import json as _json
@@ -1331,6 +1356,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--db", default="turso")
     ap.add_argument("--days", type=float, default=7.0)
     ap.set_defaults(fn=cmd_analysis_preview)
+    pg = sub.add_parser("registry-purge-stats", help="cancella dal registro le giocate corner/cartellini fuori dalle competizioni di club")
+    pg.add_argument("--db", default="turso")
+    pg.add_argument("--config", default="configs/collect.json")
+    pg.add_argument("--apply", action="store_true", help="senza: solo elenco, nessuna cancellazione")
+    pg.set_defaults(fn=cmd_registry_purge_stats)
     rb = sub.add_parser("referees-backfill", help="Fase 7: arbitri delle partite passate dai dati già salvati (nessuna richiesta)")
     rb.add_argument("--db", default="turso")
     rb.add_argument("--config", default="configs/collect.json")
