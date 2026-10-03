@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import time
 import sys
@@ -539,6 +540,33 @@ def cmd_dataset_report(a) -> None:
                 print(f"  - {u}: nostre partite quel giorno {n_day}; vicine: " + ("; ".join(f"{h}-{w} {k[:16]}" for h, w, k in near) or "nessuna"))
         _duplicate_report(store, a.examples)
         _national_names_report(store)
+    finally:
+        store.close()
+
+
+def cmd_stat_coverage(a) -> None:
+    """Fase 7 data check (no request): per stat name and source the matches with a full-time figure and the mean per team,
+    then per competition the share of results with corners and with cards, and the Sisal corner/booking quotes stored."""
+    store = SnapshotStore(a.db)
+    try:
+        rows = store.db.execute("SELECT stat, source, COUNT(*), AVG(home), AVG(away) FROM match_stats WHERE period='FT' "
+                                "GROUP BY stat, source ORDER BY COUNT(*) DESC").fetchall()
+        print("statistiche (FT): nome, fonte, partite, media casa / ospite")
+        for stat, src, n, h, w in rows:
+            if a.all or re.search(r"corner|card|yellow|red|booking|foul", stat):
+                print(f"  {stat:28s} {src:14s} {n:6d}  {h or 0:5.2f} / {w or 0:5.2f}")
+        print("copertura per competizione: risultati, con corner, con cartellini")
+        for comp, n, nc, nk in store.db.execute(
+                "SELECT r.competition, COUNT(*), "
+                "SUM(EXISTS(SELECT 1 FROM match_stats s WHERE s.fixture_id=r.fixture_id AND s.period='FT' AND s.stat LIKE '%corner%')), "
+                "SUM(EXISTS(SELECT 1 FROM match_stats s WHERE s.fixture_id=r.fixture_id AND s.period='FT' AND s.stat LIKE '%yellow%')) "
+                "FROM results r GROUP BY r.competition ORDER BY COUNT(*) DESC").fetchall():
+            print(f"  {comp:34s} {n:6d}  corner {nc:6d} ({100 * nc / max(n, 1):3.0f}%)  cartellini {nk:6d} ({100 * nk / max(n, 1):3.0f}%)")
+        print("quote Sisal corner / cartellini salvate: mercato, quote, partite")
+        for code, n, nf in store.db.execute(
+                "SELECT market_code, COUNT(*), COUNT(DISTINCT fixture_id) FROM quotes WHERE bookmaker LIKE 'sisal%' "
+                "AND (market_code LIKE 'CORNERS%' OR market_code LIKE 'CARDS%') GROUP BY market_code").fetchall():
+            print(f"  {code:24s} {n:7d} {nf:5d}")
     finally:
         store.close()
 
@@ -1143,6 +1171,10 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("--db", default="algowinbet.db")
     rm.add_argument("--aliases", default="configs/team_aliases.json")
     rm.set_defaults(fn=cmd_remap_odds)
+    sc = sub.add_parser("stat-coverage", help="Fase 7: corner e cartellini salvati per fonte e competizione (nessuna richiesta)")
+    sc.add_argument("--db", default="turso")
+    sc.add_argument("--all", action="store_true", help="tutte le statistiche, non solo corner e cartellini")
+    sc.set_defaults(fn=cmd_stat_coverage)
     dr = sub.add_parser("dataset-report", help="abbinamento dei CSV stagionali football-data alle nostre partite (nessuna richiesta)")
     dr.add_argument("--db", default="turso")
     dr.add_argument("--examples", type=int, default=6)
