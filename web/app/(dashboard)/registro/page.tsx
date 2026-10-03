@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
 import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
@@ -82,6 +83,7 @@ export default async function Registro() {
   const cal = crit.bands;
   const versions = byVersion(reg.legs);
   const V = STATE[crit.verdict];
+  const legResult = new Map(reg.legs.map((l) => [`${l.fixture_id}|${l.sel_key}`, l]));
   const settledSlips = reg.slips.filter((s) => s.result && s.result !== "non valutabile");
   const slipPnl = settledSlips.reduce((a, s) => a + (s.payout ?? 0) - 1, 0);
 
@@ -246,12 +248,35 @@ export default async function Registro() {
             </thead>
             <tbody>
               {reg.slips.slice(0, 50).map((s: PaperSlip) => {
-                const legs = parseJSON<{ match: string; market: string; odds: number }[]>(s.legs, []);
+                const legs = parseJSON<{ fixture_id: string; sel_key: string; match: string; market: string; odds: number }[]>(s.legs, []);
                 return (
                   <tr key={s.id}>
                     <td className="muted">{dayTime(s.created_at)}</td>
-                    <td title={legs.map((l) => `${l.match} · ${l.market} @${l.odds.toFixed(2)}`).join("\n")}>
-                      {legs.length} · {legs.slice(0, 2).map((l) => l.match).join(", ")}{legs.length > 2 ? "…" : ""}
+                    <td className="wrap">
+                      {/* tap to open: the selections must be readable on a phone, where there is no hover */}
+                      <details className="slip-legs">
+                        <summary>
+                          {legs.length} {legs.length === 1 ? "evento" : "eventi"} · {legs.slice(0, 2).map((l) => l.match).join(", ")}{legs.length > 2 ? "…" : ""}
+                        </summary>
+                        <ul>
+                          {legs.map((l) => {
+                            const res = legResult.get(`${l.fixture_id}|${l.sel_key}`);
+                            return (
+                              <li key={`${l.fixture_id}|${l.sel_key}`}>
+                                <Link href={`/partita/${encodeURIComponent(l.fixture_id)}`}>{l.match}</Link>
+                                <span className="muted"> · {l.market} @{l.odds.toFixed(2)}</span>{" "}
+                                {res?.result ? (
+                                  <span className={`status ${RESULT_CLASS[res.result] ?? ""}`}>
+                                    {RESULT_LABEL[res.result] ?? res.result}{res.score ? ` ${res.score}` : ""}
+                                  </span>
+                                ) : (
+                                  <span className="muted">in attesa</span>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </details>
                     </td>
                     <td className="num">{s.total_odds.toFixed(2)}</td>
                     <td className="num">{s.bonus ? `+${pct(s.bonus)}` : "–"}</td>

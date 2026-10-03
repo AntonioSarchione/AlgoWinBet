@@ -405,7 +405,7 @@ export const latestQuality = persist(async (): Promise<QualityRun | null> => {
 
 // ---- paper trading registry (Fase 6): written by the analysis, settled by the collection ticks ----
 export type PaperLeg = {
-  id: number; fixture_id: string; competition: string; match: string; kickoff: string; market: string; status: string;
+  id: number; fixture_id: string; sel_key: string; competition: string; match: string; kickoff: string; market: string; status: string;
   odds: number; p: number; p_market: number | null; ev: number; created_at: string; result: string | null; score: string | null;
   close_odds: number | null; close_fair: number | null; close_sisal_fair: number | null; model_version: string | null;
 };
@@ -417,7 +417,7 @@ export type PaperSlip = {
 export const paperRegistry = persist(async (): Promise<{ legs: PaperLeg[]; slips: PaperSlip[]; lastSettled: string | null } | null> => {
   try {
     const legSql = (sisal: string) =>
-      "SELECT id, fixture_id, competition, match, kickoff, market, status, odds, p, p_market, ev, created_at, result, score, close_odds, close_fair, " +
+      "SELECT id, fixture_id, sel_key, competition, match, kickoff, market, status, odds, p, p_market, ev, created_at, result, score, close_odds, close_fair, " +
       `${sisal} AS close_sisal_fair, model_version FROM paper_legs ORDER BY kickoff, id`;
     const [legs, slips, last] = await Promise.all([
       // close_sisal_fair arrives with the first settlement after the pass criterion: until then the column is missing
