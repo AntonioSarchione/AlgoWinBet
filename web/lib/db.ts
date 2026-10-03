@@ -414,21 +414,22 @@ export type PaperSlip = {
   first_kickoff: string; last_kickoff: string; result: string | null; payout: number | null; clv: number | null;
 };
 
-export const paperRegistry = persist(async (): Promise<{ legs: PaperLeg[]; slips: PaperSlip[] } | null> => {
+export const paperRegistry = persist(async (): Promise<{ legs: PaperLeg[]; slips: PaperSlip[]; lastSettled: string | null } | null> => {
   try {
     const legSql = (sisal: string) =>
       "SELECT id, fixture_id, competition, match, kickoff, market, status, odds, p, p_market, ev, created_at, result, score, close_odds, close_fair, " +
       `${sisal} AS close_sisal_fair, model_version FROM paper_legs ORDER BY kickoff, id`;
-    const [legs, slips] = await Promise.all([
+    const [legs, slips, last] = await Promise.all([
       // close_sisal_fair arrives with the first settlement after the pass criterion: until then the column is missing
       all<PaperLeg>(legSql("close_sisal_fair")).catch((e) => (/no such column/i.test(String(e)) ? all<PaperLeg>(legSql("NULL")) : Promise.reject(e))),
       all<PaperSlip>(
         "SELECT id, created_at, legs, total_odds, bonus, joint, ev, ev_lower, first_kickoff, last_kickoff, result, payout, clv FROM paper_slips ORDER BY id DESC LIMIT 200",
       ),
+      all<{ t: string | null }>("SELECT MAX(settled_at) AS t FROM paper_legs"),
     ]);
-    return { legs, slips };
+    return { legs, slips, lastSettled: last[0]?.t ?? null };
   } catch (e) {
     if (/no such table/i.test(String(e))) return null; // created by the first publish after Fase 6
     throw e;
   }
-}, "paperRegistry", 300);
+}, "paperRegistry", 60); // settlements land with the collection runs: a minute at most behind them

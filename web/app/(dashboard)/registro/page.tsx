@@ -94,6 +94,12 @@ export default async function Registro() {
             Ogni proposta è scritta la prima volta che un&apos;analisi la mostra, con la quota Sisal di quel momento, e non viene più modificata. Dopo la partita
             si chiude da sola con il risultato e le quote di chiusura. Una unità a giocata, solo carta: nessuna scommessa viene piazzata.
           </p>
+          {reg.lastSettled && (
+            <p className="note">
+              Ultima chiusura: {dayTime(reg.lastSettled)}. I risultati arrivano con il giro di raccolta dopo la partita (circa 2½–3½ ore dal calcio
+              d&apos;inizio, al più tardi il giro delle 08:00).
+            </p>
+          )}
         </div>
       </header>
 
