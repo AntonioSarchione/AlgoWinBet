@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, datasets, model, results, raw, status, test, bench]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, datasets, model, results, raw, status, test, bench]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -64,6 +64,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "coverage" ]; then algowinbet market-coverage --db "$DB" --book "${ARG:-sisal}"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "model" ]; then algowinbet model-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remapstats" ]; then algowinbet remap-odds --only-stats --db "$DB" && algowinbet stat-coverage --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rules" ]; then pip install -q pypdf && python scripts/sisal_rules.py $ARG; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "registry" ]; then algowinbet registry-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "stateval" ]; then algowinbet stat-eval --weeks "${ARG:-26}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "stats" ]; then algowinbet stat-coverage ${ARG:+--all} --db "$DB"; exit $?; fi
