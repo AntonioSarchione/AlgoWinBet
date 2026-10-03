@@ -142,3 +142,43 @@ def test_plan_tick_adds_the_api_football_step_when_a_league_has_an_id():
     s = SnapshotStore(":memory:")
     assert "apif" not in plan_tick(s, AutoConfig(leagues=[League("Serie A")]), NOW, NOW)
     assert "apif" in plan_tick(s, AutoConfig(leagues=[League("Serie A", apif=135)]), NOW, NOW)
+
+
+def test_finished_matches_get_half_time_and_goal_order_for_the_registry():
+    from algowinbet.domain import MatchResult
+    from algowinbet.paper import _migrate
+
+    class Finished(FakeApi):
+        def __call__(self, url, headers):
+            u = urlparse(url)
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            if u.path == "/fixtures" and q["date"] == "2026-10-03":
+                self.calls.append((u.path, q))
+                row = _api_fixture(1, 135, "AC Milan", "Inter", 489, 505)
+                row["fixture"]["status"] = {"short": "FT"}
+                row["score"] = {"halftime": {"home": 0, "away": 1}, "fulltime": {"home": 2, "away": 1}}
+                return 200, {}, json.dumps({"errors": [], "response": [row]}).encode()
+            if u.path == "/fixtures/events":
+                self.calls.append((u.path, q))
+                ev = [{"type": "Goal", "detail": "Normal Goal", "time": {"elapsed": 45, "extra": 2}, "team": {"id": 505}},
+                      {"type": "Goal", "detail": "Missed Penalty", "time": {"elapsed": 50}, "team": {"id": 489}},
+                      {"type": "Goal", "detail": "Own Goal", "time": {"elapsed": 61}, "team": {"id": 505}},  # Inter player, Milan's goal
+                      {"type": "Goal", "detail": "Penalty", "time": {"elapsed": 88}, "team": {"id": 489}}]
+                return 200, {}, json.dumps({"errors": [], "response": ev}).encode()
+            return super().__call__(url, headers)
+
+    fake = Finished()
+    s, col = _setup(fake)
+    col.run()  # links fixtures, learns team ids
+    _migrate(s)
+    for k in ("HT_FT|2/1|", "FIRST_GOAL|AWAY|"):
+        s.db.execute("INSERT INTO paper_legs(fixture_id, sel_key, kickoff, result) VALUES('g1', ?, ?, NULL)", (k, KO.isoformat()))
+    s.save_results("goal", [MatchResult(fixture_id="g1", competition="Serie A", home="Milan", away="Inter", kickoff=KO, home_goals=2,
+                                        away_goals=1)], KO + timedelta(hours=3))
+    col.now = lambda: KO + timedelta(hours=3)
+    col.sync_finished(col_stats := __import__("algowinbet.collector", fromlist=["CollectStats"]).CollectStats("t"))
+    assert s.stats_of("g1", "1H")["goals"] == (0.0, 1.0)
+    assert s.stats_of("g1", "FT")["first_goal_minute"] == (61.0, 45.02) and s.stats_of("g1", "FT")["last_goal_minute"] == (88.0, 45.02)
+    n = len(fake.calls)
+    col.sync_finished(col_stats)
+    assert len(fake.calls) == n  # nothing asked twice

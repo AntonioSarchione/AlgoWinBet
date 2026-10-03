@@ -17,12 +17,13 @@ import math
 from datetime import datetime, timedelta, timezone
 
 from .domain import OpportunityStatus, SelectionRef
-from .markets import UnsupportedMarket, complete_group, outcome, void_outcome
+from .markets import UnsupportedMarket, complete_group, needs_goal_order, needs_half_time, outcome, sequence_outcome, void_outcome
 from .pricing import devig
 
 RECORDED = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE, OpportunityStatus.FAIR}
 SETTLE_AFTER = timedelta(hours=2, minutes=30)  # from kickoff: the match is over
 GIVE_UP = timedelta(days=7)  # no result after a week (abandoned, unknown id): closed as not settleable
+DETAIL_WAIT = timedelta(days=2)  # half-time score / goal order still missing after this: closed as not settleable
 SHARP = ("pinnacle", "betfair-ex")
 
 SCHEMA = """
@@ -114,11 +115,14 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     """Settles the recorded selections whose match is over, then the slips whose selections are all settled."""
     _migrate(store)
     t = now or datetime.now(timezone.utc)
-    rows = store.db.execute("SELECT id, fixture_id, sel_key, kickoff FROM paper_legs WHERE result IS NULL AND kickoff <= ?",
-                            ((t - SETTLE_AFTER).isoformat(),)).fetchall()
+    # selections closed as not settleable stay open to a second look for a week: the half-time score or the goal order
+    # can arrive later (API-Football)
+    rows = store.db.execute("SELECT id, fixture_id, sel_key, kickoff, result FROM paper_legs WHERE kickoff <= ? AND (result IS NULL OR "
+                            "(result = 'non valutabile' AND kickoff >= ?))",
+                            ((t - SETTLE_AFTER).isoformat(), (t - GIVE_UP).isoformat())).fetchall()
     done = {"won": 0, "lost": 0, "void": 0, "non valutabile": 0}
     updates = []
-    for lid, fid, key, ko in rows:
+    for lid, fid, key, ko, before in rows:
         r = provider.result_of(fid)
         if r is None:
             if t - datetime.fromisoformat(ko) > GIVE_UP:
@@ -126,13 +130,21 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
                 done["non valutabile"] += 1
             continue
         ref = _ref(key)
+        ht = _half_time(store, fid, r)
         try:
-            if void_outcome(r.home_goals, r.away_goals, ref):
+            if needs_goal_order(ref.market_code):
+                ft = store.stats_of(fid, "FT")
+                won = sequence_outcome(r.home_goals, r.away_goals, ref, ft.get("first_goal_minute"), ft.get("last_goal_minute"))
+                res = "won" if won else "lost"
+            elif void_outcome(r.home_goals, r.away_goals, ref, ht):
                 res = "void"
             else:
-                res = "won" if outcome(r.home_goals, r.away_goals, ref) else "lost"
+                res = "won" if outcome(r.home_goals, r.away_goals, ref, ht) else "lost"
         except UnsupportedMarket:
-            res = "non valutabile"  # half-time markets, first/last goal: the final score does not settle them
+            detail = needs_half_time(ref.market_code) or needs_goal_order(ref.market_code)
+            if before is not None or (detail and t - datetime.fromisoformat(ko) < DETAIL_WAIT):
+                continue  # half-time score / goal order may still arrive; already closed as not settleable: leave it
+            res = "non valutabile"  # what the scores cannot settle
         close_odds, close_fair = closing_prices(store, fid, ref)
         updates.append((res, t.isoformat(), f"{r.home_goals}-{r.away_goals}", close_odds, close_fair, sisal_close_fair(store, fid, ref), lid))
         done[res] += 1
@@ -143,12 +155,22 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     return done
 
 
+def _half_time(store, fixture_id: str, r) -> tuple[int, int] | None:
+    """Half-time score (football-data for the leagues, API-Football for every competition), when consistent with the result."""
+    g = store.stats_of(fixture_id, "1H").get("goals")
+    if not g or g[0] is None or g[1] is None:
+        return None
+    h, a = int(g[0]), int(g[1])
+    return (h, a) if 0 <= h <= r.home_goals and 0 <= a <= r.away_goals else None
+
+
 def _settle_slips(store, t: datetime, bonus_table: list[float] | None = None, bonus_min_odds: float = 1.25) -> int:
     from .config import OptimizerCfg
     o = OptimizerCfg()
     table = bonus_table if bonus_table is not None else o.multi_bonus
-    open_slips = store.db.execute("SELECT id, legs FROM paper_slips WHERE result IS NULL AND last_kickoff <= ?",
-                                  ((t - SETTLE_AFTER).isoformat(),)).fetchall()
+    open_slips = store.db.execute("SELECT id, legs FROM paper_slips WHERE last_kickoff <= ? AND (result IS NULL OR "
+                                  "(result = 'non valutabile' AND last_kickoff >= ?))",
+                                  ((t - SETTLE_AFTER).isoformat(), (t - GIVE_UP).isoformat())).fetchall()
     n = 0
     for sid, legs_json in open_slips:
         legs = json.loads(legs_json)

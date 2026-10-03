@@ -86,3 +86,46 @@ def test_a_slip_settles_when_every_selection_has():
     for l in legs:
         odds *= l["odds"]
     assert result == "won" and payout >= odds - 1e-9 and clv > 0  # bonus never lowers the payout; better than closing
+
+
+def test_half_time_and_goal_order_markets_settle_when_the_detail_arrives():
+    from datetime import datetime, timezone
+    from algowinbet.domain import MatchStat
+    s, mock, rid, res = _published()
+    f = res.fixtures[0]
+    keys = ["HT_FT|X/X|", "MATCH_1X2@H1|DRAW|", "FIRST_GOAL|AWAY|", "LAST_GOAL|HOME|"]
+    now = datetime.now(timezone.utc).isoformat()
+    for k in keys:
+        s.db.execute("INSERT INTO paper_legs(fixture_id, sel_key, competition, match, kickoff, market, status, odds, bookmaker, p, ev, run_id, "
+                     "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (f.id, k, f.competition, f"{f.home} - {f.away}", f.kickoff.isoformat(), k, "FAIR", 2.0, "sisal", 0.5, 0.0, rid, now))
+    s.db.commit()
+    s.save_results("mock", [MatchResult(fixture_id=f.id, competition=f.competition, home=f.home, away=f.away, kickoff=f.kickoff,
+                                        home_goals=1, away_goals=1)], f.kickoff + timedelta(hours=3))
+    get = lambda k: s.db.execute("SELECT result FROM paper_legs WHERE fixture_id=? AND sel_key=?", (f.id, k)).fetchone()[0]
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(hours=3))
+    assert all(get(k) is None for k in keys)  # detail missing: they wait instead of closing as not settleable
+    at = f.kickoff + timedelta(hours=3)
+    s.save_stats("api-football", [MatchStat(fixture_id=f.id, period="1H", stat="goals", home=0, away=0, observed_at=at),
+                                  MatchStat(fixture_id=f.id, period="FT", stat="first_goal_minute", home=60, away=45.02, observed_at=at),
+                                  MatchStat(fixture_id=f.id, period="FT", stat="last_goal_minute", home=60, away=45.02, observed_at=at)])
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(hours=4))
+    assert [get(k) for k in keys] == ["won", "won", "won", "won"]  # 0-0 then 1-1, away scored first (45+2), home last
+
+
+def test_detail_that_never_arrives_closes_as_not_settleable_and_reopens_later():
+    from algowinbet.domain import MatchStat
+    s, mock, rid, res = _published()
+    f = res.fixtures[1]
+    s.db.execute("INSERT INTO paper_legs(fixture_id, sel_key, competition, match, kickoff, market, status, odds, bookmaker, p, ev, run_id, "
+                 "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 (f.id, "HT_FT|1/1|", f.competition, "x", f.kickoff.isoformat(), "x", "FAIR", 3.0, "sisal", 0.3, 0.0, rid, "x"))
+    s.db.commit()
+    s.save_results("mock", [MatchResult(fixture_id=f.id, competition=f.competition, home=f.home, away=f.away, kickoff=f.kickoff,
+                                        home_goals=2, away_goals=0)], f.kickoff + timedelta(hours=3))
+    get = lambda: s.db.execute("SELECT result FROM paper_legs WHERE fixture_id=? AND sel_key='HT_FT|1/1|'", (f.id,)).fetchone()[0]
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=3))
+    assert get() == "non valutabile"
+    s.save_stats("api-football", [MatchStat(fixture_id=f.id, period="1H", stat="goals", home=1, away=0, observed_at=f.kickoff)])
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=4))
+    assert get() == "won"  # reopened within the week once the half-time score is known

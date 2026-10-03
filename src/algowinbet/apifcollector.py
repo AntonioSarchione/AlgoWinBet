@@ -8,6 +8,8 @@ yesterday to tomorrow, no `ids` batch; one fixture per lineup request; squads by
   injuries .. /injuries?date=D for today and tomorrow (1 request each, every league), today's again after midday
   lineups ... /fixtures/lineups?fixture=ID from 55 minutes before kickoff until both XI are in (1 request per match)
   squads .... /players/squads?team=ID, refreshed every SQUAD_DAYS, teams playing soon first (roles of every player)
+  finished .. for registry selections that need more than the final score: /fixtures?date=D again after the matches of D
+              (half-time scores of every league, 1 request) and /fixtures/events?fixture=ID for first / last goal (1 each)
 
 The 7 domestic leagues come first: cups and national teams only use what the leagues of the day leave over.
 """
@@ -22,7 +24,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from .collector import CollectStats
-from .domain import LineupSnapshot, Player, Position
+from .domain import LineupSnapshot, MatchStat, Player, Position
+from .markets import needs_goal_order, needs_half_time
 from .names import TeamNames, normalize
 from .providers.apifootball import SOURCE, ApiFootballClient, ApiFootballError
 from .snapshots import BudgetExceeded, SnapshotProvider, SnapshotStore
@@ -38,6 +41,8 @@ CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TE
 LINEUP_FROM = timedelta(minutes=55)   # lineups are published about an hour before kickoff: with ticks every 30 min, 1-2 tries
 LINEUP_UNTIL = timedelta(minutes=10)  # still worth one try just after kickoff (late publications)
 SQUAD_DAYS = 30
+FINISHED_AFTER = timedelta(hours=2, minutes=15)  # from kickoff: half-time score and goal events are final
+MAX_EVENTS = 10  # goal-order requests per tick
 INJURY_REFRESH = timedelta(hours=6)
 POS = {"g": Position.GK, "goalkeeper": Position.GK, "d": Position.DEF, "defender": Position.DEF, "m": Position.MID,
        "midfielder": Position.MID, "f": Position.FWD, "attacker": Position.FWD, "forward": Position.FWD}
@@ -322,6 +327,7 @@ class ApiFootballCollector:
             self.sync_lineups(st, reserve_for_leagues=reserve)
             reserve = 2 * self._league_matches_left_today()
             self.sync_injuries(st)
+            self.sync_finished(st)
             if clock() - t0 < max_seconds:
                 self.sync_squads(st, reserve_for_leagues=reserve)
         except BudgetExceeded as e:
@@ -333,6 +339,95 @@ class ApiFootballCollector:
             st.errors.append(f"errore interno api-football: {type(e).__name__}: {e}")
         st.requests = self.client.requests_sent - before
         return st
+
+    # ------------------------------------------------------------------ finished matches (registry)
+    def _pending_detail(self) -> tuple[dict, set]:
+        """Registry selections still open (or closed as not settleable) of matches that ended since yesterday and need the
+        half-time score or the goal order: ({date: last kickoff + FINISHED_AFTER} to read again, {fixture ids for events})."""
+        t = self.now()
+        since = datetime.combine(t.date() - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        try:
+            rows = self.store.db.execute(
+                "SELECT DISTINCT fixture_id, sel_key, kickoff FROM paper_legs WHERE (result IS NULL OR result = 'non valutabile') "
+                "AND kickoff >= ? AND kickoff <= ?", (since.isoformat(), (t - FINISHED_AFTER).isoformat())).fetchall()
+        except Exception:  # registry not created yet (first publication pending)
+            return {}, set()
+        dates: dict = {}
+        events: set = set()
+        for fid, key, ko in rows:
+            code = key.split("|", 1)[0]
+            k = datetime.fromisoformat(ko)
+            if needs_half_time(code) and "goals" not in self.store.stats_of(fid, "1H"):
+                dates[k.date()] = max(dates.get(k.date(), k), k)
+            if needs_goal_order(code) and "first_goal_minute" not in self.store.stats_of(fid, "FT"):
+                events.add(fid)
+        return {d: k + FINISHED_AFTER for d, k in dates.items()}, events
+
+    def sync_finished(self, st: CollectStats) -> None:
+        dates, events = self._pending_detail()
+        stats: list[MatchStat] = []
+        for d, ready in sorted(dates.items()):
+            params = {"date": d.isoformat()}
+            last = self._last_fetch("/fixtures", params)
+            if last is not None and last >= ready:
+                continue  # already read after these matches ended: no half-time score there
+            day0 = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+            calendar = self.provider.list_fixtures(None, day0 - timedelta(hours=6), day0 + timedelta(hours=30))
+            links = {ext: fid for fid, ext in self._links().items()}
+            for r in self.client.get("/fixtures", params).get("response") or []:
+                if not self.leagues.get(int(r["league"]["id"])):
+                    continue
+                fid = links.get(str(r["fixture"]["id"]))
+                if fid is None:
+                    fx = self._match(r, calendar)
+                    if fx is None:
+                        continue
+                    fid = fx.id
+                    self.store.db.execute("INSERT OR REPLACE INTO fixture_links(source, ext_id, fixture_id, linked_at) VALUES(?,?,?,?)",
+                                          (SOURCE, str(r["fixture"]["id"]), fid, self.now().isoformat()))
+                ht = (r.get("score") or {}).get("halftime") or {}
+                done = str(((r.get("fixture") or {}).get("status") or {}).get("short") or "") in ("FT", "AET", "PEN")
+                if done and ht.get("home") is not None and ht.get("away") is not None:
+                    stats.append(MatchStat(fixture_id=fid, period="1H", stat="goals", home=float(ht["home"]), away=float(ht["away"]),
+                                           observed_at=self.now()))
+        links = self._links()
+        names = self._team_names()
+        for fid in sorted(events)[:MAX_EVENTS]:
+            ext, r = links.get(fid), self.provider.result_of(fid)
+            if not ext or r is None:
+                continue
+            got = self._goal_minutes(self.client.get("/fixtures/events", {"fixture": ext}).get("response") or [], names, r)
+            if got:
+                first, last = got
+                stats.append(MatchStat(fixture_id=fid, period="FT", stat="first_goal_minute", home=first[0], away=first[1], observed_at=self.now()))
+                stats.append(MatchStat(fixture_id=fid, period="FT", stat="last_goal_minute", home=last[0], away=last[1], observed_at=self.now()))
+        if stats:
+            st.add("dettagli partite finite", self.store.save_stats(SOURCE, stats))
+        self.store.db.commit()
+
+    @staticmethod
+    def _goal_minutes(rows: list[dict], names: dict[int, str], r) -> tuple[tuple, tuple] | None:
+        """(first goal minute home, away), (last goal minute home, away) from the goal events (minute + stoppage/100, so 45+2
+        comes before 46). Own goals: the side whose count then matches the final score (both readings are tried); None when
+        neither matches or a team is unknown."""
+        goals = []
+        for e in rows:
+            if str(e.get("type") or "").lower() != "goal" or "missed" in str(e.get("detail") or "").lower():
+                continue
+            tm = e.get("time") or {}
+            minute = float(tm.get("elapsed") or 0) + float(tm.get("extra") or 0) / 100
+            team = names.get(int((e.get("team") or {}).get("id") or 0))
+            if team not in (r.home, r.away):
+                return None
+            goals.append((minute, team == r.home, "own" in str(e.get("detail") or "").lower()))
+        for own_flips in (False, True):
+            home = [m for m, h, own in goals if h != (own and own_flips)]
+            away = [m for m, h, own in goals if h == (own and own_flips)]
+            if len(home) == r.home_goals and len(away) == r.away_goals:
+                first = (min(home) if home else None, min(away) if away else None)
+                last = (max(home) if home else None, max(away) if away else None)
+                return first, last
+        return None
 
     def _league_matches_left_today(self) -> int:
         t = self.now()

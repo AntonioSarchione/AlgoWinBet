@@ -267,6 +267,38 @@ def _needs_halves(code: str) -> bool:
     return bool(period) or base in HALF_SPAN
 
 
+def needs_half_time(code: str) -> bool:
+    """Settling it needs the half-time score."""
+    return _needs_halves(code)
+
+
+def needs_goal_order(code: str) -> bool:
+    """Settling it needs the order of the goals (first / last goal)."""
+    return split_code(code)[0] in SEQUENCE
+
+
+def sequence_outcome(home_goals: int, away_goals: int, ref: SelectionRef, first: tuple[float | None, float | None] | None,
+                     last: tuple[float | None, float | None] | None) -> bool:
+    """FIRST_GOAL / LAST_GOAL from the minute of each team's first and last goal (None: the team did not score).
+    UnsupportedMarket when the minutes are missing or tie."""
+    base = split_code(ref.market_code)[0]
+    if home_goals == away_goals == 0:
+        return ref.selection == "NONE"
+    mins = first if base == "FIRST_GOAL" else last
+    if not mins:
+        raise UnsupportedMarket(f"{ref.market_code}: needs the order of the goals")
+    h, a = mins
+    if (h is None) != (home_goals == 0) or (a is None) != (away_goals == 0) or (h is not None and h == a):
+        raise UnsupportedMarket(f"{ref.market_code}: goal minutes do not match the score")
+    if h is None or a is None:
+        side = "HOME" if a is None else "AWAY"
+    elif base == "FIRST_GOAL":
+        side = "HOME" if h < a else "AWAY"
+    else:
+        side = "HOME" if h > a else "AWAY"
+    return ref.selection == side
+
+
 def _sequence(matrix: np.ndarray, ref: SelectionRef) -> float:
     """First/last goal: with constant scoring rates each goal is the home team's with probability lh/(lh+la)."""
     if ref.selection not in ("HOME", "NONE", "AWAY"):
