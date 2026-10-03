@@ -477,6 +477,38 @@ def cmd_raw_last(a) -> None:
         print("\n" + _json.dumps(data, ensure_ascii=False)[: a.dump])
 
 
+def cmd_referees_backfill(a) -> None:
+    """Referees of past matches from payloads already stored (football-data season files, API-Football day reads)."""
+    import json as _json
+    from .fdcollector import FootballDataCollector
+    from .collector import CollectStats
+    store = SnapshotStore(a.db)
+    try:
+        cfg = AutoConfig.load(a.config)
+        st = CollectStats("arbitri")
+        fd = FootballDataCollector(store, cfg.divisions, TeamNames.load(a.aliases))
+        for endpoint, rid in store.db.execute("SELECT endpoint, MAX(id) FROM raw_requests WHERE source = 'football-data' AND status = 200 "
+                                              "AND endpoint LIKE '/mmz4281/%' GROUP BY endpoint").fetchall():
+            div = endpoint.rsplit("/", 1)[-1].removesuffix(".csv")
+            if div in cfg.divisions:
+                fd.load(store.raw_body(rid), div, rid, st, only_referees=True)
+        links = {ext: fid for ext, fid in store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source = 'api-football'").fetchall()}
+        refs = []
+        for (rid,) in store.db.execute("SELECT id FROM raw_requests WHERE source = 'api-football' AND endpoint = '/fixtures' "
+                                       "AND status = 200 ORDER BY id").fetchall():
+            for r in (_json.loads(store.raw_body(rid)).get("response") or []):
+                fid = links.get(str((r.get("fixture") or {}).get("id")))
+                if fid and (r.get("fixture") or {}).get("referee"):
+                    refs.append((fid, r["fixture"]["referee"]))
+        st.add("arbitri api-football", store.save_referees("api-football", refs, datetime.now(timezone.utc)))
+        store.db.commit()
+        _print_stats(st)
+        by = store.db.execute("SELECT source, COUNT(*), COUNT(DISTINCT name) FROM referees GROUP BY source").fetchall()
+        print("arbitri salvati: " + ", ".join(f"{s} {n} partite / {k} arbitri" for s, n, k in by))
+    finally:
+        store.close()
+
+
 def cmd_registry_check(a) -> None:
     """Registry diagnosis (no API request): slips recorded per day and per run, and for the matches of a team its recorded
     selections, the half-time / goal-order details stored and the API-Football day reads."""
@@ -1270,6 +1302,11 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
     rl.add_argument("--db", default="algowinbet.db")
     rl.set_defaults(fn=cmd_raw_last)
+    rb = sub.add_parser("referees-backfill", help="Fase 7: arbitri delle partite passate dai dati già salvati (nessuna richiesta)")
+    rb.add_argument("--db", default="turso")
+    rb.add_argument("--config", default="configs/collect.json")
+    rb.add_argument("--aliases", default="configs/team_aliases.json")
+    rb.set_defaults(fn=cmd_referees_backfill)
     rc = sub.add_parser("registry-check", help="diagnosi del registro: schedine per giorno, dettagli di una partita (nessuna richiesta API)")
     rc.add_argument("team", nargs="?", default="")
     rc.add_argument("--db", default="turso")

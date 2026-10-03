@@ -45,8 +45,20 @@ CREATE TABLE IF NOT EXISTS player_status(id INTEGER PRIMARY KEY, source TEXT, fi
   player_name TEXT, status TEXT, reason TEXT, observed_at TEXT, UNIQUE(source, fixture_id, player_id, status, reason));
 CREATE INDEX IF NOT EXISTS ix_status_fx ON player_status(fixture_id);
 CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY, done_at TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS referees(fixture_id TEXT, source TEXT, name TEXT, observed_at TEXT, PRIMARY KEY(fixture_id, source));
 CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRIMARY KEY(source, period));
 """
+
+
+def referee_key(name: str | None) -> str | None:
+    """One key for the spellings of a referee across sources: 'M Oliver' (football-data) and 'Michael Oliver, England'
+    (API-Football) both give 'm oliver'."""
+    if not name:
+        return None
+    parts = normalize(name.split(",")[0]).split()
+    if not parts:
+        return None
+    return parts[-1] if len(parts) == 1 else f"{parts[0][0]} {parts[-1]}"
 
 
 def _iso(dt: datetime) -> str:
@@ -305,6 +317,12 @@ class SnapshotStore:
         self._bulk("INSERT OR REPLACE INTO match_stats(fixture_id,period,stat,home,away,observed_at,source,raw_id)", list(rows.values()))
         return len(stats)
 
+    def save_referees(self, source: str, items: list[tuple[str, str]], at: datetime) -> int:
+        """(fixture id, referee as the source spells it); a later read replaces the earlier one (late appointments)."""
+        rows = {fid: (fid, source, name.strip(), _iso(at)) for fid, name in items if name and name.strip()}
+        self._bulk("INSERT OR REPLACE INTO referees(fixture_id,source,name,observed_at)", list(rows.values()))
+        return len(rows)
+
     def stats_of(self, fixture_id: str, period: str = "FT") -> dict[str, tuple[float | None, float | None]]:
         rows = self.db.execute("SELECT stat, home, away FROM match_stats WHERE fixture_id=? AND period=?", (fixture_id, period)).fetchall()
         return {r[0]: (r[1], r[2]) for r in rows}
@@ -448,6 +466,20 @@ class SnapshotProvider:
     def list_history(self, competitions, until) -> list[MatchResult]:
         return sorted((r for r in self._unique_results()[0] if (not competitions or r.competition in competitions) and r.available_at <= until),
                       key=lambda r: (r.kickoff, r.fixture_id))
+
+    def referees(self) -> dict[str, str]:
+        """Referee key per match under the canonical result id (football-data first, then API-Football)."""
+        try:
+            rows = self.store.db.execute("SELECT fixture_id, source, name FROM referees").fetchall()
+        except sqlite3.Error:
+            return {}
+        canon = self._unique_results()[1]
+        out: dict[str, str] = {}
+        for fid, source, name in sorted(rows, key=lambda r: r[1] != "football-data"):
+            key = referee_key(name)
+            if key:
+                out.setdefault(canon.get(fid, fid), key)
+        return out
 
     def stat_counts(self, stat: str) -> dict[str, tuple[float, float]]:
         """Full-time (home, away) counts of 'corners' or 'cards' (yellow + red) per match, under the canonical result id.

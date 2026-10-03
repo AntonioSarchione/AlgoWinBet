@@ -131,6 +131,7 @@ class ApiFootballCollector:
             rows = self.client.get("/fixtures", params).get("response") or []
             linked = 0
             teams: dict[int, tuple[str, str]] = {}
+            refs: list[tuple[str, str]] = []
             for r in rows:
                 lg = self.leagues.get(int(r["league"]["id"]))
                 if not lg:
@@ -144,7 +145,11 @@ class ApiFootballCollector:
                                       (SOURCE, str(r["fixture"]["id"]), fx.id, t.isoformat()))
                 teams[int(r["teams"]["home"]["id"])] = (fx.home, r["teams"]["home"]["name"])
                 teams[int(r["teams"]["away"]["id"])] = (fx.away, r["teams"]["away"]["name"])
+                if (r.get("fixture") or {}).get("referee"):
+                    refs.append((fx.id, r["fixture"]["referee"]))
                 linked += 1
+            if refs:
+                st.add("arbitri", self.store.save_referees(SOURCE, refs, t))
             for tid, (name, api_name) in teams.items():
                 self.store.db.execute("INSERT INTO apif_teams(team_id, name, apif_name) VALUES(?,?,?) "
                                       "ON CONFLICT(team_id) DO UPDATE SET name=excluded.name, apif_name=excluded.apif_name", (tid, name, api_name))
@@ -366,6 +371,7 @@ class ApiFootballCollector:
     def sync_finished(self, st: CollectStats) -> None:
         dates, events = self._pending_detail()
         stats: list[MatchStat] = []
+        refs: list[tuple[str, str]] = []
         for d, ready in sorted(dates.items()):
             params = {"date": d.isoformat()}
             last = self._last_fetch("/fixtures", params)
@@ -385,6 +391,8 @@ class ApiFootballCollector:
                     fid = fx.id
                     self.store.db.execute("INSERT OR REPLACE INTO fixture_links(source, ext_id, fixture_id, linked_at) VALUES(?,?,?,?)",
                                           (SOURCE, str(r["fixture"]["id"]), fid, self.now().isoformat()))
+                if (r.get("fixture") or {}).get("referee"):
+                    refs.append((fid, r["fixture"]["referee"]))
                 ht = (r.get("score") or {}).get("halftime") or {}
                 done = str(((r.get("fixture") or {}).get("status") or {}).get("short") or "") in ("FT", "AET", "PEN")
                 if done and ht.get("home") is not None and ht.get("away") is not None:
@@ -401,6 +409,8 @@ class ApiFootballCollector:
                 first, last = got
                 stats.append(MatchStat(fixture_id=fid, period="FT", stat="first_goal_minute", home=first[0], away=first[1], observed_at=self.now()))
                 stats.append(MatchStat(fixture_id=fid, period="FT", stat="last_goal_minute", home=last[0], away=last[1], observed_at=self.now()))
+        if refs:
+            st.add("arbitri", self.store.save_referees(SOURCE, refs, self.now()))
         if stats:
             st.add("dettagli partite finite", self.store.save_stats(SOURCE, stats))
         self.store.db.commit()

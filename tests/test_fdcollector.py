@@ -211,3 +211,16 @@ def test_a_finished_match_without_result_triggers_the_results_step_early():
     st.save_results("goal-api", [MatchResult(fixture_id="goal:1", competition="UEFA Nations League", home="Denmark", away="Portugal",
                                              kickoff=ko, home_goals=1, away_goals=1)], NOW)
     assert late_result_leagues(st, cfg, NOW) == [] and "results" not in plan_tick(st, cfg, NOW, None)
+
+
+def test_referee_column_saved_and_read_back_under_one_key():
+    from algowinbet.names import TeamNames
+    from algowinbet.snapshots import SnapshotProvider
+    ko = datetime(2026, 9, 27, 13, 0, tzinfo=UTC)
+    st = store_with(("goal:1", "Internazionale", "AC Milan", ko))
+    c = FootballDataCollector(st, {"E0": "Premier League"}, now=lambda: NOW)
+    c.names = TeamNames({"Inter": ["Internazionale"], "Milan": ["AC Milan"]})
+    body = ("﻿" + HEAD + ",Referee\n" + row("27/09/2026", "14:00", "Inter", "Milan") + ",M Oliver\n").encode()
+    c.load(body, "E0", None, CollectStats("t"), only_referees=True)
+    assert "goals" not in st.stats_of("goal:1")  # only the referee was read
+    assert SnapshotProvider(st).referees() == {"goal:1": "m oliver"}

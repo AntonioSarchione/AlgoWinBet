@@ -34,15 +34,20 @@ class ModelCfg(BaseModel):
     nation_half_life_days: float | None = 1095.0
     # Fase 7: corners and cards from count models (models/counts.py); a statistic with fewer matches than this is not priced
     # stat-eval 2026-10-03 (26 weeks, 852 league matches): corners beat the league average (1X2 corners log loss 0.888 vs 0.929,
-    # Over 9.5 0.687 vs 0.695); cards do not (Over 4.5 0.630 vs 0.624, level 4.15 predicted vs 3.85): off until the referee and
-    # Sisal's counting rule are in
-    stat_models: list[str] = Field(default_factory=lambda: ["corners"])
+    # Over 9.5 0.687 vs 0.695).
+    # Cards (Sisal: yellow 1, red 1, second yellow before a red not counted; what we store): stat-eval 2026-10-03 over 52 weeks
+    # (2,322 matches) with a shared match factor, a 60-day level and 5x shrinkage: 1X2 cards 1.0605 vs 1.0698 for the league
+    # average (clear), totals no better than the league average (O3.5 0.6694 vs 0.6728, O4.5 0.6422 vs 0.6436, O5.5 0.5220
+    # vs 0.5224): only the 1X2 is priced; totals wait for the referee.
+    stat_models: list[str] = Field(default_factory=lambda: ["corners", "cards"])
+    stat_options: dict[str, dict] = Field(default_factory=lambda: {"cards": {"shared": True, "level_half_life_days": 60.0, "l2": 5.0}})
+    stat_markets_off: list[str] = Field(default_factory=lambda: ["CARDS_TOTAL", "CARDS_TEAM_HOME", "CARDS_TEAM_AWAY"])
     stat_min_history: int = 300
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
-    version: str = "dc-poisson-v5"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
-    # matches weighted by tournament importance (Elo K and goal model); v5: Elo K table, national half-life 3 years
+    version: str = "dc-poisson-v6"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
+    # matches weighted by tournament importance (Elo K and goal model); v5: Elo K table, national half-life 3 years; v6: cards 1X2 priced
 
 
 class EnsembleCfg(BaseModel):

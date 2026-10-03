@@ -25,7 +25,8 @@ LEVEL_XI = math.log(2) / 60.0  # level half-life of 2 months
 VARIANTS = {
     "corners": {"modello": {}},
     "cards": {"modello": {}, "l2x5": {"l2": 5.0}, "condiviso": {"shared": True}, "livello": {"level_xi": LEVEL_XI},
-              "cond+liv": {"shared": True, "level_xi": LEVEL_XI}, "tutto": {"shared": True, "level_xi": LEVEL_XI, "l2": 5.0}},
+              "cond+liv": {"shared": True, "level_xi": LEVEL_XI}, "tutto": {"shared": True, "level_xi": LEVEL_XI, "l2": 5.0},
+              "arbitro": {"shared": True, "level_xi": LEVEL_XI, "l2": 5.0, "referee": True}},
 }
 
 
@@ -36,6 +37,8 @@ def _ll(p: float, hit: bool) -> float:
 def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: int = 2, half_life: float = 365.0,
                   min_rows: int = 300) -> dict:
     counts = provider.stat_counts(stat)
+    refs = provider.referees() if hasattr(provider, "referees") else {}
+    scores_ref: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     xi = math.log(2) / half_life
     scores: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     level: dict[str, list[float]] = defaultdict(list)
@@ -53,7 +56,11 @@ def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: 
         if len(rows) < min_rows or not tests:
             monday = nxt
             continue
-        models = {name: CountModel(stat, xi=xi, **kw).fit(rows, monday) for name, kw in VARIANTS[stat].items()}
+        models = {}
+        for name, kw in VARIANTS[stat].items():
+            kw = dict(kw)
+            use_ref = kw.pop("referee", False)
+            models[name] = CountModel(stat, xi=xi, **kw).fit(rows, monday, referees=refs if use_ref else None)
         nb = models["modello"]
         size = nb.size
         sizes = {name: (m.size, m.shared_size) for name, m in models.items()}
@@ -67,7 +74,8 @@ def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: 
             if not (nb.knows(r.home) and nb.knows(r.away)) or r.competition not in avg:
                 continue
             h, a = counts[r.fixture_id]
-            mats = {name: m.matrix(r.home, r.away, r.competition) for name, m in models.items()}
+            ref = refs.get(r.fixture_id)
+            mats = {name: m.matrix(r.home, r.away, r.competition, referee=ref) for name, m in models.items()}
             mats["poisson"] = po.matrix(r.home, r.away, r.competition)
             mean_model = CountModel(stat)
             mean_model.size = nb.size
@@ -86,14 +94,20 @@ def evaluate_stat(provider, stat: str, start: datetime, end: datetime, seasons: 
                 for line in LINES[stat]:
                     p = stat_probability(m, SelectionRef(market_code=f"{stat.upper()}_TOTAL", selection="OVER", line=line))
                     scores[name][f"O{line}"].append(_ll(p, h + a > line))
+                    if ref:
+                        scores_ref[name][f"O{line}"].append(_ll(p, h + a > line))
                 p1 = {s: stat_probability(m, SelectionRef(market_code=f"{stat.upper()}_1X2", selection=s)) for s in ("HOME", "DRAW", "AWAY")}
                 res = "HOME" if h > a else "DRAW" if h == a else "AWAY"
                 scores[name]["1X2"].append(-math.log(max(p1[res], 1e-12)))
+                if ref:
+                    scores_ref[name]["1X2"].append(-math.log(max(p1[res], 1e-12)))
         monday = nxt
     return {"scores": {k: {m: (float(np.mean(v)), len(v)) for m, v in d.items()} for k, d in scores.items()},
             "level": {k: float(np.mean(v)) for k, v in level.items()}, "size": size, "sizes": sizes,
             "by_comp": {c: (float(np.mean(p)), float(np.mean(a)), len(a)) for c, (p, a) in by_comp.items()},
             "variants": list(VARIANTS[stat]),
+            "scores_ref": {k: {m: (float(np.mean(v)), len(v)) for m, v in d.items()} for k, d in scores_ref.items()},
+            "n_refs": len(set(refs.values())),
             "by_month": {c: (float(np.mean(p)), float(np.mean(a)), len(a)) for c, (p, a) in sorted(by_month.items())}}
 
 
@@ -105,6 +119,11 @@ def print_stat_report(stat: str, rep: dict) -> None:
     for n in names:
         d = rep["scores"].get(n, {})
         print("  " + n.ljust(10) + "".join((f"{d[c][0]:.4f} ({d[c][1]})" if c in d else "-").rjust(14) for c in cols))
+    if rep.get("scores_ref"):
+        print(f"  solo partite con arbitro noto ({rep.get('n_refs', 0)} arbitri):")
+        for n in names:
+            d = rep["scores_ref"].get(n, {})
+            print("  " + n.ljust(10) + "".join((f"{d[c][0]:.4f} ({d[c][1]})" if c in d else "-").rjust(14) for c in cols))
     lv = rep["level"]
     if lv:
         print(f"  totale medio previsto {lv['previsto']:.2f} / accaduto {lv['accaduto']:.2f}"

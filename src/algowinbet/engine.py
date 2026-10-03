@@ -119,8 +119,11 @@ class Engine:
             counts = self._stat_rows[stat]
             rows = [r.model_copy(update={"home_goals": int(counts[r.fixture_id][0]), "away_goals": int(counts[r.fixture_id][1])})
                     for r in history_at(self.provider, None, cutoff, m.history_seasons) if r.fixture_id in counts]
-            self._counts[key] = (CountModel(stat, xi=math.log(2) / m.xi_half_life_days, l2=m.l2).fit(rows, cutoff)
-                                 if len(rows) >= m.stat_min_history else None)
+            o = m.stat_options.get(stat, {})
+            lh = o.get("level_half_life_days")
+            cm = CountModel(stat, xi=math.log(2) / m.xi_half_life_days, l2=o.get("l2", m.l2), shared=bool(o.get("shared", False)),
+                            level_xi=math.log(2) / lh if lh else None)
+            self._counts[key] = cm.fit(rows, cutoff) if len(rows) >= m.stat_min_history else None
         return self._counts[key]
 
     def stat_matrices(self, f: Fixture, cutoff: datetime) -> dict[str, tuple]:

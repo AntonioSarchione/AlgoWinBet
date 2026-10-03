@@ -156,6 +156,8 @@ def analyze_fixture(
                 # corners / cards: their own count matrix (models/counts.py); lineups do not move it (yet)
                 if stat not in (stats or {}):
                     raise UnsupportedMarket(f"{stat}: no model for this match")
+                if v.ref.market_code in cfg.model.stat_markets_off:
+                    raise UnsupportedMarket(f"{v.ref.market_code}: not priced (no better than the league average)")
                 sm, n_stat = stats[stat]
                 p_s = stat_probability(sm, v.ref)
             else:

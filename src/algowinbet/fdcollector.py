@@ -273,7 +273,7 @@ class FootballDataCollector:
                 break
         return mapping
 
-    def load(self, body: bytes, div: str, raw_id: int | None, st: CollectStats) -> FileReport:
+    def load(self, body: bytes, div: str, raw_id: int | None, st: CollectStats, only_referees: bool = False) -> FileReport:
         rep = FileReport()
         cal = self._calendar()
         parsed = []
@@ -287,6 +287,7 @@ class FootballDataCollector:
         mapping = self._learn([(r["HomeTeam"].strip(), r["AwayTeam"].strip(), ko, near) for r, ko, near in parsed])
         quotes: list[OddsQuote] = []
         stats: list[MatchStat] = []
+        refs: list[tuple[str, str]] = []
         t = self.now()
         for row, ko, near in parsed:
             rep.rows += 1
@@ -298,10 +299,16 @@ class FootballDataCollector:
                 continue
             rep.linked += 1
             for fid, _, _, kickoff in hit:
-                stats += self._stats(row, fid, t)
-                quotes += self._quotes(row, fid, kickoff)
-        st.add("stats", self.store.save_stats(SOURCE, stats, raw_id))
-        st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
+                if (row.get("Referee") or "").strip():
+                    refs.append((fid, row["Referee"]))
+                if not only_referees:
+                    stats += self._stats(row, fid, t)
+                    quotes += self._quotes(row, fid, kickoff)
+        if refs:
+            st.add("arbitri", self.store.save_referees(SOURCE, refs, t))
+        if not only_referees:
+            st.add("stats", self.store.save_stats(SOURCE, stats, raw_id))
+            st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
         return rep
 
     @staticmethod

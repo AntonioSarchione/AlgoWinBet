@@ -78,3 +78,46 @@ def test_shared_factor_finds_correlated_counts():
     assert cov > 0.5  # the two sides move together
     plain = CountModel("cards").fit(rows, T0 + timedelta(days=70))
     assert plain.shared_size == float("inf")
+
+
+def test_cards_1x2_is_priced_and_card_totals_are_not():
+    from algowinbet.config import Config
+    from algowinbet.domain import Fixture, OddsQuote
+    from algowinbet.models.dixon_coles import DixonColes
+    from algowinbet.opportunity import analyze_fixture
+    from algowinbet.state import MatchState
+    rng = np.random.default_rng(3)
+    rows = _season(rng, size=6.0)
+    goals = DixonColes().fit([r.model_copy(update={"home_goals": r.home_goals % 4, "away_goals": r.away_goals % 3}) for r in rows],
+                             T0 + timedelta(days=40))
+    cards = CountModel("cards", shared=True).fit([r.model_copy(update={"home_goals": r.home_goals // 2, "away_goals": r.away_goals // 2})
+                                                  for r in rows], T0 + timedelta(days=40))
+    ko = T0 + timedelta(days=41)
+    fx = Fixture(id="x", competition="L", home="A", away="F", kickoff=ko)
+    at = ko - timedelta(hours=5)
+    q = [OddsQuote(fixture_id="x", market_code="CARDS_1X2", selection=s, bookmaker=b, odds=o, observed_at=at)
+         for b in ("sisal", "pinnacle") for s, o in (("HOME", 2.4), ("DRAW", 4.2), ("AWAY", 2.6))]
+    q += [OddsQuote(fixture_id="x", market_code="CARDS_TOTAL", selection=s, line=4.5, bookmaker=b, odds=1.9, observed_at=at)
+          for b in ("sisal", "pinnacle") for s in ("OVER", "UNDER")]
+    res = analyze_fixture(MatchState(fixture=fx, cutoff=at, quotes=q), goals, [], Config(),
+                          stats={"cards": (cards.matrix("A", "F", "L"), 30)})
+    codes = {o.ref.market_code for o in res.opportunities}
+    assert "CARDS_1X2" in codes and "CARDS_TOTAL" not in codes
+
+
+def test_referee_key_and_factor():
+    from algowinbet.snapshots import referee_key
+    assert referee_key("M Oliver") == referee_key("Michael Oliver, England") == "m oliver"
+    assert referee_key("") is None
+    rng = np.random.default_rng(7)
+    rows, refs = [], {}
+    for k, r in enumerate(_season(rng, size=None, n_rounds=24)):
+        strict = k % 4 == 0  # one referee in four shows 60% more cards
+        g = 1.6 if strict else 1.0
+        rows.append(r.model_copy(update={"home_goals": int(rng.poisson(2.0 * g)), "away_goals": int(rng.poisson(1.8 * g))}))
+        refs[r.fixture_id] = "a strict" if strict else f"r {k % 4}"
+    cm = CountModel("cards", l2=5.0).fit(rows, T0 + timedelta(days=80), referees=refs)
+    assert cm.ref_adj["a strict"] > 1.3 > cm.ref_adj["r 1"]
+    hs, as_ = cm.expected("A", "B", "L", referee="a strict")
+    hn, an = cm.expected("A", "B", "L", referee="nobody")
+    assert hs / hn == cm.ref_adj["a strict"] and hn == cm.expected("A", "B", "L")[0]
