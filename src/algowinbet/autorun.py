@@ -186,7 +186,7 @@ def _last_ok(store: SnapshotStore, source: str, endpoint_like: str) -> datetime 
 
 
 RESULT_DUE = timedelta(hours=2, minutes=30)  # kickoff + 90' + half time + stoppages, with a margin
-RESULT_RETRY = timedelta(hours=2)  # a match still missing its result is asked again at most this often
+RESULT_RETRY = timedelta(minutes=45)  # a match still missing its result is asked again at most this often (GOAL requests are plenty)
 
 
 def late_result_leagues(store: SnapshotStore, cfg: AutoConfig, now: datetime) -> list[str]:

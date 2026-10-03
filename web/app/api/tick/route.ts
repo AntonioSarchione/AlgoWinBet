@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { matchesBetween } from "@/lib/db";
-import { inCollectionHours, isDailySlot, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, REPO, WORKFLOW } from "@/lib/refresh";
+import { inCollectionHours, isDailySlot, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, REPO, RESULTS_FROM_MS, RESULTS_UNTIL_MS, WORKFLOW } from "@/lib/refresh";
 
 // Scheduler tick from an external pinger (GitHub's own cron starts most runs hours late or never). The pinger calls this
 // URL every 30 minutes with "Authorization: Bearer <CRON_SECRET>"; inside the collection hours (lib/refresh.ts) it starts one
@@ -21,7 +21,12 @@ async function tick(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || !authorized(req, secret)) return NextResponse.json({ error: "non autorizzato" }, { status: 401 });
   const now = new Date();
-  if (!inCollectionHours(now) && req.nextUrl.searchParams.get("force") !== "1") {
+  const force = req.nextUrl.searchParams.get("force") === "1";
+  // evening matches end after the collection hours: a run when their results are due settles the registry the same night
+  const resultsDue =
+    !force && !inCollectionHours(now) &&
+    (await matchesBetween(new Date(now.getTime() - RESULTS_UNTIL_MS), new Date(now.getTime() - RESULTS_FROM_MS)).catch(() => false));
+  if (!inCollectionHours(now) && !resultsDue && !force) {
     return NextResponse.json({ skipped: "fuori dalle ore di raccolta" });
   }
   const token = process.env.GITHUB_DISPATCH_TOKEN;
@@ -38,7 +43,7 @@ async function tick(req: NextRequest) {
       if (!r.ok) return NextResponse.json({ error: `GitHub ${r.status}` }, { status: 502 });
       if (((await r.json()) as { total_count: number }).total_count > 0) return NextResponse.json({ skipped: `un run è già ${status}` });
     }
-    if (!isDailySlot(now) && req.nextUrl.searchParams.get("force") !== "1") {
+    if (!isDailySlot(now) && !force && !resultsDue) {
       // database unreachable: run anyway (a wasted minute is better than a missed lineup)
       const near = await matchesBetween(new Date(now.getTime() - MATCH_BEFORE_MS), new Date(now.getTime() + MATCH_AFTER_MS)).catch(() => true);
       if (!near) {

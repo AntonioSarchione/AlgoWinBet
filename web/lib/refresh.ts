@@ -11,6 +11,9 @@ export const MANUAL_MONTHLY = 5;
 export const MATCH_BEFORE_MS = 3 * 3600e3;
 export const MATCH_AFTER_MS = 3.5 * 3600e3;
 export const MAX_GAP_MS = 3 * 3600e3;
+// outside the collection hours: one or two runs for a match that kicked off 2.5-3.5 hours ago (result due, registry settled)
+export const RESULTS_FROM_MS = 2.5 * 3600e3;
+export const RESULTS_UNTIL_MS = 3.5 * 3600e3;
 
 export function isDailySlot(d: Date): boolean {
   return d.getUTCHours() === 6 && d.getUTCMinutes() < 30;
