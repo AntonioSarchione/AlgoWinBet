@@ -477,6 +477,31 @@ def cmd_raw_last(a) -> None:
         print("\n" + _json.dumps(data, ensure_ascii=False)[: a.dump])
 
 
+def cmd_analysis_preview(a) -> None:
+    """The next week's analysis as the next publication would run it, without publishing (no request): opportunities per
+    market family and status, corners / cards ones listed."""
+    from collections import Counter
+    from .markets import family_of
+    from .meta import load_meta
+    from .publish import live_config
+    store = SnapshotStore(a.db)
+    try:
+        cfg = live_config(None)
+        t = datetime.now(timezone.utc)
+        meta = load_meta(store, cfg.model.version) if cfg.ensemble.use_meta else None
+        print(f"modello {cfg.model.version}, meta {meta.version if meta else 'spento'}")
+        res = Engine(SnapshotProvider(store), cfg, use_lineups=True, meta=meta).analyze(None, t, t + timedelta(days=a.days), t)
+        print(f"{len(res.fixtures)} partite, {len(res.opportunities)} mercati, {len(res.optimizer.slips)} schedine")
+        c = Counter((family_of(o.ref.market_code), o.status.value) for o in res.opportunities)
+        for (fam, status), n in sorted(c.items()):
+            print(f"  {fam:12} {status:10} {n}")
+        for o in sorted(res.opportunities, key=lambda o: -o.ev):
+            if o.ref.market_code.startswith(("CARDS_", "CORNERS_")) and o.status.value in ("STRONG", "CANDIDATE", "FAIR"):
+                print(f"  {o.home}-{o.away} {o.description}: quota {o.odds:.2f}, p {o.p_final:.3f}, EV {o.ev:+.3f} ({o.status.value})")
+    finally:
+        store.close()
+
+
 def cmd_referees_backfill(a) -> None:
     """Referees of past matches from payloads already stored (football-data season files, API-Football day reads)."""
     import json as _json
@@ -1302,6 +1327,10 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
     rl.add_argument("--db", default="algowinbet.db")
     rl.set_defaults(fn=cmd_raw_last)
+    ap = sub.add_parser("analysis-preview", help="analisi della prossima settimana senza pubblicarla (nessuna richiesta)")
+    ap.add_argument("--db", default="turso")
+    ap.add_argument("--days", type=float, default=7.0)
+    ap.set_defaults(fn=cmd_analysis_preview)
     rb = sub.add_parser("referees-backfill", help="Fase 7: arbitri delle partite passate dai dati già salvati (nessuna richiesta)")
     rb.add_argument("--db", default="turso")
     rb.add_argument("--config", default="configs/collect.json")
