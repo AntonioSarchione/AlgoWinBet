@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import { ArrowLeft, CircleSlash, Gauge, ListChecks, Percent, Sigma, Target } from "lucide-react";
-import { fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type BookSel, type OppRow } from "@/lib/db";
+import { DEPLOY, fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type BookSel, type OppRow } from "@/lib/db";
 import { legMinOdds, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
@@ -72,7 +72,7 @@ const manualSlips = unstable_cache(
     });
     return { n, results };
   },
-  ["manualSlips"],
+  ["manualSlips", DEPLOY],
   { revalidate: 6 * 3600 },
 );
 

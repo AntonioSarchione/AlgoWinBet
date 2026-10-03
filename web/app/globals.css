@@ -151,6 +151,37 @@ h2.section { font-size: 15px; margin: 6px 0 0; }
 .kpi small { display: block; color: var(--muted); font-size: 12px; }
 .kpi b { font-size: 19px; }
 
+/* ---------- registry summary ---------- */
+.reg-intro { max-width: 760px; font-size: 14px !important; line-height: 1.5; color: var(--text-2) !important; }
+.reg-updated { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.reg-updated svg { color: var(--accent); }
+.reg-updated-note::before { content: "·"; margin-right: 6px; }
+.reg-group { display: flex; flex-direction: column; gap: 10px; }
+.reg-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 0 2px; }
+.reg-group-head h2 { margin: 0; font-size: 16px; }
+.reg-group-head .muted { font-size: 13px; }
+.reg-tag { font-size: 12px; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 3px 10px; }
+.reg-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.reg-kpis.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.reg-kpi { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.reg-kpi-top { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.reg-kpi-top .kpi-icon { width: 30px; height: 30px; border-radius: 8px; }
+.reg-kpi-value { font-family: var(--font-display); font-size: 30px; line-height: 1.1; font-weight: 700; }
+.reg-kpi-sub { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.reg-kpi-sub b { color: var(--text); font-weight: 600; }
+.reg-kpi-sub b.pos { color: var(--good); }
+.reg-kpi-sub b.neg { color: var(--bad); }
+@media (max-width: 1100px) { .reg-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 860px) { .reg-kpis.three { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .reg-kpis, .reg-kpis.three { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .reg-kpi { padding: 12px 14px; gap: 4px; }
+  .reg-kpi-top .kpi-icon { width: 26px; height: 26px; }
+  .reg-kpi-value { font-size: 24px; }
+  .reg-updated-note { flex-basis: 100%; }
+  .reg-updated-note::before { content: none; }
+}
+
 /* ---------- filter bar ---------- */
 .filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 10px; padding: 12px; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

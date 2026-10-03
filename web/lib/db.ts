@@ -115,15 +115,19 @@ async function all<T>(sql: string, args: InValue[] = []): Promise<T[]> {
 }
 
 // Server-side data cache (shared by every request and page). A published run never changes, so reads keyed by run id can be
-// kept for long; only "which run is the latest" and the counters are refreshed every minute. Moving between pages then
-// costs no database round trip for data already read.
+// kept for long. Moving between pages then costs no database round trip for data already read.
 const RUN_TTL = 6 * 3600;
-const LIVE_TTL = 60;
+// every deploy starts a fresh cache: a cached result never outlives the code (optimizer rules, data shapes) that made it
+export const DEPLOY = process.env.VERCEL_GIT_COMMIT_SHA ?? "dev";
+// A time-based cache serves its stale copy to the first request after it expires (the refresh happens behind it), so a
+// page could show the previous state until a second visit. Rule: what says "latest" (last analysis, budget, last tick) is
+// read uncached on every request with tiny primary-key reads; everything else is cached under a key that changes with
+// its data (run id, newest lineup / quote / settlement), so a cached copy is never stale.
 function persist<A extends unknown[], R>(fn: (...args: A) => Promise<R>, name: string, seconds: number) {
-  return cache(unstable_cache(fn, [name], { revalidate: seconds }));
+  return cache(unstable_cache(fn, [name, DEPLOY], { revalidate: seconds }));
 }
 
-export const latestRun = persist(async (): Promise<Run | null> => {
+export const latestRun = cache(async (): Promise<Run | null> => {
   try {
     return (await all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 1"))[0] ?? null;
   } catch (e) {
@@ -132,7 +136,7 @@ export const latestRun = persist(async (): Promise<Run | null> => {
     if (/no such table/i.test(String(e))) return null;
     throw e;
   }
-}, "latestRun", LIVE_TTL);
+});
 
 export const runFixtures = persist(
   (runId: number) => all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? ORDER BY kickoff, competition, home", [runId]),
@@ -231,14 +235,14 @@ export const fixtureBook = persist(async (runId: number, ids: string[]) => {
 
 export const runSlips = cache((runId: number) => all<SlipRow>("SELECT * FROM pub_slips WHERE run_id = ? ORDER BY rank", [runId]));
 
-export const usage = persist(async () => {
+export const usage = cache(async () => {
   const now = new Date();
   const day = `D${now.toISOString().slice(0, 10)}`;
   const month = `M${now.toISOString().slice(0, 7)}`;
   const rows = await all<Usage>("SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", [day, month]);
   const get = (src: string, kind: "D" | "M") => rows.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
   return { goalDay: get("goal-api", "D"), apifDay: get("api-football", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D"), manualMonth: get("manual-refresh", "M") };
-}, "usage", LIVE_TTL);
+});
 
 /** Uncached: the manual refresh button checks the monthly cap right before starting a run. */
 // scheduler gate (/api/tick): is any match kicking off in [from, to]? Uncached on purpose: the answer drives a run.
@@ -257,16 +261,22 @@ export async function manualRefreshesThisMonth(): Promise<number> {
   return rows[0]?.used ?? 0;
 }
 
-export const lastTick = persist(async () => {
-  const r = await all<{ t: string | null }>("SELECT MAX(fetched_at) AS t FROM raw_requests");
+export const lastTick = cache(async () => {
+  // newest row by primary key (ids grow with time): no scan of the whole table
+  const r = await all<{ t: string | null }>("SELECT fetched_at AS t FROM raw_requests ORDER BY id DESC LIMIT 1");
   return r[0]?.t ?? null;
-}, "lastTick", LIVE_TTL);
+});
 
-export const fixtureDetail = persist(fixtureDetailUncached, "fixtureDetail", 300);
-
-async function fixtureDetailUncached(id: string) {
+// keyed by the analysis and the newest lineup of the match: a new run or a lineup shows on the first visit
+export const fixtureDetail = cache(async (id: string) => {
   const run = await latestRun();
   if (!run) return null;
+  const v = await all<{ t: string | null }>("SELECT MAX(observed_at) AS t FROM lineups WHERE fixture_id = ?", [id]);
+  return fixtureDetailAt(id, run, v[0]?.t ?? "");
+});
+const fixtureDetailAt = persist(fixtureDetailUncached, "fixtureDetail", 6 * 3600);
+
+async function fixtureDetailUncached(id: string, run: Run, _lineupsAt: string) {
   const fx = (await all<FixtureRow>("SELECT * FROM pub_fixtures WHERE run_id = ? AND fixture_id = ?", [run.id, id]))[0];
   if (!fx) return null;
   const [opps, nq, lineups, formHome, formAway, h2h] = await Promise.all([
@@ -312,8 +322,13 @@ const PLAYABLE = "bookmaker LIKE 'sisal%'";
 
 // Every priced selection of a fixture (market, selection, line): the menu of the odds-trend tab.
 export type QuoteKey = { market_code: string; selection: string; line_key: string; n: number };
-export const quoteMenu = persist(quoteMenuUncached, "quoteMenu", 300);
-function quoteMenuUncached(id: string) {
+// keyed by the newest stored quote of the match (index on fixture_id, observed_at)
+const quotesAt = cache(async (id: string) =>
+  (await all<{ t: string | null }>("SELECT MAX(observed_at) AS t FROM quotes WHERE fixture_id = ?", [id]))[0]?.t ?? "",
+);
+const quoteMenuAt = persist(quoteMenuUncached, "quoteMenu", 6 * 3600);
+export const quoteMenu = async (id: string) => quoteMenuAt(id, await quotesAt(id));
+function quoteMenuUncached(id: string, _quotesAt: string) {
   return all<QuoteKey>(
     `SELECT market_code, selection, COALESCE(line_key, '') AS line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND ${PLAYABLE} ` +
       "GROUP BY market_code, selection, COALESCE(line_key, '')",
@@ -322,8 +337,9 @@ function quoteMenuUncached(id: string) {
 }
 
 // Price path of one market line (all its selections, all bookmakers), oldest first.
-export const quotePath = persist(quotePathUncached, "quotePath", 300);
-function quotePathUncached(id: string, market: string, lineKey: string) {
+const quotePathAt = persist(quotePathUncached, "quotePath", 6 * 3600);
+export const quotePath = async (id: string, market: string, lineKey: string) => quotePathAt(id, market, lineKey, await quotesAt(id));
+function quotePathUncached(id: string, market: string, lineKey: string, _quotesAt: string) {
   return all<QuotePoint>(
     `SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND COALESCE(line_key, '') = ? AND ${PLAYABLE} ` +
       "ORDER BY observed_at",
@@ -390,18 +406,24 @@ export type QualityReport = {
 };
 export type QualityRun = { id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: QualityReport };
 
-export const latestQuality = persist(async (): Promise<QualityRun | null> => {
+export const latestQuality = cache(async (): Promise<QualityRun | null> => {
   try {
-    const rows = await all<{ id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: string }>(
-      "SELECT id, created_at, window_start, window_end, model_version, report FROM quality_runs ORDER BY id DESC LIMIT 1",
-    );
-    const r = rows[0];
-    return r ? { ...r, report: parseJSON<QualityReport>(r.report, { groups: {}, calibration: {}, value: {}, monthly: [], thresholds: { min_ev: 0, min_probability: 0, market_prior_sd: 0 }, n_matches: 0 }) } : null;
+    const last = await all<{ id: number }>("SELECT id FROM quality_runs ORDER BY id DESC LIMIT 1");
+    return last[0] ? qualityRun(last[0].id) : null;
   } catch (e) {
     if (/no such table/i.test(String(e))) return null; // table created by the first weekly run
     throw e;
   }
-}, "latestQuality", 600);
+});
+const qualityRun = persist(async (id: number): Promise<QualityRun | null> => {
+  {
+    const rows = await all<{ id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: string }>(
+      "SELECT id, created_at, window_start, window_end, model_version, report FROM quality_runs WHERE id = ?", [id],
+    );
+    const r = rows[0];
+    return r ? { ...r, report: parseJSON<QualityReport>(r.report, { groups: {}, calibration: {}, value: {}, monthly: [], thresholds: { min_ev: 0, min_probability: 0, market_prior_sd: 0 }, n_matches: 0 }) } : null;
+  }
+}, "qualityRun", 24 * 3600);
 
 // ---- paper trading registry (Fase 6): written by the analysis, settled by the collection ticks ----
 export type PaperLeg = {

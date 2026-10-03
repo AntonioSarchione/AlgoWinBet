@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
+import type { ReactNode } from "react";
+import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Layers, PieChart, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
 import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
@@ -23,7 +24,10 @@ const VERDICT: Record<State, string> = {
   open: "In prova: nessuna giocata reale finché il criterio non è superato.",
 };
 
-type Stats = { n: number; open: number; hits: number; roi: number | null; clv: number | null; nClv: number; evClose: number | null; nClose: number; maxDd: number };
+type Stats = {
+  n: number; open: number; hits: number; decided: number; expected: number | null; profit: number; unsettleable: number;
+  roi: number | null; clv: number | null; nClv: number; evClose: number | null; nClose: number; maxDd: number;
+};
 
 function stats(legs: PaperLeg[]): Stats {
   const settled = legs.filter((l) => l.result === "won" || l.result === "lost" || l.result === "void");
@@ -36,10 +40,15 @@ function stats(legs: PaperLeg[]): Stats {
   const clv = settled.filter((l) => l.close_odds).map((l) => l.odds / (l.close_odds as number) - 1);
   const evc = settled.filter((l) => l.close_fair).map((l) => l.odds * (l.close_fair as number) - 1);
   const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  const decided = settled.filter((l) => l.result !== "void");
   return {
     n: settled.length,
     open: legs.filter((l) => l.result == null).length,
     hits: settled.filter((l) => l.result === "won").length,
+    decided: decided.length,
+    expected: mean(decided.map((l) => l.p)), // the model's own probability: how many it expected to win
+    profit: cum,
+    unsettleable: legs.filter((l) => l.result === "non valutabile").length,
     roi: settled.length ? cum / settled.length : null,
     clv: mean(clv),
     nClv: clv.length,
@@ -47,6 +56,21 @@ function stats(legs: PaperLeg[]): Stats {
     nClose: evc.length,
     maxDd,
   };
+}
+
+const tone = (x: number | null) => (x == null ? "" : x >= 0 ? "pos" : "neg");
+
+function Kpi({ icon: Icon, label, value, cls = "", children }: { icon: typeof Wallet; label: string; value: string; cls?: string; children: ReactNode }) {
+  return (
+    <div className="card reg-kpi">
+      <div className="reg-kpi-top">
+        <span className="kpi-icon"><Icon size={16} aria-hidden="true" /></span>
+        <span>{label}</span>
+      </div>
+      <b className={`reg-kpi-value num ${cls}`}>{value}</b>
+      <p className="reg-kpi-sub">{children}</p>
+    </div>
+  );
 }
 
 function StatRow({ label, s }: { label: string; s: Stats }) {
@@ -86,47 +110,67 @@ export default async function Registro() {
   const legResult = new Map(reg.legs.map((l) => [`${l.fixture_id}|${l.sel_key}`, l]));
   const settledSlips = reg.slips.filter((s) => s.result && s.result !== "non valutabile");
   const slipPnl = settledSlips.reduce((a, s) => a + (s.payout ?? 0) - 1, 0);
+  const slipsWon = settledSlips.filter((s) => s.result === "won").length;
+  const slipsOpen = reg.slips.filter((s) => !s.result).length;
+  const units = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)} u`;
 
   return (
     <>
       <header className="page-head">
         <div>
           <h1>Registro</h1>
-          <p>
-            Ogni proposta è scritta la prima volta che un&apos;analisi la mostra, con la quota Sisal di quel momento, e non viene più modificata. Dopo la partita
-            si chiude da sola con il risultato e le quote di chiusura. Una unità a giocata, solo carta: nessuna scommessa viene piazzata.
+          <p className="reg-intro">
+            Ogni proposta entra qui la prima volta che un&apos;analisi la mostra, con la quota Sisal di quel momento, e non cambia più. Dopo la partita si
+            chiude da sola. Solo carta: 1 unità a giocata, nessuna scommessa piazzata.
           </p>
-          {reg.lastSettled && (
-            <p className="note">
-              Ultima chiusura: {dayTime(reg.lastSettled)}. I risultati arrivano con il giro di raccolta dopo la partita (circa 2½–3½ ore dal calcio
-              d&apos;inizio, al più tardi il giro delle 08:00).
-            </p>
-          )}
         </div>
+        {reg.lastSettled && (
+          <p className="reg-updated">
+            <Clock size={14} aria-hidden="true" /> Ultima chiusura <b>{dayTime(reg.lastSettled)}</b>
+            <span className="muted reg-updated-note">i risultati arrivano 2½–3½ ore dopo il calcio d&apos;inizio (al più tardi alle 08:00)</span>
+          </p>
+        )}
       </header>
 
-      <div className="kpis">
-        <div className="card kpi">
-          <span className="kpi-icon"><BookOpenCheck size={18} aria-hidden="true" /></span>
-          <span><small>Giocate di valore chiuse</small><b className="num">{sv.n}</b><span className="note">{sv.open} in attesa</span></span>
+      <section className="reg-group" aria-labelledby="reg-res">
+        <div className="reg-group-head">
+          <h2 id="reg-res">Risultati</h2>
+          <span className="muted">giocate di valore (Forte e Candidata)</span>
+          {crit.missing > 0 && <span className="reg-tag">Campione piccolo: mancano {crit.missing} giocate per giudicare</span>}
         </div>
-        <div className="card kpi">
-          <span className="kpi-icon"><Wallet size={18} aria-hidden="true" /></span>
-          <span><small>Rendimento (1 u a giocata)</small><b className={`num ${sv.roi != null && sv.roi >= 0 ? "pos" : "neg"}`}>{signed(sv.roi)}</b></span>
+        <div className="reg-kpis">
+          <Kpi icon={BookOpenCheck} label="Giocate chiuse" value={String(sv.n)}>
+            <b>{sv.open}</b> in attesa del risultato{sv.unsettleable > 0 && <> · {sv.unsettleable} non valutabil{sv.unsettleable === 1 ? "e" : "i"}</>}
+          </Kpi>
+          <Kpi icon={PieChart} label="Vinte" value={sv.decided ? pct(sv.hits / sv.decided) : "–"}>
+            {sv.decided ? <><b>{sv.hits}</b> su {sv.decided} · il modello ne attendeva il <b>{pct(sv.expected)}</b></> : "nessuna giocata decisa"}
+          </Kpi>
+          <Kpi icon={Wallet} label="Rendimento" value={signed(sv.roi)} cls={tone(sv.roi)}>
+            utile <b className={tone(sv.n ? sv.profit : null)}>{units(sv.profit)}</b> su {sv.n} u giocate
+          </Kpi>
+          <Kpi icon={TrendingDown} label="Calo massimo" value={`${sv.maxDd.toFixed(1)} u`}>
+            la perdita più ampia da un punto massimo dell&apos;utile
+          </Kpi>
         </div>
-        <div className="card kpi">
-          <span className="kpi-icon"><Target size={18} aria-hidden="true" /></span>
-          <span><small>CLV sulla chiusura Sisal</small><b className={`num ${sv.clv != null && sv.clv >= 0 ? "pos" : "neg"}`}>{signed(sv.clv)}</b></span>
+      </section>
+
+      <section className="reg-group" aria-labelledby="reg-mkt">
+        <div className="reg-group-head">
+          <h2 id="reg-mkt">Valore contro il mercato</h2>
+          <span className="muted">con poche giocate conta più del rendimento, che dipende quasi solo dalla fortuna</span>
         </div>
-        <div className="card kpi">
-          <span className="kpi-icon"><Scale size={18} aria-hidden="true" /></span>
-          <span><small>EV alla chiusura Pinnacle</small><b className={`num ${sv.evClose != null && sv.evClose >= 0 ? "pos" : "neg"}`}>{signed(sv.evClose)}</b></span>
+        <div className="reg-kpis three">
+          <Kpi icon={Target} label="Quota battuta (CLV Sisal)" value={signed(sv.clv)} cls={tone(sv.clv)}>
+            quota presa contro quota finale Sisal, su <b>{sv.nClv}</b> giocate. Sopra zero: presa prima che scendesse
+          </Kpi>
+          <Kpi icon={Scale} label="Valore sul prezzo Pinnacle" value={signed(sv.evClose)} cls={tone(sv.evClose)}>
+            la quota presa misurata sul prezzo finale Pinnacle (il più preciso), su <b>{sv.nClose}</b> giocate
+          </Kpi>
+          <Kpi icon={Layers} label="Schedine" value={settledSlips.length ? units(slipPnl) : "–"} cls={settledSlips.length ? tone(slipPnl) : ""}>
+            {settledSlips.length ? <><b>{slipsWon}</b> vinte su {settledSlips.length} chiuse</> : "nessuna chiusa"} · {slipsOpen} in attesa
+          </Kpi>
         </div>
-        <div className="card kpi">
-          <span className="kpi-icon"><TrendingDown size={18} aria-hidden="true" /></span>
-          <span><small>Calo massimo</small><b className="num">{sv.maxDd.toFixed(1)} u</b></span>
-        </div>
-      </div>
+      </section>
 
       <section className="card" aria-labelledby="crit-title">
         <div className="card-head">

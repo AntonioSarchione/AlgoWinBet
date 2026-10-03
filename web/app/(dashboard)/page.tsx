@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
   Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
 } from "lucide-react";
-import { lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
+import { DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
 import { explainSlip, legMinOdds, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
@@ -61,7 +61,7 @@ const homeSlips = unstable_cache(
       min_leg_probability: k.legProb, min_slip_ev: k.evMin, min_probability: k.riskMin,
     });
   },
-  ["homeSlips"],
+  ["homeSlips", DEPLOY],
   { revalidate: 6 * 3600 },
 );
 
