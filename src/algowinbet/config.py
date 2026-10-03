@@ -46,8 +46,9 @@ class ModelCfg(BaseModel):
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results
-    version: str = "dc-poisson-v6"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
-    # matches weighted by tournament importance (Elo K and goal model); v5: Elo K table, national half-life 3 years; v6: cards 1X2 priced
+    version: str = "dc-poisson-v5"  # v2: national-team Elo prior; v3: + 4 years of international results; v4: national
+    # matches weighted by tournament importance (Elo K and goal model); v5: Elo K table, national half-life 3 years. Not bumped for corners / cards: the meta-model
+    # and calibration are keyed by this version and fitted on the goal model, which those statistics do not touch
 
 
 class EnsembleCfg(BaseModel):
