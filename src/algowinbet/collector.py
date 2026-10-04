@@ -169,6 +169,79 @@ class GoalCollector:
         st.report = self.mapper.report
         return st
 
+    # ------------------------------------------------- historical lineups (Fase 6-bis)
+    LINEUP_PLAYERS = "goal-lineups"  # players table source of the players seen in GOAL lineups (their ids match the XI)
+
+    def pending_lineup_history(self, competitions: list[str], since: datetime) -> list[tuple]:
+        """Finished matches of these competitions since `since` with no confirmed XI stored, newest first."""
+        qs = ",".join("?" * len(competitions))
+        return self.store.db.execute(
+            f"SELECT r.fixture_id, r.competition, r.home, r.away, r.kickoff FROM results r WHERE r.fixture_id LIKE 'goal:%' "
+            f"AND r.competition IN ({qs}) AND r.kickoff >= ? AND NOT EXISTS (SELECT 1 FROM lineups l WHERE l.fixture_id = r.fixture_id "
+            f"AND l.status = 'confirmed') AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'no-lineup:' || r.fixture_id) "
+            f"ORDER BY r.kickoff DESC", (*competitions, since.isoformat())).fetchall()
+
+    def backfill_lineups(self, competitions: list[str], since: datetime, max_requests: int, max_seconds: float,
+                         clock: Callable[[], float] | None = None) -> CollectStats:
+        """XI of finished matches (1 GOAL request each): the player impact model learns from them who really matters.
+        Players are saved with their team as of their most recent match seen (a transfer moves them)."""
+        import time as _time
+        clock = clock or _time.monotonic
+        st = CollectStats("lineups-history")
+        t0 = clock()
+        todo = self.pending_lineup_history(competitions, since)
+
+        def work():
+            for fid, comp, home, away, ko in todo[:max_requests]:
+                if clock() - t0 > max_seconds:
+                    st.skipped.append("tempo esaurito")
+                    break
+                env = self.client.get(f"/fixtures/{fid.split(':', 1)[1]}/lineups")
+                data = env.get("data")
+                raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
+                kickoff = datetime.fromisoformat(ko)
+                fx = Fixture(id=fid, competition=comp, home=home, away=away, kickoff=kickoff, status=FixtureStatus.FINISHED)
+                # a finished match: the XI listed is the one that played, whatever flag the payload carries
+                lus = [l.model_copy(update={"status": "confirmed", "published_at": kickoff, "observed_at": kickoff})
+                       for l in self.mapper.lineups(data, fx, kickoff) if len(l.starters) >= 7]
+                if not lus:
+                    # nothing published for this match: remembered, never asked again
+                    self.store.db.execute("INSERT OR REPLACE INTO jobs(name, done_at, detail) VALUES(?,?,?)",
+                                          (f"no-lineup:{fid}", datetime.now(timezone.utc).isoformat(), "GOAL senza formazione"))
+                    self.store.db.commit()
+                    st.add("senza formazione", 1)
+                    continue
+                st.add("lineups", self.store.save_lineups(SOURCE, lus, raw_id))
+                st.add("players", self._save_lineup_players(data, home, away, kickoff))
+
+        self._run(st, work)
+        st.skipped.append(f"{max(0, len(todo) - max_requests)} partite ancora da leggere" if len(todo) > max_requests else "nessuna partita in coda")
+        return st
+
+    def _save_lineup_players(self, data, home: str, away: str, at: datetime) -> int:
+        rows: list[Player] = []
+        sides = {"home": home, "away": away}
+        for key, team in sides.items():
+            side = data.get(key) if isinstance(data, dict) else None
+            if not isinstance(side, dict):
+                continue
+            for p in (side.get("startingLineups") or []) + (side.get("substitutes") or []):
+                if not isinstance(p, dict) or not p.get("playerId") or not p.get("lineupPlayer"):
+                    continue
+                pos = self.mapper._POS.get(str(p.get("playerPosition") or "").strip().lower())
+                if pos is None:
+                    continue
+                rows.append(Player(id=f"goal:{p['playerId']}", name=str(p["lineupPlayer"]), team=team, position=pos))
+        if not rows:
+            return 0
+        # the most recent match decides the team: an older match read later never moves a player back
+        seen = dict(self.store.db.execute(
+            f"SELECT id, updated_at FROM players WHERE id IN ({','.join('?' * len(rows))})", [r.id for r in rows]).fetchall())
+        fresh = [r for r in rows if not seen.get(r.id) or seen[r.id] < at.isoformat()]
+        if fresh:
+            self.store.save_players(self.LINEUP_PLAYERS, fresh, at)
+        return len(fresh)
+
     def sync_odds(self, hours_ahead: int = 48, max_fixtures: int = 20) -> CollectStats:
         st = CollectStats("odds")
 

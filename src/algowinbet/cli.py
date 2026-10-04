@@ -623,6 +623,35 @@ def cmd_quotes_check(a) -> None:
         store.close()
 
 
+DOMESTIC = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1", "Primeira Liga", "Eredivisie"]
+
+
+def lineup_backfill(store, names, now: datetime, since: str, max_requests: int, max_seconds: float, keep: int):
+    """GOAL XI of finished domestic matches, within the day's GOAL budget minus `keep` requests left for the normal ticks."""
+    from .collector import GoalCollector
+    guard = BudgetGuard(store, "goal-api", daily=1000, reserve=50)
+    left = (guard.remaining()["daily"] or 0) - keep
+    if left <= 0:
+        return None, 0
+    coll = GoalCollector(GoalApiClient(store=store, budget=guard), store, [], names)
+    st = coll.backfill_lineups(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc), min(max_requests, left), max_seconds)
+    return st, len(coll.pending_lineup_history(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc)))
+
+
+def cmd_lineups_backfill(a) -> None:
+    """Historical XI of the 7 domestic leagues from GOAL (1 request per match, within the daily budget)."""
+    store = SnapshotStore(a.db)
+    try:
+        st, left = lineup_backfill(store, TeamNames.load(a.aliases), datetime.now(timezone.utc), a.since, a.max, a.max_seconds, a.keep)
+        if st is None:
+            print("budget GOAL di oggi esaurito (tolta la quota lasciata ai giri normali)")
+            return
+        print(f"richieste {st.requests} · salvate {st.saved} · {'; '.join(st.skipped + st.errors)}")
+        print(f"partite ancora senza formazione dal {a.since}: {left}")
+    finally:
+        store.close()
+
+
 def cmd_lineup_history_check(a) -> None:
     """One-shot check (a few GOAL requests): does GOAL return the XI of finished matches, recent and a season ago, and do
     their players resolve to the roster? Decides whether the player impact model can be trained on GOAL lineups."""
@@ -1564,6 +1593,14 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("team", nargs="?", default="")
     rc.add_argument("--db", default="turso")
     rc.set_defaults(fn=cmd_registry_check)
+    lb = sub.add_parser("lineups-backfill", help="formazioni delle partite finite dei 7 campionati da GOAL (1 richiesta a partita)")
+    lb.add_argument("--since", default="2025-07-01")
+    lb.add_argument("--max", type=int, default=900)
+    lb.add_argument("--max-seconds", type=float, default=840)
+    lb.add_argument("--keep", type=int, default=120, help="richieste GOAL di oggi lasciate ai giri normali")
+    lb.add_argument("--db", default="turso")
+    lb.add_argument("--aliases", default="configs/team_aliases.json")
+    lb.set_defaults(fn=cmd_lineups_backfill)
     lh = sub.add_parser("lineup-history-check", help="GOAL restituisce le formazioni delle partite finite? (2 richieste GOAL)")
     lh.add_argument("--comp", default="Serie A")
     lh.add_argument("--db", default="turso")
