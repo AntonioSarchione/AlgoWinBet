@@ -29,6 +29,41 @@ Probabilità proprie, quote Sisal, valore contro Pinnacle, schedine ottimizzate 
   a mano.
 - **Registra tutto alla prima comparsa** e lo chiude dopo la partita: CLV, valore alla chiusura, calibrazione reale. Nessuna scelta a posteriori.
 
+## Uno sguardo
+
+<p align="center">
+  <img src="docs/screenshots/home-schedina.png" alt="Home: la schedina ottimizzata e il riepilogo dell'analisi" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/home-perche.png" alt="La schedina proposta e perché: EV, robustezza, cosa la cambierebbe" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/partita-1x2.png" alt="Analisi di una partita: probabilità 1X2, risultati esatti, under/over" width="100%">
+</p>
+
+<details>
+<summary><b>Altre schermate</b>: opportunità, registro, criterio di passaggio, qualità del modello, budget</summary>
+<br>
+
+**Migliori opportunità**: quota Sisal, quota equa, probabilità del modello e del mercato, EV e stato.
+<img src="docs/screenshots/home-opportunita.png" alt="Migliori opportunità" width="100%">
+
+**Registro**: risultati a carta e valore contro il mercato.
+<img src="docs/screenshots/registro.png" alt="Registro: risultati e valore contro il mercato" width="100%">
+
+**Criterio di passaggio**: le nove condizioni e il loro stato.
+<img src="docs/screenshots/registro-criterio.png" alt="Criterio di passaggio" width="100%">
+
+**Qualità del modello**: log loss per gruppo e mercato contro il prezzo di chiusura.
+<img src="docs/screenshots/qualita.png" alt="Qualità delle probabilità" width="100%">
+
+**Budget**: richieste API e minuti GitHub del mese.
+<img src="docs/screenshots/sistema.png" alt="Budget richieste API e minuti GitHub" width="100%">
+
+</details>
+
+<sub>Schermate del 04/10/2026 dal sito reale (`node web/scripts/readme-shots.mjs` per rifarle).</sub>
+
 ## Come funziona
 
 ```mermaid

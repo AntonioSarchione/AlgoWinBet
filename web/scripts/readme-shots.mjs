@@ -24,8 +24,6 @@ const SHOTS = [
   ["home-perche", "/", ["#slip-title", "#why-title"]],
   ["home-opportunita", "/", ["#opp-title"]],
   ["partita-1x2", "partita", ["#match-title", "Probabilità 1X2"]],
-  ["partita-quote", "partita", ["Andamento"]],
-  ["palinsesto", "/palinsesto", ["Palinsesto completo"]],
   ["registro", "/registro", ["#reg-res", "#reg-mkt"]],
   ["registro-criterio", "/registro", ["#crit-title"]],
   ["qualita", "/qualita", ["Qualità delle probabilità"]],
@@ -130,7 +128,7 @@ try {
     }
     const r = await evaluate(RECT(keys));
     if (!r) { console.log(`${name}: sezioni non trovate (${keys.join(", ")}), saltata`); continue; }
-    const clip = { x: Math.max(0, r.x - PAD), y: Math.max(0, r.y - PAD), width: Math.min(WIDTH, r.width + 2 * PAD), height: Math.min(MAX_H, r.height + 2 * PAD), scale: 1 };
+    const clip = { x: Math.max(0, r.x - PAD), y: Math.max(0, r.y - PAD), width: Math.min(WIDTH - Math.max(0, r.x - PAD), r.width + 2 * PAD), height: Math.min(MAX_H, r.height + 2 * PAD), scale: 1 };
     const { data } = await send("Page.captureScreenshot", { format: "png", clip, captureBeyondViewport: true });
     writeFileSync(join(OUT, `${name}.png`), Buffer.from(data, "base64"));
     console.log(`${name}: ${url.replace(SITE, "") || "/"} ${Math.round(clip.width)}×${Math.round(clip.height)}`);
