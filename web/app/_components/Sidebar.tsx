@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, BookOpenCheck, CalendarDays, Gauge, LayoutDashboard, LogOut, Moon, Sparkles, Sun, Target } from "lucide-react";
+import { Activity, BookOpenCheck, CalendarDays, Gauge, LayoutDashboard, LogOut, Moon, Sparkles, Sun, Target, Wallet } from "lucide-react";
 import { LogoMark, Wordmark } from "./Logo";
 import { logout } from "@/app/login/actions";
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/opportunita", label: "Opportunità", icon: Target },
   { href: "/palinsesto", label: "Palinsesto", icon: CalendarDays },
   { href: "/registro", label: "Registro", icon: BookOpenCheck },
+  { href: "/bankroll", label: "Bankroll", icon: Wallet },
   { href: "/qualita", label: "Qualità del modello", icon: Gauge },
   { href: "/sistema", label: "Stato del sistema", icon: Activity },
 ];
