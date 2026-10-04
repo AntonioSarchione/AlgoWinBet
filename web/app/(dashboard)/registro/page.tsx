@@ -19,8 +19,8 @@ const STATE: Record<State, { label: string; cls: string; icon: typeof CheckCircl
 };
 const VERDICT: Record<State, string> = {
   pass: "Criterio superato: il metodo ha mostrato un vantaggio misurabile sui prezzi di chiusura.",
-  fail: "Criterio fallito: dopo 300 giocate il valore alla chiusura è negativo oltre il caso. Il vantaggio non c\u2019è: si cambia strategia e si riparte da zero.",
-  alarm: "Allarme sul rendimento.",
+  fail: "Criterio fallito: dopo 300 giocate il valore alla chiusura (o la calibrazione) è peggiore oltre il caso. Il vantaggio non c\u2019è: si cambia strategia e si riparte da zero.",
+  alarm: "Allarme: un tipo di mercato è in perdita oltre il caso o il rendimento è molto sotto il valore misurato. Si controlla prima di continuare.",
   open: "In prova: nessuna giocata reale finché il criterio non è superato.",
 };
 
@@ -103,7 +103,7 @@ export default async function Registro() {
   const value = reg.legs.filter((l) => l.status === "STRONG" || l.status === "CANDIDATE");
   const fair = reg.legs.filter((l) => l.status === "FAIR");
   const sv = stats(value);
-  const crit = evaluate(reg.legs);
+  const crit = evaluate(reg.legs, reg.slips);
   const cal = crit.bands;
   const versions = byVersion(reg.legs);
   const V = STATE[crit.verdict];
@@ -175,6 +175,7 @@ export default async function Registro() {
       <section className="card" aria-labelledby="crit-title">
         <div className="card-head">
           <h2 id="crit-title">Criterio di passaggio</h2>
+          <span className="count">{crit.passed}/{crit.required} condizioni</span>
           <span className={`status ${V.cls}`}><V.icon size={14} aria-hidden="true" /> {V.label}</span>
         </div>
         <p className="card-pad" style={{ paddingBottom: 0 }}>
@@ -196,15 +197,15 @@ export default async function Registro() {
                   <div className="crit-head"><b>{c.label}</b><span className="num">{c.now}</span></div>
                   <div className="note">{c.detail}</div>
                 </div>
-                <span className={`status ${S.cls}`}>{S.label}</span>
+                <span className={`status ${S.cls}`}>{c.info && c.state === "open" ? "Indicativo" : S.label}</span>
               </li>
             );
           })}
         </ul>
         <p className="note card-pad">
-          Superato solo quando i primi tre punti sono superati insieme e il rendimento non è in allarme. Contano solo le proposte registrate alla prima
-          comparsa: nessuna scelta a posteriori. Gli intervalli trattano le giocate come indipendenti; selezioni della stessa partita non lo sono, quindi
-          sono un po&apos; ottimisti.
+          Superato solo quando tutte le condizioni sono superate insieme e nulla è in allarme; il rendimento non decide mai il passaggio. Contano solo
+          le proposte registrate alla prima comparsa: nessuna scelta a posteriori. Gli intervalli raggruppano le selezioni della stessa partita, che si
+          muovono insieme. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il vantaggio sparisce si torna in prova.
         </p>
       </section>
 
