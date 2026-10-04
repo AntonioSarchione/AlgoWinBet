@@ -46,3 +46,26 @@ def test_freshness_due_orders_the_most_overdue_first():
         st.put_raw("oddspapi", "/historical-odds", {"fixtureId": f"x-{f}"}, 200, b"{}", now - timedelta(hours=hours_ago))
     # soon: 2h old vs 1h target (2x); tomorrow: 10h vs 8h (1.25x); fresh: 2h vs 8h (not due); far: 12h vs 24h (not due)
     assert freshness_due(st, now) == ["soon", "tomorrow"]
+
+
+def test_dispatch_quality_once_per_version_and_within_budget(monkeypatch):
+    st = SnapshotStore(":memory:")
+    now = datetime(2026, 10, 4, 6, 5, tzinfo=UTC)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    calls = []
+    post = lambda url: calls.append(url) or 204  # noqa: E731
+    assert "avviata" in am.dispatch_quality(st, "v9", now, post=post)
+    assert calls[0].endswith("/repos/owner/repo/actions/workflows/quality.yml/dispatches")
+    am.dispatch_quality(st, "v9", now, post=post)
+    assert am.dispatch_quality(st, "v9", now, post=post) is None  # QUALITY_TRIES reached
+    assert len(calls) == am.QUALITY_TRIES
+    st.add_usage(am.SOURCE, am.month_key(now), am.MINIMUM_AT - 2)
+    assert "rinviata" in am.dispatch_quality(st, "v10", now, post=post)  # would cross the minimum level
+    assert len(calls) == am.QUALITY_TRIES
+
+
+def test_dispatch_quality_skips_a_version_with_its_meta_model(monkeypatch):
+    from algowinbet import actionsminutes
+    st = SnapshotStore(":memory:")
+    monkeypatch.setattr("algowinbet.meta.load_meta", lambda store, version: version == "v5")
+    assert actionsminutes.dispatch_quality(st, "v5", datetime(2026, 10, 4, 6, tzinfo=UTC), post=lambda url: 204) is None

@@ -984,6 +984,13 @@ def cmd_collect_auto(a) -> None:
         except Exception as e:  # noqa: BLE001 - the count is a guard, never a reason to lose the morning run
             print(f"minuti GitHub: conteggio non riuscito ({type(e).__name__}: {e})")
     lvl, used = am.month_level(store, started)
+    if daily:
+        try:
+            msg = am.dispatch_quality(store, Config.load(None).model.version, started)
+            if msg:
+                print(msg)
+        except Exception as e:  # noqa: BLE001 - retried next morning, never a reason to lose this run
+            print(f"verifica qualità: avvio non riuscito ({type(e).__name__}: {e})")
     if lvl == 2 and not daily and not (a.manual or a.history or a.force_publish):
         print(f"minuti GitHub: {used}/{am.BUDGET} usati, solo il giro del mattino fino a fine mese")
         am.record_run(store, started)

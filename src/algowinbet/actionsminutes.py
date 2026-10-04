@@ -94,3 +94,35 @@ def month_level(store, now: datetime | None = None) -> tuple[int, int]:
     now = now or datetime.now(timezone.utc)
     used = store.usage(SOURCE, month_key(now))
     return level(used, now), used
+
+
+QUALITY_SOURCE = "quality-dispatch"  # api_usage period = model version: start attempts of its first quality replay
+QUALITY_MINUTES = 5  # a 60-week replay takes about 2 billed minutes; kept with a margin
+QUALITY_TRIES = 2
+
+
+def dispatch_quality(store, version: str, now: datetime, post=None) -> str | None:
+    """The morning run starts the quality replay at once when the model version has no meta-model yet: a version change
+    switches the calibration off until the replay has fitted it again on the new model's probabilities. At most
+    QUALITY_TRIES starts per version (one a morning), never when the replay would bring the month to the minimum level.
+    Needs GITHUB_TOKEN with actions: write (a workflow_dispatch event may be sent with it)."""
+    from .meta import load_meta
+    if load_meta(store, version) or store.usage(QUALITY_SOURCE, version) >= QUALITY_TRIES:
+        return None
+    used = store.usage(SOURCE, month_key(now))
+    if used + QUALITY_MINUTES >= MINIMUM_AT:
+        return f"verifica qualità per {version} rinviata: minuti GitHub {used}/{BUDGET}"
+    token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
+    if post is None:
+        if not token or not repo:
+            return None
+
+        def post(url: str) -> int:
+            req = urllib.request.Request(url, data=json.dumps({"ref": "main"}).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+            return urllib.request.urlopen(req, timeout=30).status
+    status = post(f"https://api.github.com/repos/{repo}/actions/workflows/quality.yml/dispatches")
+    store.add_usage(QUALITY_SOURCE, version, 1)
+    if status == 204:
+        return f"verifica qualità avviata per {version} (nessun meta-modello per questa versione)"
+    return f"verifica qualità per {version}: GitHub {status}"

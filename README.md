@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="web/app/icon.svg" alt="Logo AlgoWinBet" width="120">
+
 # AlgoWinBet
 
 **Analisi probabilistica del calcio, misurata contro il mercato più preciso.**
@@ -164,13 +166,17 @@ partita. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il 
 
 ## Prossimi passi
 
-1. **Riavvio automatico della qualità** a ogni nuova versione del modello, così la calibrazione non resta spenta fino al lunedì.
-2. **Sisal contro Pinnacle**: leggere il primo test nel replay di lunedì e decidere quanto fidarsi del mercato Sisal.
+1. **Sisal contro Pinnacle**: leggere il primo test nel replay di lunedì e decidere quanto fidarsi del mercato Sisal.
+2. **Calibrazione sul registro**: le prime selezioni chiuse vincono più spesso del previsto; ricontrollare con più campione, ora che
+   meta-modello e calibrazione sono di nuovo attivi.
 3. **Importanza dei giocatori** (Fase 6-bis) da minuti, gol e xG di API-Football: un assente pesa per quanto vale davvero.
 4. **Fondamenta**: backup settimanale compatto del database, controllo di salute con allarmi, dimensione e pulizia dei dati in Sistema.
 5. **Taratura dell'EV prudente** quando il registro avrà circa 300 giocate chiuse.
 6. **Fase 7**: verificare corner e 1X2 cartellini sul registro (CLV) dopo 2–3 settimane; contare i doppi gialli inglesi dagli eventi.
 7. **Fase 8 · My Combo**: prima verificare se OddsPapi espone i prezzi Sisal delle combo sulla stessa partita.
+
+Già automatico: a ogni nuova versione del modello il giro del mattino lancia subito il replay di qualità (massimo 2 tentativi, mai vicino
+al limite dei minuti), così la calibrazione non resta spenta fino al lunedì.
 
 ## Sviluppo
 

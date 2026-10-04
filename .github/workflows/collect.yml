@@ -33,7 +33,7 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read  # the morning run counts the month's Actions minutes from the run list
+  actions: write  # the morning run counts the month's Actions minutes from the run list and starts the quality replay of a new model version
 
 jobs:
   tick:
