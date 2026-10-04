@@ -1,124 +1,169 @@
+<div align="center">
+
 # AlgoWinBet
 
-Motore di analisi probabilistica dei mercati sportivi, **solo paper / uso personale**. Non piazza scommesse.
-Specifica completa: [docs/AlgoWinBet_Specifiche_Tecniche_e_Funzionali.pdf](docs/AlgoWinBet_Specifiche_Tecniche_e_Funzionali.pdf).
+**Analisi probabilistica del calcio, misurata contro il mercato più preciso.**
+Probabilità proprie, quote Sisal, valore contro Pinnacle, schedine ottimizzate e un registro che non perdona.
 
-## Stato: Milestone 2 — core engine + news/lineup engine (Python, SQLite, dati mock/CSV/manuali)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![Turso](https://img.shields.io/badge/Turso-libSQL-4FF8D2?logo=turso&logoColor=black)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-raccolta_online-2088FF?logo=githubactions&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-dashboard-000000?logo=vercel&logoColor=white)
+![Solo carta](https://img.shields.io/badge/scommesse_reali-nessuna-critical)
 
-Pipeline: `provider → state @ cutoff → Dixon-Coles (distribuzione dei punteggi) → prezzo di mercato (devig, consenso multi-book)
-→ ensemble bayesiano → fair odds / edge / EV / incertezza / data quality → status → optimizer (beam search) → risk/stake → spiegazione`.
+</div>
 
-Cosa c'è: dominio canonico, registry mercati (1X2, doppia chance, over/under, BTTS, team totals, risultato esatto),
-probabilità congiunte esatte per legs della stessa partita, correlation engine, optimizer con **NO BET**, risk engine
-(fractional Kelly con cap, mai inseguimento perdite), backtest walk-forward con paper betting (Brier, log loss, ECE, CLV),
-store SQLite append-only, CLI.
+> **Solo carta, uso personale.** AlgoWinBet non piazza scommesse. Ogni proposta finisce in un registro a 1 unità, e nulla si gioca davvero
+> finché il [criterio di passaggio](#criterio-di-passaggio) non è superato.
 
-**News/lineup engine (M2):** notizie testuali → eventi strutturati con fonte, timestamp e affidabilità (parser a regole IT/EN, parser LLM
-opzionale con output validato); disponibilità giocatori (XI ufficiale > probabile > tassi di titolarità + notizie); modello di impatto dei
-giocatori sui gol attesi (prior per ruolo/importanza + apprendimento dalle formazioni storiche, con incertezza); impact routing e
-ricalcolo selettivo per evento; timeline T-72h…T-30m; quote "vecchie" rispetto all'informazione segnalate e mai promosse a CANDIDATE.
+---
 
-Non ancora (milestone successivi): modelli ML (LightGBM), player props, adapter API automatici per formazioni (oggi: JSON copiato da fonti
-ufficiali), API FastAPI, dashboard Next.js, DNB/Asian handicap, learning automatico del prior di mercato.
+## Cosa fa
 
-## Uso
+- **Raccoglie da solo**, tutto online e gratis: calendario, formazioni, risultati, statistiche e quote Sisal + Pinnacle. Niente gira sul PC.
+- **Stima le probabilità** di ogni mercato (1X2, doppia chance, U/O, Gol/NoGol, risultato esatto, tempi, corner, cartellini…) con un modello
+  Dixon-Coles corretto da formazioni, livello della competizione e prezzo di mercato.
+- **Misura il valore** di ogni quota Sisal contro la probabilità del modello e contro il prezzo senza margine di Pinnacle.
+- **Costruisce schedine** ottimizzate per profilo (Massima probabilità, Equilibrata, Value) con il bonus multipla Sisal, oppure le valuta
+  a mano.
+- **Registra tutto alla prima comparsa** e lo chiude dopo la partita: CLV, valore alla chiusura, calibrazione reale. Nessuna scelta a posteriori.
 
-```bash
-pip install -e ".[dev]"
-python -m pytest -q
+## Come funziona
 
-# demo su dati sintetici (mock: i book prezzano dal vero => tipicamente NO BET)
-algowinbet analyze --provider mock --odds-min 2 --odds-max 15
-algowinbet backtest --provider mock
-# mercato con inefficienza pianificata, per vedere il motore trovare valore
-algowinbet analyze --provider mock --mock-noise 0 --mock-bias-over 0.15 --market-prior-sd 0.08
-
-# dati reali gratuiti: scarica a mano i CSV da football-data.co.uk (gratis per uso privato, niente bot)
-algowinbet backtest --provider csv --csv E0.csv I1.csv
-algowinbet analyze  --provider csv --csv E0.csv fixtures.csv --days 7
+```mermaid
+flowchart LR
+  subgraph Fonti gratuite
+    G[GOAL API<br/>calendario · formazioni · statistiche]
+    O[OddsPapi<br/>quote Sisal + Pinnacle]
+    F[football-data.co.uk<br/>storico risultati e quote]
+    A[API-Football<br/>indisponibili · arbitri]
+  end
+  P((pinger<br/>ogni 30 min)) --> V
+  V[Vercel /api/tick] -->|avvia| T[GitHub Actions<br/>collect-auto]
+  G & O & F & A --> T
+  T -->|scrive| D[(Turso)]
+  Q[GitHub Actions<br/>qualità settimanale] -->|calibrazione e meta-modello| D
+  D --> M[Modello e ottimizzatore]
+  M -->|analisi pubblicata| D
+  D --> W[Dashboard Next.js<br/>su Vercel]
 ```
 
-### Formazioni e notizie (M2)
+1. **Tick**: un pinger chiama `/api/tick` ogni 30 minuti; la route avvia un run di `collect` solo quando serve (partite vicine, risultati
+   da chiudere, giro del mattino) e rispetta il budget dei minuti GitHub.
+2. **Raccolta**: ogni run fa solo ciò che è dovuto (formazioni nella finestra prima del calcio d'inizio, fotografie Sisal, storico prezzi
+   gratuito per le partite più vecchie di aggiornamento).
+3. **Analisi**: modello → prezzo di mercato → meta-modello → calibrazione → EV prudente → stato (Forte, Candidata, Equa, Evita) →
+   ottimizzatore delle schedine.
+4. **Registro**: ogni proposta nuova entra a carta; dopo la partita si chiude da sola con CLV Sisal e valore alla chiusura Pinnacle.
+5. **Qualità**: ogni lunedì un replay walk-forward misura log loss e calibrazione e riaddestra il meta-modello.
+
+## La dashboard
+
+| Pagina | Cosa mostra |
+|---|---|
+| **Home** | Schedine proposte per profilo, filtri (quota, probabilità, EV minimo, mercati), perché questa schedina, budget API e minuti GitHub |
+| **Opportunità** | Tutte le selezioni con valore, ordinate per forza del segnale |
+| **Palinsesto** | Le partite in arrivo con quote Sisal; crea una schedina manuale |
+| **Schedina** | Valutazione di una schedina scelta a mano: probabilità congiunta, EV, bonus |
+| **Partita** | Analisi profonda: probabilità per mercato, formazioni, andamento delle quote, indisponibili |
+| **Registro** | Risultati a carta, valore contro il mercato, criterio di passaggio, calibrazione reale |
+| **Qualità** | Replay settimanale: log loss contro mercato e chiusura, calibrazione, meta-modello |
+| **Sistema** | Stato della raccolta, budget delle fonti, minuti GitHub del mese, ultimi run |
+
+## Regole del gioco
+
+- **Solo Sisal è giocabile.** Pinnacle è il riferimento per misurare il valore, mai una quota da prendere.
+- **Quota minima 1,20 per evento**: sotto, più rumore che valore.
+- **Mai nazionali e club nella stessa schedina**, anche se quota ed EV sono buoni.
+- **Cartellini con la regola Sisal**: gialli 1, rossi 1, il secondo giallo prima del rosso non conta, solo tempi regolamentari.
+- **Un cambio al modello entra solo con un guadagno chiaro** fuori campione (circa 0,005 di log loss); ogni versione ha risultati separati.
+
+## Criterio di passaggio
+
+Il rendimento con poche centinaia di giocate è quasi solo fortuna. Il criterio misura invece **il valore sul prezzo finale di Pinnacle**,
+il prezzo più preciso del mercato. Tutte e nove le condizioni devono essere vere insieme:
+
+| # | Condizione |
+|---|---|
+| 1 | almeno **300** giocate di valore chiuse, su **100** partite diverse, in **8** settimane |
+| 2 | valore medio sul prezzo finale Pinnacle **≥ +1,5%**, con il limite basso dell'intervallo al 95% sopra 0 (le giocate senza chiusura contano 0) |
+| 3 | prezzo finale Pinnacle disponibile per **≥ 85%** delle giocate |
+| 4 | valore positivo nella **prima metà**, nella **seconda** e nelle **ultime 300** |
+| 5 | nessun tipo di mercato (≥ 50 giocate) **chiaramente in perdita** |
+| 6 | **schedine** con valore medio sul prezzo Pinnacle sopra 0, su almeno 50 |
+| 7 | **calibrazione** su ≥ 1.000 selezioni: nessuna fascia fuori, scarto medio entro 2 punti, log loss non peggiore di Sisal senza margine |
+| 8 | almeno **150** giocate con la **versione attuale** del modello, con valore positivo |
+| 9 | quote prese **non peggiori della chiusura Sisal** in media |
+
+Il rendimento resta solo un allarme (sotto −15%, o molto sotto il valore misurato). Gli intervalli raggruppano le selezioni della stessa
+partita. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il vantaggio sparisce si torna in prova.
+
+## Tutto gratis, con i limiti sotto controllo
+
+| Risorsa | Limite | Come si rispetta |
+|---|---|---|
+| GOAL API | 1.000 richieste al giorno | contatore con riserva, formazioni solo nella finestra prima del calcio d'inizio |
+| OddsPapi | 250 richieste al mese | fotografie solo Sisal pianificate; storico prezzi gratuito (richieste libere) |
+| API-Football | 100 richieste al giorno | una lettura per competizione e giorno |
+| GitHub Actions | 2.000 minuti al mese (repo privato) | il secondo già pagato legge prezzi gratis; risparmio sopra 1.700 previsti, solo giro del mattino sopra 1.900 |
+| Turso, Vercel | piani gratuiti | replica locale nei run, cache per versione dei dati |
+
+## Stato delle fasi
+
+| Fase | | Stato |
+|---|---|---|
+| 0 | Pulizia | ✅ |
+| 1 | Scaricamento automatico dei CSV storici | ✅ |
+| 2 | Modello più preciso (livello competizione, forma, prior di mercato) | ✅ |
+| 3 | Test sul passato (replay walk-forward settimanale) | ✅ |
+| 4 | Calibrazione e pesi appresi (meta-modello) | ✅ attiva sulla v5 |
+| 5 | Ottimizzatore e Home | 🟡 manca la taratura dell'EV prudente |
+| 6 | Paper trading automatico e criterio di passaggio | 🟡 registro attivo, criterio severo in corso |
+| 6-bis | Formazioni, indisponibili, importanza dei giocatori | 🟡 formazioni e indisponibili attivi |
+| 7 | Corner e cartellini | 🟡 attivi corner e 1X2 cartellini |
+| 8 | My Combo (più selezioni della stessa partita) | ⏳ |
+| 9 | Marcatori | ⏳ |
+| 9-bis | Bankroll (sezione dedicata) | ⏳ |
+| 10 | LightGBM | ⏳ con più storico |
+
+## Prossimi passi
+
+1. **Riavvio automatico della qualità** a ogni nuova versione del modello, così la calibrazione non resta spenta fino al lunedì.
+2. **Sisal contro Pinnacle**: leggere il primo test nel replay di lunedì e decidere quanto fidarsi del mercato Sisal.
+3. **Importanza dei giocatori** (Fase 6-bis) da minuti, gol e xG di API-Football: un assente pesa per quanto vale davvero.
+4. **Fondamenta**: backup settimanale compatto del database, controllo di salute con allarmi, dimensione e pulizia dei dati in Sistema.
+5. **Taratura dell'EV prudente** quando il registro avrà circa 300 giocate chiuse.
+6. **Fase 7**: verificare corner e 1X2 cartellini sul registro (CLV) dopo 2–3 settimane; contare i doppi gialli inglesi dagli eventi.
+7. **Fase 8 · My Combo**: prima verificare se OddsPapi espone i prezzi Sisal delle combo sulla stessa partita.
+
+## Sviluppo
+
 ```bash
-# formazioni, rose e notizie copiate da siti ufficiali (formato: configs/info.example.json)
-algowinbet analyze --provider csv --csv E0.csv fixtures.csv --info info.json
-algowinbet news  --provider mock --team A0-Team01 --text "Colombo squalificato. Forse Testa in dubbio."   # parsing
-algowinbet event --provider mock --mock-stage pre_lineup --team A0-Team03 --text "Cattaneo indisponibile per infortunio"  # ricalcolo selettivo
-algowinbet timeline A0-Team09 --provider mock --mock-stage post_lineup --days 1      # info che arriva nel tempo
-algowinbet info-value --provider mock --mock-effect-scale 3    # le info migliorano davvero le stime? (log loss cieco vs con info)
-algowinbet stale-edge --provider mock                          # scommesse quando la quota non si è ancora mossa dopo l'XI
+pip install -e ".[dev,turso]"
+python -m pytest -q                       # test del motore
+npm --prefix web install
+npm --prefix web run test:optimizer       # parità ottimizzatore Python ↔ TypeScript
+npm --prefix web run dev                  # dashboard in locale
 ```
 
-### Snapshot storage e GOAL API (M3)
-Lo storico delle quote/formazioni non è ottenibile a posteriori gratis: si raccoglie **in avanti**, con timestamp reali di osservazione
-(`observed_at` = momento della richiesta), in `data/snapshots.db` (payload grezzi gzip deduplicati + righe normalizzate).
+Comandi utili (nessuna richiesta API, salvo dove indicato):
 
 ```bash
-export GOALAPI_KEY=...            # la chiave non va mai nel repo né come argomento
-python -m algowinbet.cli goal leagues "Serie A"                      # trova l'id lega
-python -m algowinbet.cli goal probe /leagues/ID/fixtures --param limit=2   # 1 richiesta: salva il grezzo e mostra i campi reali
-python -m algowinbet.cli goal collect --mode fixtures --leagues ID --dry-run
-python -m algowinbet.cli goal collect --mode lineups --leagues ID --window 95   # da schedulare ogni 10-15 min (Task Scheduler)
-python -m algowinbet.cli snapshots                                   # statistiche e uso API
-python -m algowinbet.cli analyze --provider snapshots --csv storico.csv ...
+algowinbet quality --db turso --weeks 60 --save   # replay di qualità e meta-modello
+algowinbet analysis-preview --db turso            # analisi della prossima settimana senza pubblicarla
+algowinbet registry-check                         # schedine e selezioni registrate per giorno e per run
+algowinbet quotes-check "Inter"                   # quote Sisal e collegamento OddsPapi delle prossime partite
 ```
-Modi: `fixtures`, `results`, `lineups` (solo partite entro la finestra, salta le XI già confermate), `odds`, `players`.
-Budget: contatore locale giornaliero con riserva, sincronizzato con gli header `X-RateLimit-*`; `429` gestiti con `Retry-After`.
 
-**Verificato dalla documentazione GOAL**: auth Bearer, envelope, paginazione, header rate-limit, codici d'errore, enum stati, endpoint.
-**Verificato sul piano free con richieste reali (29/09/2026)**: fixtures e results (schema piatto, `kickoffUtc`, ordine decrescente per data, `from/to/status`
-filtrano; ~2000 risultati storici Serie A dal 2024/25); lineups (forma `{home,away:{startingLineups,substitutes,coach,missingPlayers},homeFormation,awayFormation,hasLineups}`,
-vuote finché non pubblicate). **`/odds` NON è incluso nel piano free** (402 "Feature not available in your plan"): le quote arrivano da OddsPapi o a mano.
-**Non ancora visto**: righe dei titolari a partita pubblicata (assunte come le righe `coach`: `playerId`, `lineupPlayer`, `lineupPosition`) e `missingPlayers` (possibili infortuni/squalifiche).
-**Assunto (non documentato)**: gli schemi delle righe lineups/odds/players. I mapper sono tolleranti e contano ciò che non riescono a
-mappare (`Lacune di mapping`); i payload grezzi restano salvati, quindi dopo il primo `goal probe` reale si corregge il mapper e si rielabora senza altre richieste.
-Alias nomi squadra tra fonti: `configs/team_aliases.json` (il collector segnala i nomi senza storico).
+Segreti del repository (mai nel codice): `GOAL_API_KEY`, `ODDSPAPI_API_KEY`, `APIFOOTBALL_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`.
+Variabili Vercel: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `DASHBOARD_PASSWORD`, `CRON_SECRET`, `GITHUB_DISPATCH_TOKEN`.
 
-### Raccolta online (M3): GitHub Actions + Turso + OddsPapi
-Niente gira sul PC: `.github/workflows/collect.yml` esegue `algowinbet collect-auto` a orari fissi e il database vive su Turso.
-Ogni esecuzione è un "tick" che fa solo ciò che serve in quel momento (`src/algowinbet/autorun.py`):
-- GOAL: calendario, risultati e statistiche una volta al giorno; formazioni solo nella finestra prima del calcio d'inizio.
-- OddsPapi: 1 istantanea al giorno e 1 per ogni fascia di calcio d'inizio 30–75 minuti prima (dopo le formazioni ufficiali),
-  con 1 sola richiesta per tutto il campionato; linee di chiusura dallo storico (gratuito secondo la documentazione OddsPapi).
-- Budget: GOAL 1.000/giorno con riserva, OddsPapi 250/mese con riserva; contatore sincronizzato con `/account` (gratuito).
-- Storico risultati: scaricato da GOAL in automatico (una volta per campionato, poi aggiornato ogni giorno), niente CSV da scaricare a mano.
-  Il provider `csv` resta solo come opzione per esperimenti offline.
-
-Configurazione: `configs/collect.json` (id lega GOAL, id torneo OddsPapi, bookmaker). Segreti del repository (mai nel codice):
-`GOALAPI_KEY`, `ODDSPAPI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`.
-
-```bash
-python -m algowinbet.cli odds account                    # gratis: quota e bookmaker inclusi nel piano
-python -m algowinbet.cli odds tournaments "serie a"      # id del torneo per configs/collect.json
-python -m algowinbet.cli odds probe /odds --param fixtureId=ID   # 1 richiesta: struttura reale
-python -m algowinbet.cli collect-auto --db data/snapshots.db     # un tick in locale, per prova
-```
-**Verificato con richieste reali**: GOAL fixtures/results/lineups (vuote)/statistics; `/odds` di GOAL non incluso nel free.
-**Non ancora verificato**: tutte le risposte OddsPapi (schemi presi dalla documentazione), gratuità di `/historical-odds`,
-connessione Turso dal runner, minuti Actions effettivi. I minuti gratuiti dei repo privati sono limitati: il cron copre solo
-le ore utili (circa 1.000 esecuzioni al mese).
-
-### Quote Sisal
-Sisal non ha API pubbliche e lo scraping viola i suoi termini: inserisci le quote a mano in un JSON
-(formato in `src/algowinbet/providers/manual.py`) e passalo con `--manual quote.json`; viene unito alle altre fonti.
-
-## Principi già implementati
-- Cutoff informativo: history/quote/eventi filtrati per `observed_at`; il backtest usa solo quote d'apertura per decidere e quelle di chiusura solo per il CLV.
-- Prior di mercato: il prezzo devigged è il prior, il modello è evidenza rumorosa (`w = τ²/(τ²+σ²)`). Su mercati efficienti il risultato tipico è NO BET.
-  `backtest` stampa `w_struct*` (peso ottimo osservato): se è alto in modo stabile, alza `--market-prior-sd`.
-- Le combo della stessa partita usano la distribuzione congiunta, mai il prodotto delle marginali. Le slip default usano 1 leg per partita
-  perché il prezzo SGP del book non è disponibile dalle fonti gratuite.
-- Mock: l'errore del modello misurato è ~ `sqrt(p(1-p)/n_partite)`; con dati reali va ri-misurato.
-
-## Cosa dicono gli esperimenti (su dati sintetici)
-- Le formazioni migliorano il log loss del modello strutturale, di più quando gli effetti dei giocatori sono grandi (`info-value`), ma il
-  mercato resta più accurato: il modello di squadra stima male con poche partite. Il vantaggio non sta nel "sapere più del mercato" ma nel
-  sapere **prima** del mercato: dopo l'XI ufficiale, con quota non ancora aggiornata (`stale-edge`), il CLV è positivo. Con quote già
-  aggiornate (`--mock-fresh-quotes`) il vantaggio sparisce e il risultato è NO BET.
-- L'effetto dei singoli giocatori è quasi non apprendibile dai soli gol di squadra con poche partite: il prior per ruolo e `importance`
-  (da statistiche per 90' dei giocatori) conta più dell'apprendimento. Nei dati reali fornisci `importance` e `start_rate` nel JSON.
-- Sono numeri su un mondo simulato: vanno rimisurati su dati reali prima di fidarsi.
+Dettagli sulle fonti: [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md). Specifica originale:
+[docs/AlgoWinBet_Specifiche_Tecniche_e_Funzionali.pdf](docs/AlgoWinBet_Specifiche_Tecniche_e_Funzionali.pdf).
 
 ## Limiti onesti
-- Le fonti gratuite non hanno player props, prezzi SGP né formazioni ufficiali strutturate: quelle parti restano da collegare.
-- Nessun sistema garantisce schedine vincenti; le quote dei book incorporano già quasi tutta l'informazione pubblica.
+
+- Le quote dei bookmaker incorporano già quasi tutta l'informazione pubblica: il risultato tipico su un mercato efficiente è **nessuna giocata**.
+- Le fonti gratuite non hanno prezzi Sisal per ogni partita (soprattutto nazionali e coppe) né i prezzi delle combo sulla stessa partita.
+- Nessun sistema garantisce schedine vincenti. Il registro serve proprio a scoprire, con numeri onesti, se il vantaggio c'è.
