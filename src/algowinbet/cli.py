@@ -591,6 +591,14 @@ def cmd_snapshot_check(a) -> None:
                       f"'{m._name(row, 1)}'-'{m._name(row, 2)}' -> {fx.home + '-' + fx.away if fx else 'NESSUNA'}")
         for g in sorted(set(m.report.gaps))[:30] if hasattr(m.report, "gaps") else []:
             print("  gap:", g)
+        fx_raw, fx_at = latest("/fixtures")
+        if fx_raw is not None:
+            links = {e for (e,) in store.db.execute("SELECT ext_id FROM fixture_links WHERE source = 'oddspapi'").fetchall()}
+            rows = [r for r in (data(fx_raw) or []) if (r.get("startTime") or "") >= now.isoformat()[:10]]
+            print(f"/fixtures letto {fx_at}: {len(rows)} partite future")
+            for r in sorted(rows, key=lambda r: r.get("startTime") or ""):
+                print(f"  {r.get('startTime', '')[:16]} {r.get('participant1Name')}-{r.get('participant2Name')} hasOdds={r.get('hasOdds')} "
+                      f"collegata={'sì' if str(r.get('fixtureId')) in links else 'no'} {r.get('fixtureId')}")
     finally:
         store.close()
 
