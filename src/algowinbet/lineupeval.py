@@ -28,8 +28,7 @@ def _ll(p: dict[str, float], hg: int, ag: int) -> tuple[float, float, float]:
             -math.log(max(p["BTTS"] if btts else 1 - p["BTTS"], 1e-12)))
 
 
-VARIANTS = {"priori per ruolo": {"lineup_impact": "prior"}, "appreso": {"lineup_impact": "learned"},
-            "appreso ×0.5": {"lineup_impact": "learned", "lineup_scale": 0.5}, "priori ×0.5": {"lineup_impact": "prior", "lineup_scale": 0.5}}
+VARIANTS = {"priori per ruolo": {"lineup_impact": "prior"}, "appreso": {"lineup_impact": "learned"}}
 
 
 def evaluate_lineups(provider, cfg: Config, start: datetime, end: datetime, competitions: list[str],
@@ -55,6 +54,7 @@ def _evaluate(frozen, provider, cfg: Config, start: datetime, end: datetime, com
     base, xi = defaultdict(Scores), defaultdict(Scores)
     diffs: dict[str, list[tuple[float, float, float]]] = defaultdict(list)
     shifts: list[float] = []
+    signed: list[tuple] = []
     skipped = defaultdict(int)
     for monday in sorted(weeks):
         for r in weeks[monday]:
@@ -88,6 +88,9 @@ def _evaluate(frozen, provider, cfg: Config, start: datetime, end: datetime, com
                 a, b = _ll(p0, r.home_goals, r.away_goals), _ll(p1, r.home_goals, r.away_goals)
                 diffs[g].append(tuple(y - x for x, y in zip(a, b)))
             shifts.append(abs(adj.d_home) + abs(adj.d_away))
+            lh, la = fitted[0].expected_goals(r.home, r.away)
+            signed.append((adj.d_home, adj.d_away, r.home_goals - lh, r.away_goals - la,
+                           sum(ah.p_start.values()), sum(imp.base[p.id] for p in rh)))
     out = {}
     for g, ds in diffs.items():
         n = len(ds)
@@ -98,7 +101,14 @@ def _evaluate(frozen, provider, cfg: Config, start: datetime, end: datetime, com
             sd = math.sqrt(sum((x - m) ** 2 for x in xs) / (n - 1)) if n > 1 else float("nan")
             row[f"d_{name}"] = (m, 1.96 * sd / math.sqrt(n) if n > 1 else float("nan"))
         out[g] = row
-    return {"groups": out, "skipped": dict(skipped), "mean_shift": sum(shifts) / len(shifts) if shifts else 0.0,
+    diag = {}
+    if len(signed) > 2:
+        import numpy as np
+        a = np.array(signed)
+        diag = {"mean_dh": float(a[:, 0].mean()), "mean_da": float(a[:, 1].mean()),
+                "corr_home": float(np.corrcoef(a[:, 0], a[:, 2])[0, 1]), "corr_away": float(np.corrcoef(a[:, 1], a[:, 3])[0, 1]),
+                "xi_size": float(a[:, 4].mean()), "base_size": float(a[:, 5].mean())}
+    return {"groups": out, "skipped": dict(skipped), "diag": diag, "mean_shift": sum(shifts) / len(shifts) if shifts else 0.0,
             "weeks": len(weeks)}
 
 
@@ -115,6 +125,10 @@ def _print_one(rep: dict) -> None:
     for g, r in sorted(rep["groups"].items(), key=lambda kv: -kv[1]["n"]):
         f = lambda t: f"{t[0]:+.4f} ±{t[1]:.4f}"  # noqa: E731
         print(f"  {g:<18}{r['n']:>8}  {r['base']['ll_1x2']:>13.4f} {f(r['d_1x2']):>16} {f(r['d_o25']):>16} {f(r['d_btts']):>16}")
+    if rep.get("diag"):
+        d = rep["diag"]
+        print(f"diagnosi: spostamento medio casa {d['mean_dh']:+.3f}, ospite {d['mean_da']:+.3f} (log); correlazione con gli scarti di gol "
+              f"casa {d['corr_home']:+.3f}, ospite {d['corr_away']:+.3f}; titolari nella formazione {d['xi_size']:.1f} contro somma usuale {d['base_size']:.1f}")
     if rep["skipped"]:
         print("partite saltate: " + ", ".join(f"{k} {v}" for k, v in rep["skipped"].items()))
     t = rep["groups"].get("tutte")
