@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { matchesBetween } from "@/lib/db";
-import { inCollectionHours, isDailySlot, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, REPO, RESULTS_FROM_MS, RESULTS_UNTIL_MS, WORKFLOW } from "@/lib/refresh";
+import { actionsMinutesThisMonth, matchesBetween } from "@/lib/db";
+import {
+  inCollectionHours, isDailySlot, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, minutesLevel, REPO, RESULTS_FROM_MS, RESULTS_UNTIL_MS, WORKFLOW,
+} from "@/lib/refresh";
 
 // Scheduler tick from an external pinger (GitHub's own cron starts most runs hours late or never). The pinger calls this
 // URL every 30 minutes with "Authorization: Bearer <CRON_SECRET>"; inside the collection hours (lib/refresh.ts) it starts one
@@ -29,6 +31,9 @@ async function tick(req: NextRequest) {
   if (!inCollectionHours(now) && !resultsDue && !force) {
     return NextResponse.json({ skipped: "fuori dalle ore di raccolta" });
   }
+  // Actions minutes guard (database unreachable: normal level, the job checks again itself)
+  const level = force ? 0 : minutesLevel(await actionsMinutesThisMonth().catch(() => 0), now);
+  if (level === 2 && !isDailySlot(now)) return NextResponse.json({ skipped: "minuti GitHub quasi finiti: solo il giro del mattino" });
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   if (!token) return NextResponse.json({ error: "manca GITHUB_DISPATCH_TOKEN" }, { status: 500 });
   const gh = (path: string, init?: RequestInit) =>
@@ -47,6 +52,7 @@ async function tick(req: NextRequest) {
       // database unreachable: run anyway (a wasted minute is better than a missed lineup)
       const near = await matchesBetween(new Date(now.getTime() - MATCH_BEFORE_MS), new Date(now.getTime() + MATCH_AFTER_MS)).catch(() => true);
       if (!near) {
+        if (level === 1) return NextResponse.json({ skipped: "risparmio minuti GitHub: nessuna partita vicina" });
         const r = await gh(`/actions/workflows/${WORKFLOW}/runs?status=completed&per_page=1`);
         const last = r.ok ? ((await r.json()) as { workflow_runs: { created_at: string }[] }).workflow_runs[0]?.created_at : undefined;
         if (last && now.getTime() - Date.parse(last) < MAX_GAP_MS) {

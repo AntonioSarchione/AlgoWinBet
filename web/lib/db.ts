@@ -241,7 +241,7 @@ export const usage = cache(async () => {
   const month = `M${now.toISOString().slice(0, 7)}`;
   const rows = await all<Usage>("SELECT source, period, used FROM api_usage WHERE period IN (?, ?)", [day, month]);
   const get = (src: string, kind: "D" | "M") => rows.find((u) => u.source === src && u.period.startsWith(kind))?.used ?? 0;
-  return { goalDay: get("goal-api", "D"), apifDay: get("api-football", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D"), manualMonth: get("manual-refresh", "M") };
+  return { goalDay: get("goal-api", "D"), apifDay: get("api-football", "D"), oddsMonth: get("oddspapi", "M"), oddsDay: get("oddspapi", "D"), manualMonth: get("manual-refresh", "M"), ghMonth: get("actions-minutes", "M") };
 });
 
 /** Uncached: the manual refresh button checks the monthly cap right before starting a run. */
@@ -252,6 +252,14 @@ export async function matchesBetween(from: Date, to: Date): Promise<boolean> {
     [from.toISOString().replace("Z", "+00:00"), to.toISOString().replace("Z", "+00:00")],
   );
   return rows.length > 0;
+}
+
+/** Uncached: GitHub Actions minutes of this month (counted by the collect job), read by the tick route before a run. */
+export async function actionsMinutesThisMonth(): Promise<number> {
+  const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'actions-minutes' AND period = ?", [
+    `M${new Date().toISOString().slice(0, 7)}`,
+  ]);
+  return Number(rows[0]?.used ?? 0);
 }
 
 export async function manualRefreshesThisMonth(): Promise<number> {

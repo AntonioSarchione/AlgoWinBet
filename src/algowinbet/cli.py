@@ -975,6 +975,20 @@ def cmd_collect_auto(a) -> None:
     except RuntimeError as e:
         sys.exit(str(e))
     names = TeamNames.load(a.aliases)
+    from . import actionsminutes as am
+    started = datetime.now(timezone.utc)
+    daily = started.hour == 6 and started.minute < 30
+    if daily or not store.usage(am.SOURCE, am.month_key(started)):  # every morning, and at once when the month has no count
+        try:
+            print(f"minuti GitHub del mese (da GitHub): {am.sync_month(store, started)}")
+        except Exception as e:  # noqa: BLE001 - the count is a guard, never a reason to lose the morning run
+            print(f"minuti GitHub: conteggio non riuscito ({type(e).__name__}: {e})")
+    lvl, used = am.month_level(store, started)
+    if lvl == 2 and not daily and not (a.manual or a.history or a.force_publish):
+        print(f"minuti GitHub: {used}/{am.BUDGET} usati, solo il giro del mattino fino a fine mese")
+        am.record_run(store, started)
+        store.close()
+        return
     goal = odds = None
     if cfg.goal_leagues and (os.environ.get("GOALAPI_KEY") or os.environ.get("GOAL_API_KEY")):
         gc = GoalApiClient(store=store, budget=BudgetGuard(store, "goal-api", daily=cfg.goal_daily_limit, reserve=cfg.goal_reserve))
@@ -1020,6 +1034,14 @@ def cmd_collect_auto(a) -> None:
         left = min(DATASETS_SECONDS, a.max_seconds + 300 - (time.monotonic() - t0))  # the job has 20 minutes
         if left >= 60:
             run_datasets(store, cfg, datasets, datetime.now(timezone.utc), left, on_step=show)
+        # the minute this job already pays for: its unused seconds read the most overdue Sisal prices (free requests)
+        free = am.free_seconds()
+        if odds is not None and free >= 14:
+            from .autorun import freshness_due
+            due = freshness_due(store, datetime.now(timezone.utc))
+            if due:
+                st = odds.sync_prematch_history(only=due, max_seconds=free - 8)
+                print(f"riempimento del minuto pagato ({free:.0f}s liberi): {st.requests} storici letti su {len(due)} da aggiornare", flush=True)
         now = datetime.now(timezone.utc)
         if a.summary:  # row counts over the whole database: about a minute on Turso, so not on every tick
             print("Riepilogo database: " + ", ".join(f"{k}={v}" for k, v in store.stats().items()))
@@ -1029,6 +1051,9 @@ def cmd_collect_auto(a) -> None:
             print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
                                      for s in ("goal-api", "oddspapi", "api-football")))
+        n = am.record_run(store, now)
+        if n:
+            print(f"minuti GitHub: questo run {n}, mese {store.usage(am.SOURCE, am.month_key(now))}/{am.BUDGET}")
     finally:
         store.close()
 

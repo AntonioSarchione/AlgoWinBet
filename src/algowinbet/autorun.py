@@ -156,6 +156,30 @@ def _history_fetches(store: SnapshotStore) -> dict[str, datetime]:
     return out
 
 
+# Freshness target of a Sisal price by time to kickoff (hours to kickoff, max age of the last read): the free reads that
+# fill the minute a run already pays for go to the most overdue matches first.
+FRESHNESS = ((6.0, 1.0), (24.0, 3.0), (72.0, 8.0), (float("inf"), 24.0))
+
+
+def freshness_due(store: SnapshotStore, now: datetime, days: int = 7) -> list[str]:
+    """GOAL fixture ids linked to OddsPapi whose last price read is older than its FRESHNESS target, most overdue first."""
+    store.db.executescript(LINKS_SCHEMA)
+    upcoming = {f.id: f for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=days))}
+    fetched = _history_fetches(store)
+    scored = []
+    for ext, fid in store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall():
+        f = upcoming.get(fid)
+        if f is None:
+            continue
+        to_ko = (f.kickoff - now).total_seconds() / 3600.0
+        target = next(t for h, t in FRESHNESS if to_ko <= h)
+        last = fetched.get(ext)
+        age = (now - last).total_seconds() / 3600.0 if last else float("inf")
+        if age >= target:
+            scored.append((age / target, -to_ko, fid))
+    return [fid for *_, fid in sorted(scored, reverse=True)]
+
+
 def history_due(store: SnapshotStore, cfg: AutoConfig, now: datetime) -> list[str]:
     """GOAL fixture ids whose free price path is due: never fetched or older than a day (up to history_days ahead), a
     checkpoint passed since the last fetch, or a confirmed XI stored after it. Nearest kickoff first."""

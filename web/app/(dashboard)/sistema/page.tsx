@@ -1,4 +1,5 @@
 import { Activity, Database } from "lucide-react";
+import { ACTIONS_BUDGET } from "@/lib/refresh";
 import { lastTick, parseJSON, systemStatus, usage } from "@/lib/db";
 import { ago, dayTime, shortDate } from "@/app/_components/format";
 import { Empty, Meter } from "@/app/_components/ui";
@@ -72,6 +73,7 @@ export default async function Sistema() {
             <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Riserva di 50 richieste mai usata dai giri automatici" />
             <Meter label="API-Football · oggi" used={use.apifDay} limit={100} hint="Si azzera a mezzanotte UTC. Riserva di 3 richieste; le formazioni dei 7 campionati hanno la precedenza su coppe e nazionali" />
             <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint={`Piano automatico 200 + aggiornamenti manuali (${use.manualMonth}/5 usati); riserva di 20 mai toccata`} />
+            <Meter label="Minuti GitHub · mese" used={use.ghMonth} limit={ACTIONS_BUDGET} hint="Contati dal giro del mattino su tutti i workflow e aggiornati a ogni raccolta. I secondi rimasti del minuto già pagato rileggono gratis le quote Sisal" />
           </div>
         </section>
       </div>

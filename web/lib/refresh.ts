@@ -15,6 +15,16 @@ export const MAX_GAP_MS = 3 * 3600e3;
 export const RESULTS_FROM_MS = 2.5 * 3600e3;
 export const RESULTS_UNTIL_MS = 3.5 * 3600e3;
 
+// GitHub Actions minutes (private repo: 2,000 a month). Same thresholds as src/algowinbet/actionsminutes.py:
+// 1 = economy (month projected over 1,700): no run only to keep prices fresh; 2 = minimum (1,900 used): morning run only.
+export const ACTIONS_BUDGET = 2000;
+export function minutesLevel(used: number, now: Date): 0 | 1 | 2 {
+  if (used >= 1900) return 2;
+  const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const elapsed = (now.getUTCDate() - 1 + (now.getUTCHours() + now.getUTCMinutes() / 60) / 24) / days;
+  return used / Math.max(elapsed, 1 / days) >= 1700 ? 1 : 0;
+}
+
 export function isDailySlot(d: Date): boolean {
   return d.getUTCHours() === 6 && d.getUTCMinutes() < 30;
 }

@@ -33,12 +33,15 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read  # the morning run counts the month's Actions minutes from the run list
 
 jobs:
   tick:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # job start: the tick fills the minute already paid with free price reads and records the minutes it costs
+      - run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       # uv installs the cached wheels in a couple of seconds (pip took ~12 s): every run is billed by the started minute
       - uses: astral-sh/setup-uv@v6
@@ -69,6 +72,7 @@ jobs:
           FORCE_PUBLISH: ${{ inputs.publish && '--force-publish' || '' }}
           MANUAL: ${{ inputs.refresh && '--manual' || '' }}
           HISTORY: ${{ inputs.history && '--history --max-seconds 900' || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: algowinbet collect-auto --config configs/collect.json --db turso $FORCE_PUBLISH $MANUAL $HISTORY
       - name: save database replica
         if: always()
