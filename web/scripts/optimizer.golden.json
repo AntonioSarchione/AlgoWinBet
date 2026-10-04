@@ -8,6 +8,20 @@
    "min_legs": 1,
    "max_legs_per_fixture": 1,
    "max_legs_per_competition": 99,
+   "national_competitions": [
+    "Nations League",
+    "World Cup",
+    "European Championship",
+    "Euro 20",
+    "Qualification",
+    "Qualifiers",
+    "Friendl",
+    "Copa America",
+    "Copa América",
+    "Africa Cup",
+    "Asian Cup",
+    "Gold Cup"
+   ],
    "min_leg_probability": 0.0,
    "min_leg_odds": 1.2,
    "beam_width": 200,
@@ -2849,6 +2863,64 @@
      "ev": -0.08535908799150216,
      "ev_lower": -0.2231388111111512,
      "objective": -0.13822658628937867,
+     "stake": 0.0,
+     "bonus": 0.0
+    }
+   ]
+  },
+  {
+   "name": "nazionali-club",
+   "odds_min": null,
+   "odds_max": null,
+   "max_legs": 6,
+   "national": true,
+   "national_competitions": [
+    "Mock League A"
+   ],
+   "no_bet": false,
+   "slips": [
+    {
+     "legs": [
+      [
+       "mock-1-20-02",
+       "MATCH_1X2|AWAY|"
+      ]
+     ],
+     "total_odds": 2.12,
+     "joint_probability": 0.46646954871153457,
+     "ev": -0.011084556731546624,
+     "ev_lower": -0.09259022752141255,
+     "objective": 0.2337444401460818,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-04",
+       "MATCH_1X2|HOME|"
+      ]
+     ],
+     "total_odds": 2.27,
+     "joint_probability": 0.43180065414360175,
+     "ev": -0.01981251509402404,
+     "ev_lower": -0.10680396314844631,
+     "objective": 0.1909243798051071,
+     "stake": 0.0,
+     "bonus": 0.0
+    },
+    {
+     "legs": [
+      [
+       "mock-1-20-05",
+       "MATCH_1X2|HOME|"
+      ]
+     ],
+     "total_odds": 2.18,
+     "joint_probability": 0.44932432191265037,
+     "ev": -0.020472978230422156,
+     "ev_lower": -0.1041349675276736,
+     "objective": 0.16022824632390628,
      "stake": 0.0,
      "bonus": 0.0
     }

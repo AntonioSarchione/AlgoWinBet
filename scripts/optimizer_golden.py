@@ -34,6 +34,8 @@ CASES = [
     {"name": "edge-shrink", "odds_min": None, "odds_max": None, "max_legs": 4, "edge_shrink": 0.3},
     {"name": "bonus", "odds_min": 8.0, "odds_max": 60.0, "max_legs": 8, "min_slip_ev": -0.6,
      "multi_bonus_min_odds": 1.0},
+    # one competition counted as national teams: never in a slip with the others
+    {"name": "nazionali-club", "odds_min": None, "odds_max": None, "max_legs": 6, "national": True},
 ]
 
 
@@ -69,6 +71,9 @@ def build() -> dict:
         c.optimizer.min_slip_ev = case.get("min_slip_ev", c.optimizer.min_slip_ev)
         c.optimizer.min_legs = case.get("min_legs", c.optimizer.min_legs)
         c.optimizer.multi_bonus_min_odds = case.get("multi_bonus_min_odds", c.optimizer.multi_bonus_min_odds)
+        if case.get("national"):
+            case["national_competitions"] = [sorted({o.competition for o in res.opportunities})[0]]
+            c.optimizer.national_competitions = case["national_competitions"]
         r = optimize(res.opportunities, res.analyses, c)
         assign_stakes(r.slips, c.risk)
         out["cases"].append({**case, "no_bet": r.no_bet, "slips": [

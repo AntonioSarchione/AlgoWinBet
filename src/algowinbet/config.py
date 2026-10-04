@@ -94,6 +94,11 @@ class OptimizerCfg(BaseModel):
     min_legs: int = 1  # fewer selections than this: not a valid slip (e.g. 5 to always reach the Sisal multiple bonus)
     max_legs_per_fixture: int = 1  # SGP needs a bookmaker combo quote; see joint pricing
     max_legs_per_competition: int = 99
+    # user's rule (2026-10-03): a slip never mixes national-team competitions with club competitions, whatever the value.
+    # A competition is national when its name contains one of these
+    national_competitions: list[str] = Field(default_factory=lambda: [
+        "Nations League", "World Cup", "European Championship", "Euro 20", "Qualification", "Qualifiers", "Friendl",
+        "Copa America", "Copa América", "Africa Cup", "Asian Cup", "Gold Cup"])
     min_leg_probability: float = 0.0
     # no selection under these odds enters a slip (user's rule, 2026-10-03): it adds noise and almost nothing to the slip
     min_leg_odds: float = 1.2

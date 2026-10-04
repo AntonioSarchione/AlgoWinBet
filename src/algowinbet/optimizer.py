@@ -111,9 +111,13 @@ def optimize(opps: list[Opportunity], analyses: dict[str, FixtureAnalysis], cfg:
     n = len(cands)
     C = {(i, j): pair_dependence(cands[i], cands[j], matrices, o) for i in range(n) for j in range(i + 1, n)}
 
+    national = {c.competition: any(k.lower() in c.competition.lower() for k in o.national_competitions) for c in cands}
+
     def allowed(idx: tuple[int, ...], new: int) -> bool:
         legs = [cands[i] for i in idx]
         nl = cands[new]
+        if legs and national[legs[0].competition] != national[nl.competition]:
+            return False  # national teams and clubs never in the same slip
         if sum(1 for l in legs if l.fixture_id == nl.fixture_id) >= o.max_legs_per_fixture:
             return False
         if any(l.fixture_id == nl.fixture_id and l.ref == nl.ref for l in legs):

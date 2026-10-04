@@ -24,6 +24,9 @@ export type OptOpp = {
 
 // user's rule (2026-10-03): no selection under these odds in a slip, whatever the settings (noise, no value added)
 export const MIN_LEG_ODDS = 1.2;
+// same as config.py OptimizerCfg.national_competitions
+export const NATIONAL_COMPETITIONS = ["Nations League", "World Cup", "European Championship", "Euro 20", "Qualification", "Qualifiers",
+  "Friendl", "Copa America", "Copa América", "Africa Cup", "Asian Cup", "Gold Cup"];
 
 export type OptimizerCfg = {
   odds_min: number;
@@ -33,6 +36,7 @@ export type OptimizerCfg = {
   min_legs?: number; // missing in analyses published before it existed: 1
   max_legs_per_fixture: number;
   max_legs_per_competition: number;
+  national_competitions?: string[]; // name keywords of national-team competitions (missing in older analyses: the default)
   min_leg_probability: number;
   min_leg_odds?: number; // no selection under these odds enters a slip (missing in older analyses: 1.2)
   beam_width: number;
@@ -209,8 +213,12 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
   const C = new Map<string, number>();
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) C.set(`${i},${j}`, pairDependence(cands[i], cands[j], o));
 
+  // user's rule: a slip never mixes national-team competitions with club competitions
+  const keys = (o.national_competitions ?? NATIONAL_COMPETITIONS).map((k) => k.toLowerCase());
+  const national = cands.map((c) => keys.some((k) => c.competition.toLowerCase().includes(k)));
   const allowed = (idx: number[], nw: number) => {
     const nl = cands[nw];
+    if (idx.length && national[idx[0]] !== national[nw]) return false;
     let sameFix = 0;
     let sameComp = 0;
     for (const i of idx) {
