@@ -623,6 +623,43 @@ def cmd_quotes_check(a) -> None:
         store.close()
 
 
+def cmd_lineup_history_check(a) -> None:
+    """One-shot check (a few GOAL requests): does GOAL return the XI of finished matches, recent and a season ago, and do
+    their players resolve to the roster? Decides whether the player impact model can be trained on GOAL lineups."""
+    from .collector import GoalCollector
+    from .domain import Fixture, FixtureStatus
+    from .providers.goalapi import shape_summary
+    store = SnapshotStore(a.db)
+    try:
+        client = GoalApiClient(store=store, budget=BudgetGuard(store, "goal-api", daily=1000, reserve=50))
+        coll = GoalCollector(client, store, [], TeamNames.load(a.aliases))
+        now = datetime.now(timezone.utc)
+        print("risultati salvati per competizione e stagione (fixture GOAL):")
+        for comp, n, lo, hi in store.db.execute(
+                "SELECT competition, COUNT(*), MIN(kickoff), MAX(kickoff) FROM results WHERE fixture_id LIKE 'goal:%' GROUP BY competition ORDER BY 2 DESC LIMIT 12").fetchall():
+            print(f"  {comp:<28} {n:>5}  {lo[:10]} .. {hi[:10]}")
+        picks = []
+        for label, until in (("recente", now), ("un anno fa", now - timedelta(days=330))):
+            row = store.db.execute("SELECT fixture_id, competition, home, away, kickoff FROM results WHERE fixture_id LIKE 'goal:%' "
+                                   "AND competition = ? AND kickoff <= ? ORDER BY kickoff DESC LIMIT 1", (a.comp, until.isoformat())).fetchone()
+            if row:
+                picks.append((label, row))
+        for label, (fid, comp, home, away, ko) in picks:
+            print(f"\n{label}: {home} - {away} {ko[:10]} ({fid})")
+            env = client.get(f"/fixtures/{fid.split(':', 1)[1]}/lineups")
+            data = env.get("data")
+            for line in shape_summary(data)[:25]:
+                print("  " + line)
+            fx = Fixture(id=fid, competition=comp, home=home, away=away, kickoff=datetime.fromisoformat(ko), status=FixtureStatus.FINISHED)
+            roster = SnapshotProvider(store).list_players(comp)
+            for l in coll.mapper.lineups(data, fx, now):
+                ids = coll._reconcile_players(l.starters, l.team, roster)
+                known = {p.id for p in roster}
+                print(f"  {l.team}: stato {l.status}, titolari {len(l.starters)}, riconosciuti nella rosa {sum(i in known for i in ids)}")
+    finally:
+        store.close()
+
+
 def cmd_registry_calibration(a) -> None:
     """Registry calibration against Pinnacle and Sisal closing prices: model error or luck of the matches (no API request)."""
     from .registrycal import load_rows, print_report, report
@@ -1527,6 +1564,11 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("team", nargs="?", default="")
     rc.add_argument("--db", default="turso")
     rc.set_defaults(fn=cmd_registry_check)
+    lh = sub.add_parser("lineup-history-check", help="GOAL restituisce le formazioni delle partite finite? (2 richieste GOAL)")
+    lh.add_argument("--comp", default="Serie A")
+    lh.add_argument("--db", default="turso")
+    lh.add_argument("--aliases", default="configs/team_aliases.json")
+    lh.set_defaults(fn=cmd_lineup_history_check)
     rl = sub.add_parser("registry-calibration", help="calibrazione del registro contro le chiusure Pinnacle e Sisal (nessuna richiesta API)")
     rl.add_argument("--db", default="turso")
     rl.set_defaults(fn=cmd_registry_calibration)
