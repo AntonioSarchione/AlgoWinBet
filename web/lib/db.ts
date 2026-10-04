@@ -44,6 +44,7 @@ export type FixtureRow = {
   n_quotes: number;
   xg_home: number | null;
   xg_away: number | null;
+  rho?: number | null; // Dixon-Coles low-score correction (absent on runs before My Combo)
   markets: string | null;
   book?: string | null; // JSON: Sisal price, market and final probability of the headline selections (absent on old runs)
 };

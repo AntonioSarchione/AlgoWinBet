@@ -7,6 +7,7 @@ import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type Cand, type Profi
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, MatchCell } from "@/app/_components/ui";
 import { MAX_PICK } from "@/lib/pick";
+import { MyCombo } from "@/app/_components/MyCombo";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Schedina manuale" };
@@ -76,10 +77,11 @@ const manualSlips = unstable_cache(
   { revalidate: 6 * 3600 },
 );
 
-type SP = { fx?: string | string[]; p?: string; ev?: string; pmin?: string; min?: string; max?: string; lmin?: string; lmax?: string };
+type SP = { fx?: string | string[]; p?: string; ev?: string; pmin?: string; min?: string; max?: string; lmin?: string; lmax?: string; combo?: string };
 
 export default async function Schedina({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
+  if (sp.combo) return <ComboPage id={sp.combo} />;
   const ids = [...new Set([sp.fx ?? []].flat().filter(Boolean))].slice(0, MAX_PICK).sort();
   const back = `/palinsesto?${new URLSearchParams(ids.map((id) => ["fx", id]))}`;
   const run = await latestRun();
@@ -296,5 +298,45 @@ function Mini({ label, value, tone }: { label: string; value: string; tone?: "po
       <span className="note">{label}</span>
       <b className={`num ${tone ?? ""}`} style={{ display: "block", fontSize: 18 }}>{value}</b>
     </div>
+  );
+}
+
+// My Combo: several selections of one match on the single price Sisal shows for them together (typed by hand: no feed
+// carries Sisal's My Combo prices). The page gives the expected goals; the browser does the rest.
+async function ComboPage({ id }: { id: string }) {
+  const run = await latestRun();
+  const f = run ? (await runFixtures(run.id)).find((x) => x.fixture_id === id) : undefined;
+  const back = `/partita/${encodeURIComponent(id)}`;
+  const head = (
+    <header className="page-head">
+      <div>
+        <h1>My Combo{f ? ` · ${f.home} – ${f.away}` : ""}</h1>
+        <p>
+          {f ? <>{compShort(f.competition)} · {dayTime(f.kickoff)}. </> : null}
+          Scegli più esiti della stessa partita e scrivi la quota My Combo che vedi su Sisal: il modello calcola la probabilità che vincano
+          insieme, la quota equa e l&apos;EV. Uso personale, solo paper trading: non entra nel Registro.
+        </p>
+      </div>
+      <Link href={f ? back : "/palinsesto"} className="btn"><ArrowLeft size={17} aria-hidden="true" /> {f ? "Torna alla partita" : "Palinsesto"}</Link>
+    </header>
+  );
+  if (!run || !f) {
+    return <>{head}<div className="card"><Empty icon={CircleSlash} title="Partita non in analisi">Non è nell&apos;ultima analisi pubblicata (già iniziata o fuori dai 7 giorni).</Empty></div></>;
+  }
+  if (f.xg_home == null || f.xg_away == null || f.rho == null) {
+    return <>{head}<div className="card"><Empty icon={CircleSlash} title="Matrice dei risultati non disponibile">Analisi pubblicata con una versione precedente: riprova dopo la prossima pubblicazione.</Empty></div></>;
+  }
+  const sels = parseJSON<BookSel[]>((await fixtureBook(run.id, [id]))[0]?.sels ?? "[]", []);
+  const finals: Record<string, number> = {};
+  const prices: Record<string, number> = {};
+  for (const x of sels) {
+    finals[x.k] = x.p;
+    if (/sisal/i.test(x.b)) prices[x.k] = x.o;
+  }
+  return (
+    <>
+      {head}
+      <MyCombo home={f.home} away={f.away} xgHome={f.xg_home} xgAway={f.xg_away} rho={f.rho} finals={finals} prices={prices} />
+    </>
   );
 }

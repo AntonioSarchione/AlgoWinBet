@@ -42,7 +42,7 @@ FAIR_REFS = {"p_home": SelectionRef(market_code="MATCH_1X2", selection="HOME"),
              "p_over25": SelectionRef(market_code="TOTAL_GOALS", selection="OVER", line=2.5),
              "p_btts": SelectionRef(market_code="BTTS", selection="YES")}
 # Columns added after the first release: added in place on existing databases (see _migrate).
-EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets": "TEXT", "book": "TEXT"},
+EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets": "TEXT", "book": "TEXT", "rho": "REAL"},
                  "pub_opportunities": {"p_struct": "REAL", "p_low": "REAL", "p_high": "REAL", "n_books": "INTEGER", "edge": "REAL",
                                        "factors": "TEXT", "sel_key": "TEXT", "home": "TEXT", "away": "TEXT", "score": "REAL",
                                        "disagreement": "REAL", "dq_lineup": "REAL"},
@@ -147,15 +147,16 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     for f in res.fixtures:
         fitted = eng.fit(f.competition, t)
         probs = {k: None for k in FAIR_REFS}
-        xg, markets = (None, None), None
+        xg, markets, rho = (None, None), None, None
         if fitted and fitted[0].knows(f.home) and fitted[0].knows(f.away):
             m = fitted[0].score_matrix(f.home, f.away)
             probs = {k: round(probability(m, r), 4) for k, r in FAIR_REFS.items()}
             xg = tuple(round(float(x), 3) for x in fitted[0].expected_goals(f.home, f.away))
             markets = json.dumps(model_markets(m), ensure_ascii=False)
+            rho = round(float(fitted[0].rho), 5)  # with xg the dashboard rebuilds the score matrix (My Combo, same match)
         ops = by_fx.get(f.id, [])
         fx_rows.append((f.id, f.kickoff.isoformat(), f.competition, f.home, f.away, *probs.values(),
-                        ops[0].lineup_state if ops else "none", len(ops), *xg, markets, book_prices(ops)))
+                        ops[0].lineup_state if ops else "none", len(ops), *xg, markets, book_prices(ops), rho))
 
     versions = {"model": cfg.model.version, "meta": meta.version if meta else "spento", "data": data_version(store)}
     cur = store.db.execute(
@@ -165,7 +166,7 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
          json.dumps(res.optimizer.reasons, ensure_ascii=False), json.dumps(res.status_counts()), json.dumps(res.notes, ensure_ascii=False),
          json.dumps(optimizer_settings(cfg)), json.dumps(versions)))
     run_id = int(cur.fetchall()[0][0])  # not lastrowid: the remote libsql driver does not report it reliably
-    store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes,xg_home,xg_away,markets,book)",
+    store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes,xg_home,xg_away,markets,book,rho)",
                 [(run_id, *r) for r in fx_rows])
     # score, disagreement, sel_key, home/away and dq_lineup feed the dashboard's own slip optimizer (web/lib/optimizer.ts)
     store._bulk("INSERT INTO pub_opportunities(run_id,fixture_id,kickoff,competition,match,market,bookmaker,odds,fair_odds,p_final,p_market,ev,"

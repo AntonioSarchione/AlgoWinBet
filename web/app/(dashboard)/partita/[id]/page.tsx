@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, History, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, History, Layers, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
 import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
@@ -38,8 +38,9 @@ export default async function Partita({ params, searchParams }: Props) {
 
   return (
     <>
-      <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <Link href="/palinsesto" className="btn btn-ghost btn-sm"><ArrowLeft size={15} aria-hidden="true" /> Palinsesto</Link>
+        <Link href={`/schedina?combo=${encodeURIComponent(id)}`} className="btn btn-ghost btn-sm"><Layers size={15} aria-hidden="true" /> Valuta una My Combo</Link>
       </div>
 
       <section className="card hero" aria-labelledby="match-title" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
