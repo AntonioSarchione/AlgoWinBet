@@ -14,6 +14,22 @@ from algowinbet.providers import ManualInfoOverlay, MockProvider
 from algowinbet.state import build_state
 from algowinbet.store import Store
 
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _lineups_on(monkeypatch):
+    """These tests exercise the lineup machinery: switched on whatever the live default is (lineup_impact)."""
+    from algowinbet import engine as _engine
+    orig = _engine.Engine.__init__
+
+    def init(self, provider, cfg, *a, **k):
+        cfg = cfg.model_copy(deep=True)
+        cfg.model.lineup_impact = "learned"
+        orig(self, provider, cfg, *a, **k)
+    monkeypatch.setattr(_engine.Engine, "__init__", init)
+
 T0 = utc(2025, 4, 20, 12, 0)
 
 
