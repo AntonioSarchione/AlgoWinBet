@@ -559,6 +559,42 @@ def cmd_referees_backfill(a) -> None:
         store.close()
 
 
+def cmd_snapshot_check(a) -> None:
+    """The newest OddsPapi snapshots as stored (no request): every fixture row, the team names resolved through the cached
+    /participants, and the GOAL match it links to (or why not)."""
+    import json as _json
+    from .providers.oddspapi import OddsPapiMapper
+    store = SnapshotStore(a.db)
+    try:
+        def latest(endpoint):
+            r = store.db.execute("SELECT id, fetched_at FROM raw_requests WHERE source = 'oddspapi' AND endpoint = ? AND status = 200 "
+                                 "ORDER BY id DESC LIMIT 1", (endpoint,)).fetchone()
+            return (_json.loads(store.raw_body(r[0])), r[1]) if r else (None, None)
+        parts, p_at = latest("/participants")
+        markets, _ = latest("/markets")
+        def data(x):
+            return x.get("data", x) if isinstance(x, dict) else x
+        m = OddsPapiMapper(TeamNames.load(a.aliases), data(markets) or [], data(parts))
+        print(f"/participants letto {p_at}: {len(m.participants)} squadre")
+        now = datetime.now(timezone.utc)
+        cal = SnapshotProvider(store).list_fixtures(None, now - timedelta(hours=3), now + timedelta(days=10))
+        rows = store.db.execute("SELECT id, fetched_at FROM raw_requests WHERE source = 'oddspapi' AND endpoint = '/odds-by-tournaments' "
+                                "AND status = 200 AND fetched_at >= ? ORDER BY id", ((now - timedelta(days=1)).isoformat(),)).fetchall()
+        for rid, at in rows:
+            body = _json.loads(store.raw_body(rid))
+            body = data(body)
+            for row in (body if isinstance(body, list) else [body]):
+                if a.text and a.text not in str(row.get("tournamentId")):
+                    continue
+                fx = m.match_fixture(row, cal)
+                print(f"  {at[:16]} t{row.get('tournamentId')} {row.get('startTime')} ids {row.get('participant1Id')}/{row.get('participant2Id')} "
+                      f"'{m._name(row, 1)}'-'{m._name(row, 2)}' -> {fx.home + '-' + fx.away if fx else 'NESSUNA'}")
+        for g in sorted(set(m.report.gaps))[:30] if hasattr(m.report, "gaps") else []:
+            print("  gap:", g)
+    finally:
+        store.close()
+
+
 def cmd_quotes_check(a) -> None:
     """Upcoming matches (7 days, optionally of one competition / team): OddsPapi link, Sisal quotes by kind with the newest
     observation, and the playable selections in the latest publication (no request)."""
@@ -1386,6 +1422,11 @@ def build_parser() -> argparse.ArgumentParser:
     rb.add_argument("--config", default="configs/collect.json")
     rb.add_argument("--aliases", default="configs/team_aliases.json")
     rb.set_defaults(fn=cmd_referees_backfill)
+    sk = sub.add_parser("snapshot-check", help="righe delle ultime fotografie OddsPapi e loro collegamento (nessuna richiesta)")
+    sk.add_argument("text", nargs="?", default="", help="id torneo OddsPapi, es. 23755")
+    sk.add_argument("--db", default="turso")
+    sk.add_argument("--aliases", default="configs/team_aliases.json")
+    sk.set_defaults(fn=cmd_snapshot_check)
     qk = sub.add_parser("quotes-check", help="quote Sisal delle prossime partite e collegamento OddsPapi (nessuna richiesta)")
     qk.add_argument("text", nargs="?", default="")
     qk.add_argument("--db", default="turso")
