@@ -101,7 +101,10 @@ try {
   await send("Page.enable");
   console.log("Accedi nella finestra del browser che si è aperta: aspetto il login (massimo 5 minuti)...");
   const until = Date.now() + 5 * 60_000;
-  while ((await evaluate("location.pathname").catch(() => "/login")) === "/login") {
+  // logged in = on the site and off the login page (the window starts on about:blank, which is not a login)
+  const origin = new URL(SITE).origin;
+  const done = `location.origin === ${JSON.stringify(origin)} && location.pathname !== "/login" && !!document.querySelector("h1")`;
+  while (!(await evaluate(done).catch(() => false))) {
     if (Date.now() > until) throw new Error("login non fatto entro 5 minuti");
     await sleep(1000);
   }
