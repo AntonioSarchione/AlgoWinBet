@@ -78,19 +78,24 @@ function zFor(k: number): number {
 }
 
 export function calibrationBands(legs: PaperLeg[]) {
-  const bins = Array.from({ length: 10 }, () => ({ p: 0, y: 0, n: 0 }));
+  const bins = Array.from({ length: 10 }, () => ({ p: 0, y: 0, n: 0, legs: [] as PaperLeg[] }));
   for (const l of legs) {
     if (!decided(l)) continue;
     const b = bins[Math.min(9, Math.floor(l.p * 10))];
     b.p += l.p;
     b.y += l.result === "won" ? 1 : 0;
     b.n += 1;
+    b.legs.push(l);
   }
   const rows = bins
     .map((b, i) => {
       const p = b.n ? b.p / b.n : 0;
       const y = b.n ? b.y / b.n : 0;
-      const se = b.n ? Math.sqrt(Math.max(p * (1 - p), 1e-6) / b.n) : 0;
+      // standard error grouped by match: selections of the same match win and lose together (a low-scoring weekend
+      // wins every under at once), so a band of many selections from few matches must not look significant
+      const r = interval(b.legs.map((l) => (l.result === "won" ? 1 : 0) - l.p), b.legs.map((l) => l.fixture_id));
+      const binom = b.n ? Math.sqrt(Math.max(p * (1 - p), 1e-6) / b.n) : 0;
+      const se = r.hi != null && r.mean != null ? Math.max((r.hi - r.mean) / Z95, binom) : binom;
       return { lo: i / 10, n: b.n, p, y, z: se ? (y - p) / se : 0 };
     })
     .filter((r) => r.n > 0);
