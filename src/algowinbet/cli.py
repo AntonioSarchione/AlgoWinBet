@@ -1058,11 +1058,53 @@ def cmd_collect_auto(a) -> None:
             print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
                                      for s in ("goal-api", "oddspapi", "api-football")))
+        failed: list[str] = []
+        if daily or a.health:
+            from .health import print_health, run_health, save_health
+            checks, extra = run_health(store, now, Config.load(None).model.version)
+            print_health(checks)
+            save_health(store, checks, extra, now)
+            failed = [f"{c.label}: {c.detail}" for c in checks if c.level == "error"]
         n = am.record_run(store, now)
         if n:
             print(f"minuti GitHub: questo run {n}, mese {store.usage(am.SOURCE, am.month_key(now))}/{am.BUDGET}")
     finally:
         store.close()
+    if failed:  # all the work is done: failing now only sends GitHub's e-mail to the owner
+        for f in failed:
+            print(f"::error::{f}")
+        sys.exit(1)
+
+
+def cmd_health(a) -> None:
+    """Health check of the whole chain plus database size per table (no API request)."""
+    from .health import print_health, run_health, save_health
+    store = SnapshotStore(a.db)
+    try:
+        now = datetime.now(timezone.utc)
+        checks, extra = run_health(store, now, Config.load(None).model.version)
+        print_health(checks)
+        if extra.get("tables"):
+            print("Spazio per tabella:")
+            for t, b in extra["tables"].items():
+                print(f"  {t:<22} {b / 1e6:8.1f} MB")
+        if a.save:
+            save_health(store, checks, extra, now)
+    finally:
+        store.close()
+
+
+def cmd_db_backup(a) -> None:
+    """Compact gzipped copy of the database for the weekly backup (read from the local replica, no API request)."""
+    from pathlib import Path
+    from .health import backup, replica_path
+    src = Path(a.src) if a.src else replica_path()
+    if src is None or not src.exists():
+        sys.exit("nessun file di database da copiare (serve TURSO_MODE=replica o --src)")
+    r = backup(src, Path(a.out), tuple(a.skip))
+    print(f"backup {a.out}: {r['raw_bytes'] / 1e6:.0f} MB compattato, {r['gz_bytes'] / 1e6:.0f} MB compresso"
+          + (f" · senza {', '.join(r['skipped'])}" if r["skipped"] else ""))
+    print("righe: " + ", ".join(f"{t} {n}" for t, n in r["rows"].items()))
 
 
 def cmd_apif(a) -> None:
@@ -1489,7 +1531,17 @@ def build_parser() -> argparse.ArgumentParser:
                     help="aggiornamento manuale: fotografia Sisal adesso (richieste conteggiate, massimo manual_monthly al mese) + storico gratuito")
     ca.add_argument("--history", action="store_true", help="storico prezzi gratuito /historical-odds di tutte le partite future")
     ca.add_argument("--summary", action="store_true", help="conteggio righe del database e partite in calendario (circa 1 minuto su Turso)")
+    ca.add_argument("--health", action="store_true", help="controllo di salute anche fuori dal giro del mattino")
     ca.set_defaults(fn=cmd_collect_auto)
+    hc = sub.add_parser("health", help="controllo di salute e spazio del database per tabella (nessuna richiesta API)")
+    hc.add_argument("--db", default="turso")
+    hc.add_argument("--save", action="store_true")
+    hc.set_defaults(fn=cmd_health)
+    bk = sub.add_parser("db-backup", help="copia compatta del database (replica locale) in un file .db.gz")
+    bk.add_argument("--out", default="backup/algowinbet.db.gz")
+    bk.add_argument("--skip", nargs="*", default=[], help="tabelle da non copiare")
+    bk.add_argument("--src", default=None, help="file del database (predefinito: la replica locale di Turso)")
+    bk.set_defaults(fn=cmd_db_backup)
     sn = sub.add_parser("snapshots", help="statistiche dello snapshot store")
     sn.add_argument("--db", default="data/snapshots.db")
     sn.add_argument("--upcoming", type=int, metavar="GIORNI", help="elenca le partite salvate nei prossimi GIORNI")

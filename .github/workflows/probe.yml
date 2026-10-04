@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -75,6 +75,10 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "stats" ]; then algowinbet stat-coverage ${ARG:+--all} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "datasets" ]; then algowinbet dataset-report --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "results" ]; then algowinbet results-day "${ARG:-$(date -u -d yesterday +%F)}" --comp "$PARAMS" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "health" ]; then
+            export TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db
+            algowinbet health --db "$DB" && algowinbet db-backup --out backup/test.db.gz --skip ${ARG:-blobs}; exit $?
+          fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "bench" ]; then algowinbet db-bench; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "raw" ]; then algowinbet raw-last "$ARG" --source "${PARAMS:-goal}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "inspect" ]; then algowinbet inspect "$ARG" --db "$DB"; exit 0; fi
