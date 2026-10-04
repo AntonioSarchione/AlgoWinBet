@@ -80,9 +80,14 @@ def start_rates(roster, lineups, kickoff: dict) -> tuple[dict[str, float], dict[
     for team, ls in by_team.items():
         ls = sorted(ls, key=lambda l: kickoff.get(l.fixture_id) or datetime.min.replace(tzinfo=timezone.utc))
         last = ls[-RECENT_XI:]
-        for p in (p for p in roster if p.team == team):
-            learned[p.id] = sum(p.id in l.starters for l in ls) / len(ls)
-            recent[p.id] = sum(p.id in l.starters for l in last) / len(last)
+        mine = [p for p in roster if p.team == team]
+        for rates, xs in ((learned, ls), (recent, last)):
+            r = {p.id: sum(p.id in l.starters for l in xs) / len(xs) for p in mine}
+            # starters outside today's roster (moved, unknown ids) would leave the usual XI short of 11 and make every
+            # confirmed XI look stronger than usual: the rates are scaled to 11 starters (each capped at 1)
+            tot = sum(r.values())
+            k = 11.0 / tot if tot > 0 else 1.0
+            rates.update({i: min(1.0, v * k) for i, v in r.items()})
     return learned, recent
 
 

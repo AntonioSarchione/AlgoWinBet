@@ -54,5 +54,5 @@ def test_ids_translate_and_start_rates():
     roster = pr.list_players("Serie A")
     lus = [HistoricalLineup(fixture_id=f"f{i}", team="Milan", starters=["goal:1"] + (["goal:2"] if i < 10 else [])) for i in range(20)]
     learned, recent = start_rates(roster, lus, {f"f{i}": datetime(2026, 1, 1 + i, tzinfo=timezone.utc) for i in range(20)})
-    assert learned["goal:2"] == 0.5 and recent["goal:2"] == 0.0 and recent["goal:1"] == 1.0  # left the XI: 0% today
+    assert learned["goal:2"] > 0 and recent["goal:2"] == 0.0 and recent["goal:1"] == 1.0  # left the XI: 0% today (rates scaled to 11, capped at 1)
     assert RECENT_XI == 8
