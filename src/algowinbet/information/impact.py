@@ -58,6 +58,13 @@ class PlayerImpactModel:
         self.n_obs = np.zeros(n, dtype=int)
         self.learned = False
         self.sbar = np.array([base[i] for i in self.ids])
+        self.sbar_now = self.sbar  # usual start rate today (recent matches): transfers and new regulars
+
+    def set_current(self, base_now: dict[str, float]) -> "PlayerImpactModel":
+        """Prediction uses the recent start rates (a player who left starts 0% now); the fit keeps the whole-window ones."""
+        self.base = base_now
+        self.sbar_now = np.array([base_now[i] for i in self.ids])
+        return self
 
     @property
     def a(self) -> np.ndarray:
@@ -124,7 +131,7 @@ class PlayerImpactModel:
         pa = np.array([away.p_start.get(i, self.base[i]) if i in away.p_start else 0.0 for i in self.ids])
         in_h = np.array([self.players[i].team == home.team for i in self.ids])
         in_a = np.array([self.players[i].team == away.team for i in self.ids])
-        dh_s, da_s = (ph - self.sbar) * in_h, (pa - self.sbar) * in_a
+        dh_s, da_s = (ph - self.sbar_now) * in_h, (pa - self.sbar_now) * in_a
         a, d = self.a, self.d
         eff_h = a * dh_s - d * da_s  # per-player contribution to home log-lambda
         eff_a = a * da_s - d * dh_s
@@ -137,12 +144,12 @@ class PlayerImpactModel:
         for k, i in enumerate(self.ids):
             pl = self.players[i]
             if in_h[k] and abs(a[k] * dh_s[k]) > 0.004:
-                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {ph[k]:.0%} vs usuale {self.sbar[k]:.0%}: attacco", float(a[k] * dh_s[k])))
+                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {ph[k]:.0%} vs usuale {self.sbar_now[k]:.0%}: attacco", float(a[k] * dh_s[k])))
             if in_a[k] and abs(a[k] * da_s[k]) > 0.004:
-                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {pa[k]:.0%} vs usuale {self.sbar[k]:.0%}: attacco", float(a[k] * da_s[k])))
+                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {pa[k]:.0%} vs usuale {self.sbar_now[k]:.0%}: attacco", float(a[k] * da_s[k])))
             if in_h[k] and abs(d[k] * dh_s[k]) > 0.004:
-                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {ph[k]:.0%} vs usuale {self.sbar[k]:.0%}: difesa", float(-d[k] * dh_s[k])))
+                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {ph[k]:.0%} vs usuale {self.sbar_now[k]:.0%}: difesa", float(-d[k] * dh_s[k])))
             if in_a[k] and abs(d[k] * da_s[k]) > 0.004:
-                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {pa[k]:.0%} vs usuale {self.sbar[k]:.0%}: difesa", float(-d[k] * da_s[k])))
+                contribs.append((pl.name, f"{pl.name} ({pl.position.value}, {pl.team}) start {pa[k]:.0%} vs usuale {self.sbar_now[k]:.0%}: difesa", float(-d[k] * da_s[k])))
         contribs.sort(key=lambda z: -abs(z[2]))
         return Adjustment(dh, da_, math.sqrt(var_h), math.sqrt(var_a), contribs[:6], self.learned)

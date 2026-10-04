@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .calibration import CalibrationSet
 from .meta import MetaSet
@@ -63,6 +63,27 @@ def newcomer_prior(hist, cutoff: datetime, value: float) -> dict[str, tuple[floa
     if not before or not value:
         return {}
     return {t: (value, value) for r in hist if r.kickoff >= start for t in (r.home, r.away) if t not in before}
+
+
+RECENT_XI = 8  # matches that define a player's usual start rate today
+
+
+def start_rates(roster, lineups, kickoff: dict) -> tuple[dict[str, float], dict[str, float]]:
+    """Start rate of every roster player of a team with lineup history: over the whole window (the fit) and over the team's
+    last RECENT_XI matches (prediction). A player never in those XI gets 0, not the generic default: a player who left must
+    not count as a missing regular."""
+    by_team: dict[str, list] = {}
+    for l in lineups:
+        by_team.setdefault(l.team, []).append(l)
+    learned: dict[str, float] = {}
+    recent: dict[str, float] = {}
+    for team, ls in by_team.items():
+        ls = sorted(ls, key=lambda l: kickoff.get(l.fixture_id) or datetime.min.replace(tzinfo=timezone.utc))
+        last = ls[-RECENT_XI:]
+        for p in (p for p in roster if p.team == team):
+            learned[p.id] = sum(p.id in l.starters for l in ls) / len(ls)
+            recent[p.id] = sum(p.id in l.starters for l in last) / len(last)
+    return learned, recent
 
 
 class Engine:
@@ -203,22 +224,14 @@ class Engine:
                 hist_ids = {r.fixture_id for r in hist}
                 fn = getattr(self.provider, "list_lineup_history", None)
                 lus = [l for l in (fn(competition, cutoff) if fn else []) if l.fixture_id in hist_ids]
-                team_matches: dict[str, int] = {}
-                starts: dict[str, int] = {}
-                for l in lus:
-                    team_matches[l.team] = team_matches.get(l.team, 0) + 1
-                    for pid in l.starters:
-                        starts[pid] = starts.get(pid, 0) + 1
-                team_of = {p.id: p.team for p in roster}
-                learned = {pid: n / team_matches[team_of[pid]] for pid, n in starts.items()
-                           if pid in team_of and team_matches.get(team_of[pid])}
+                learned, recent = start_rates(roster, lus, {r.fixture_id: r.kickoff for r in hist})
                 imp = PlayerImpactModel(roster, base_rates(roster, learned))
                 model = fitted[0]
                 offsets = {}
                 for r in hist:
                     lh, la = model.expected_goals(r.home, r.away)
                     offsets[(r.fixture_id, "home")], offsets[(r.fixture_id, "away")] = math.log(lh), math.log(la)
-                self._impact[key] = imp.fit(lus, hist, offsets)
+                self._impact[key] = imp.fit(lus, hist, offsets).set_current(base_rates(roster, recent))
         return self._impact[key]
 
     # -------------------------------------------------------------- analysis

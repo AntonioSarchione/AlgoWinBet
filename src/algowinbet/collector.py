@@ -170,7 +170,8 @@ class GoalCollector:
         return st
 
     # ------------------------------------------------- historical lineups (Fase 6-bis)
-    LINEUP_PLAYERS = "goal-lineups"  # players table source of the players seen in GOAL lineups (their ids match the XI)
+    LINEUP_PLAYERS = "goal-lineups"
+    XI_BEFORE_KICKOFF = timedelta(minutes=60)  # official XI are published about an hour before kickoff  # players table source of the players seen in GOAL lineups (their ids match the XI)
 
     def pending_lineup_history(self, competitions: list[str], since: datetime) -> list[tuple]:
         """Finished matches of these competitions since `since` with no confirmed XI stored, newest first."""
@@ -189,6 +190,12 @@ class GoalCollector:
         clock = clock or _time.monotonic
         st = CollectStats("lineups-history")
         t0 = clock()
+        # first rows of the backfill were dated at kickoff: moved to the usual publication time (idempotent)
+        self.store.db.execute(
+            "UPDATE lineups SET observed_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes'), "
+            "published_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes') WHERE source = ? AND status = 'confirmed' "
+            "AND observed_at = (SELECT kickoff FROM results WHERE results.fixture_id = lineups.fixture_id)", (SOURCE,))
+        self.store.db.commit()
         todo = self.pending_lineup_history(competitions, since)
 
         def work():
@@ -202,7 +209,8 @@ class GoalCollector:
                 kickoff = datetime.fromisoformat(ko)
                 fx = Fixture(id=fid, competition=comp, home=home, away=away, kickoff=kickoff, status=FixtureStatus.FINISHED)
                 # a finished match: the XI listed is the one that played, whatever flag the payload carries
-                lus = [l.model_copy(update={"status": "confirmed", "published_at": kickoff, "observed_at": kickoff})
+                seen = kickoff - self.XI_BEFORE_KICKOFF
+                lus = [l.model_copy(update={"status": "confirmed", "published_at": seen, "observed_at": seen})
                        for l in self.mapper.lineups(data, fx, kickoff) if len(l.starters) >= 7]
                 if not lus:
                     # nothing published for this match: remembered, never asked again

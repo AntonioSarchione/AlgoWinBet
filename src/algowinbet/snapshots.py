@@ -411,6 +411,42 @@ class SnapshotProvider:
 
     def __init__(self, store: SnapshotStore):
         self.store = store
+        self._idmap: dict[str, str] | None = None
+
+    # One identity per player: the GOAL id when the player appears in GOAL lineups (the history the impact model learns
+    # from); API-Football ids (live lineups, injuries) are translated by team and name.
+    GOAL_PLAYERS = "goal-lineups"
+
+    def _goal_ids(self) -> dict[str, str]:
+        if self._idmap is None:
+            from .information.news import norm
+            rows = self.store.db.execute("SELECT id, name, team, source FROM players").fetchall()
+            by_name: dict[tuple[str, str], str] = {}
+            by_surname: dict[tuple[str, str], list[tuple[str, str]]] = {}
+            for pid, name, team, src in rows:
+                if src == self.GOAL_PLAYERS and name:
+                    n = norm(name).replace(".", " ").split()
+                    by_name[(team, " ".join(n))] = pid
+                    by_surname.setdefault((team, n[-1]), []).append((n[0][:1], pid))
+            m: dict[str, str] = {}
+            for pid, name, team, src in rows:
+                if src == self.GOAL_PLAYERS or not name:
+                    continue
+                n = norm(name).replace(".", " ").split()
+                hit = by_name.get((team, " ".join(n)))
+                if hit is None:
+                    cands = by_surname.get((team, n[-1]), [])
+                    if len(cands) > 1 and len(n) > 1:  # "M. Maignan" -> first initial
+                        cands = [c for c in cands if c[0] == n[0][:1]]
+                    hit = cands[0][1] if len(cands) == 1 else None
+                if hit:
+                    m[pid] = hit
+            self._idmap = m
+        return self._idmap
+
+    def _to_goal(self, ids: list[str]) -> list[str]:
+        m = self._goal_ids()
+        return [m.get(i, i) for i in ids]
 
     def _fx(self, row) -> Fixture:
         return Fixture(id=row[0], competition=row[1], home=row[2], away=row[3], kickoff=_dt(row[4]),
@@ -532,14 +568,15 @@ class SnapshotProvider:
         """Structured player availability (API-Football injuries and suspensions) for this fixture."""
         rows = self.store.db.execute("SELECT source, team, player_id, player_name, status, reason, observed_at FROM player_status "
                                      "WHERE fixture_id=?", (fixture_id,)).fetchall()
-        return [InformationEvent(id=f"{src}:{fixture_id}:{p}:{st}", fixture_id=fixture_id, team=team, player=p, event_type="PLAYER_STATUS",
+        m = self._goal_ids()
+        return [InformationEvent(id=f"{src}:{fixture_id}:{p}:{st}", fixture_id=fixture_id, team=team, player=m.get(p, p), event_type="PLAYER_STATUS",
                                  source_level="A", published_at=_dt(at), observed_at=_dt(at), confidence=0.95 if st != "DOUBTFUL" else 0.9,
                                  payload={"status": st, "reason": reason, "name": name, "source": src})
                 for src, team, p, name, st, reason, at in rows]
 
     def _lineup(self, r) -> LineupSnapshot:
-        return LineupSnapshot(fixture_id=r[0], team=r[1], status=r[2], formation=r[3], starters=json.loads(r[4]), bench=json.loads(r[5]),
-                              published_at=_dt(r[6]), observed_at=_dt(r[7]), source_level=r[8])
+        return LineupSnapshot(fixture_id=r[0], team=r[1], status=r[2], formation=r[3], starters=self._to_goal(json.loads(r[4])),
+                              bench=self._to_goal(json.loads(r[5])), published_at=_dt(r[6]), observed_at=_dt(r[7]), source_level=r[8])
 
     def get_lineups(self, fixture_id: str) -> list[LineupSnapshot]:
         rows = self.store.db.execute(
@@ -549,21 +586,23 @@ class SnapshotProvider:
 
     def list_lineup_history(self, competition: str, until: datetime) -> list[HistoricalLineup]:
         fids = {r.fixture_id for r in self.list_history([competition], until)}
-        out = []
-        for fid in fids:
-            best: dict[str, LineupSnapshot] = {}
-            for l in self.get_lineups(fid):
-                if l.status == "confirmed":
-                    best[l.team] = l  # latest confirmed per team
-            out += [HistoricalLineup(fixture_id=fid, team=t, starters=l.starters) for t, l in best.items()]
-        return out
+        best: dict[tuple[str, str], LineupSnapshot] = {}
+        # one read of every confirmed XI (thousands of matches): the latest confirmed one per match and team
+        for r in self.store.db.execute(
+                "SELECT fixture_id,team,status,formation,starters,bench,published_at,observed_at,source_level FROM lineups "
+                "WHERE status = 'confirmed' ORDER BY observed_at").fetchall():
+            if r[0] in fids:
+                best[(r[0], r[1])] = self._lineup(r)
+        return [HistoricalLineup(fixture_id=fid, team=t, starters=l.starters) for (fid, t), l in best.items()]
 
     def list_players(self, competition: str) -> list[Player]:
         teams = {t for f in self._latest_fixtures() if f.competition == competition for t in (f.home, f.away)}
         teams |= {t for r in self._results() if r.competition == competition for t in (r.home, r.away)}
-        rows = self.store.db.execute("SELECT id,name,team,position,importance,start_rate FROM players").fetchall()
+        rows = self.store.db.execute("SELECT id,name,team,position,importance,start_rate,source FROM players").fetchall()
+        # a team with GOAL lineup players uses only those (API-Football ids of the same players are translated, never added)
+        goal_teams = {r[2] for r in rows if r[6] == self.GOAL_PLAYERS}
         return [Player(id=r[0], name=r[1], team=r[2], position=Position(r[3]), importance=r[4] or 1.0, start_rate=r[5])
-                for r in rows if r[2] in teams]
+                for r in rows if r[2] in teams and (r[2] not in goal_teams or r[6] == self.GOAL_PLAYERS)]
 
     def get_news_items(self, fixture_id: str) -> list[NewsItem]:
         fx = next((f for f in self._latest_fixtures() if f.id == fixture_id), None)
