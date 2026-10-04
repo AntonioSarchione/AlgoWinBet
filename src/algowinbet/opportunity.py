@@ -14,7 +14,7 @@ from .markets import UnsupportedMarket, family_of, probability, void_probability
 from .meta import FAMILY_SELECTIONS, MetaSet, family_key, group_of
 from .information import Adjustment, PlayerImpactModel, TeamAvailability, build_availability
 from .models import DixonColes
-from .pricing import MarketView, SOURCE_LEVEL_SCORE, build_market_views
+from .pricing import MarketView, SOURCE_LEVEL_SCORE, build_market_views, is_estimated, reference_fair
 from .state import MatchState
 
 S = OpportunityStatus
@@ -31,6 +31,7 @@ class FixtureAnalysis:
     adjustment: Adjustment = field(default_factory=Adjustment)
     availability: dict[str, TeamAvailability] = field(default_factory=dict)
     matrix_blind: np.ndarray | None = None
+    payouts: list[tuple[str, float]] = field(default_factory=list)  # (market, Sisal price x Pinnacle fair p) for estimates
 
 
 def data_quality(state: MatchState, model: DixonColes, view: MarketView, stale: bool = False) -> dict[str, float]:
@@ -99,6 +100,7 @@ def analyze_fixture(
     roster: list[Player] | None = None,
     meta: MetaSet | None = None,
     stats: dict[str, tuple] | None = None,
+    estimate: dict[str, float] | None = None,
 ) -> FixtureAnalysis:
     calib = calib or CalibrationSet()
     f = state.fixture
@@ -118,7 +120,9 @@ def analyze_fixture(
     m_lo = model.score_matrix(f.home, f.away, (adj.d_home - adj.sd_home, adj.d_away + adj.sd_away))
     boot_matrices = [b.score_matrix(f.home, f.away, la_) for b in boots]
     known = model.knows(f.home) and model.knows(f.away)
-    views = build_market_views(state.quotes, cfg.ensemble.devig_method, cfg.bet_bookmakers)
+    views = build_market_views(state.quotes, cfg.ensemble.devig_method, cfg.bet_bookmakers, estimate)
+    payouts = [(v.ref.market_code, v.best_odds * p) for v in views if not is_estimated(v.best_book)
+               for p in [reference_fair(v.per_book)] if p]
     n_eff = max(model.sample_size(f.home, f.away), 3)
     ens = cfg.ensemble
     info_t = state.latest_info_time()
@@ -247,4 +251,4 @@ def analyze_fixture(
         ))
     lh, la = model.expected_goals(f.home, f.away)
     return FixtureAnalysis(state=state, matrix=matrix, opportunities=out, skipped=skipped, expected_goals=(lh, la),
-                           model_known=known, adjustment=adj, availability=avail, matrix_blind=matrix_blind)
+                           model_known=known, adjustment=adj, availability=avail, matrix_blind=matrix_blind, payouts=payouts)

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { compShort, dayTime, fairOdds, pct } from "./format";
 import { HBar, Ring, Split1X2, TeamBadge } from "./ui";
+import { isEstimated } from "@/lib/books";
 
 export type ExplorerMatch = {
   id: string;
@@ -30,7 +31,7 @@ function side(f: ExplorerMatch, k: Side) {
   const b = f.book[k];
   const model = f[k];
   if (!b) return { value: model, sub: `quota equa ${fairOdds(model)}` };
-  return { value: b.pf, sub: `Sisal ${b.odds.toFixed(2)} · modello ${pct(model)}` };
+  return { value: b.pf, sub: `${isEstimated(b.book) ? "Sisal stimata" : "Sisal"} ${b.odds.toFixed(2)} · modello ${pct(model)}` };
 }
 
 // Home: every match passing the filters in a scrollable strip (nearest kickoff first); the selected one drives the rings

@@ -357,6 +357,10 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 for period in (f"D{t:%Y-%m-%d}", f"M{t:%Y-%m}"):
                     store.add_usage(MANUAL_REQUESTS, period, st.requests)
             out.append(st)
+            # matches the Sisal snapshot skipped: link them, so the free price path brings Pinnacle (estimated Sisal price)
+            link = odds.link_unquoted({l.name: str(l.oddspapi) for l in cfg.leagues if l.oddspapi})
+            if link.requests or link.errors:
+                out.append(link)
         elif s == "history":
             left = 600.0 if max_seconds is None else max(30.0, max_seconds - (clock() - t0))
             if history:

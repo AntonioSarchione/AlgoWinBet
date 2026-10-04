@@ -8,6 +8,7 @@ import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_comp
 import { Empty, MatchCell } from "@/app/_components/ui";
 import { MAX_PICK } from "@/lib/pick";
 import { MyCombo } from "@/app/_components/MyCombo";
+import { isEstimated } from "@/lib/books";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Schedina manuale" };
@@ -231,6 +232,9 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
                         <td className="muted num">{i + 1}</td>
                         <td className="wrap">
                           <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {dayTime(l.kickoff)}</>} href={`/partita/${encodeURIComponent(l.fixture_id)}`} />
+                          {isEstimated(l.bookmaker) && (
+                            <span className="sub crit-warn">Quota Sisal stimata da Pinnacle: gioca solo se su Sisal è almeno {(1 / l.p_final).toFixed(2)}</span>
+                          )}
                         </td>
                         <td className="num">{l.odds.toFixed(2)}</td>
                         <td className="num">{pct(l.p_final, 1)}</td>
@@ -251,6 +255,12 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
               <Mini label="EV stimato" value={signed(best.ev)} tone={best.ev >= 0 ? "pos" : "neg"} />
               <Mini label="Bonus multipla Sisal" value={best.bonus ? `+${(best.bonus * 100).toFixed(0)}%` : "—"} />
             </div>
+            {best.legs.some((l) => isEstimated(l.bookmaker)) && (
+              <p className="note card-pad" style={{ paddingTop: 0 }}>
+                Alcune partite non sono quotate da Sisal sul nostro fornitore: la quota è stimata dal prezzo equo di Pinnacle per il margine
+                abituale di Sisal. Controlla la quota vera su Sisal prima di giocare; queste giocate non entrano nel Registro.
+              </p>
+            )}
             {best.ev < 0 && (
               <p className="note card-pad" style={{ paddingTop: 0 }}>
                 EV negativo: con queste partite anche la combinazione migliore paga meno di quanto vale. Il modello non la giocherebbe.
@@ -331,7 +341,7 @@ async function ComboPage({ id }: { id: string }) {
   const prices: Record<string, number> = {};
   for (const x of sels) {
     finals[x.k] = x.p;
-    if (/sisal/i.test(x.b)) prices[x.k] = x.o;
+    if (!isEstimated(x.b)) prices[x.k] = x.o;
   }
   return (
     <>

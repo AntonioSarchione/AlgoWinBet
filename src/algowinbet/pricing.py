@@ -100,10 +100,24 @@ def _bettable(book: str, bettable: list[str] | None) -> bool:
     return not bettable or any(b.lower() in book.lower() for b in bettable)
 
 
-def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bettable: list[str] | None = None) -> list[MarketView]:
+ESTIMATED_BOOK = "sisal-stimata"  # bookmaker of an estimated Sisal price (see build_market_views): never a recorded bet
+
+
+def is_estimated(book: str | None) -> bool:
+    return book == ESTIMATED_BOOK
+
+
+def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bettable: list[str] | None = None,
+                       estimate: dict[str, float] | None = None) -> list[MarketView]:
     """One view per selection. With `bettable` (e.g. ["sisal"]) a view exists only for selections those bookmakers price and its
-    best odds come from them; the other books (Pinnacle) still feed the devigged market probability of those selections."""
+    best odds come from them; the other books (Pinnacle) still feed the devigged market probability of those selections.
+
+    `estimate` (market code -> usual Sisal payout as a share of the fair price, "*" for any market): when no bettable book
+    prices the match at all (Sisal on the feed skips it), each selection a reference book (Pinnacle) prices gets an estimated
+    Sisal price, fair reference price x usual payout, under ESTIMATED_BOOK. The user checks the real price on Sisal."""
     quotes = latest_quotes(quotes)
+    if estimate and bettable and any(_bettable(q.bookmaker, bettable) for q in quotes):
+        estimate = None  # Sisal prices the match: a selection it does not offer is not on offer
     by_ref: dict[str, list[OddsQuote]] = {}
     for q in quotes:
         by_ref.setdefault(q.ref.key, []).append(q)
@@ -128,6 +142,11 @@ def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bet
     views = []
     for key, qs in by_ref.items():
         playable = [q for q in qs if _bettable(q.bookmaker, bettable)]
+        if not playable and estimate:
+            v = _estimated_view(qs, p_by_ref_book.get(key, {}), estimate)
+            if v is not None:
+                views.append(v)
+            continue
         if not playable:
             continue  # nobody we can bet with prices it: not an option at all
         top = max(playable, key=lambda q: q.odds)
@@ -151,3 +170,44 @@ def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bet
         )
         views[-1].source_level = "A" if lvl >= 0.97 else "B" if lvl >= 0.8 else "C"
     return views
+
+
+def _reference(per_book: dict[str, float]) -> tuple[str, float] | None:
+    return next(((b, p) for r in REFERENCE_BOOKS for b, p in per_book.items() if r in b.lower()), None)
+
+
+def reference_fair(per_book: dict[str, float]) -> float | None:
+    """Devigged probability at the first reference book (Pinnacle) that prices the complete set, else None."""
+    ref = _reference(per_book)
+    return ref[1] if ref else None
+
+
+def _estimated_view(qs: list[OddsQuote], per_book: dict[str, float], estimate: dict[str, float]) -> MarketView | None:
+    """Estimated Sisal price of one selection from a reference book's fair price (complete devigged set only)."""
+    ref = _reference(per_book)
+    payout = estimate.get(qs[0].market_code, estimate.get("*"))
+    if ref is None or payout is None or not 0 < ref[1] < 1:
+        return None
+    src = [q for q in qs if q.bookmaker == ref[0]]
+    top = max(src, key=lambda q: q.observed_at)
+    return MarketView(ref=top.ref, best_odds=max(1.01, round(payout / ref[1], 2)), best_book=ESTIMATED_BOOK,
+                      best_observed_at=top.observed_at, n_books=len(qs), p_market=ref[1], dispersion=0.0, overround=None,
+                      source_level=top.source_level, per_book=per_book)
+
+
+MIN_PAYOUT_PAIRS = 20  # Sisal / Pinnacle pairs needed before a market's own usual payout is trusted (else the overall one)
+
+
+def payout_ratios(samples: list[tuple[str, float]]) -> dict[str, float]:
+    """Usual Sisal payout per market as a share of Pinnacle's fair price (median; "*" over every market), capped at 1:
+    an estimate never promises more than the fair price. {} with too few pairs."""
+    by: dict[str, list[float]] = {}
+    for code, r in samples:
+        if 0.5 < r < 1.5:  # a pair this far apart is a feed error
+            by.setdefault(code, []).append(r)
+    every = [r for rs in by.values() for r in rs]
+    if len(every) < MIN_PAYOUT_PAIRS:
+        return {}
+    out = {code: min(1.0, float(np.median(rs))) for code, rs in by.items() if len(rs) >= MIN_PAYOUT_PAIRS}
+    out["*"] = min(1.0, float(np.median(every)))
+    return out

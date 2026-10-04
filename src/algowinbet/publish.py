@@ -42,7 +42,7 @@ FAIR_REFS = {"p_home": SelectionRef(market_code="MATCH_1X2", selection="HOME"),
              "p_over25": SelectionRef(market_code="TOTAL_GOALS", selection="OVER", line=2.5),
              "p_btts": SelectionRef(market_code="BTTS", selection="YES")}
 # Columns added after the first release: added in place on existing databases (see _migrate).
-EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets": "TEXT", "book": "TEXT", "rho": "REAL"},
+EXTRA_COLUMNS = {"pub_fixtures": {"xg_home": "REAL", "xg_away": "REAL", "markets": "TEXT", "book": "TEXT", "rho": "REAL", "estimated": "INTEGER"},
                  "pub_opportunities": {"p_struct": "REAL", "p_low": "REAL", "p_high": "REAL", "n_books": "INTEGER", "edge": "REAL",
                                        "factors": "TEXT", "sel_key": "TEXT", "home": "TEXT", "away": "TEXT", "score": "REAL",
                                        "disagreement": "REAL", "dq_lineup": "REAL"},
@@ -143,6 +143,9 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     by_fx: dict[str, list] = {}
     for o in res.opportunities:
         by_fx.setdefault(o.fixture_id, []).append(o)
+    est_fx: dict[str, list] = {}  # matches Sisal does not price on the feed: estimated prices, manual slips only
+    for o in res.estimated:
+        est_fx.setdefault(o.fixture_id, []).append(o)
     fx_rows = []
     for f in res.fixtures:
         fitted = eng.fit(f.competition, t)
@@ -154,9 +157,10 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
             xg = tuple(round(float(x), 3) for x in fitted[0].expected_goals(f.home, f.away))
             markets = json.dumps(model_markets(m), ensure_ascii=False)
             rho = round(float(fitted[0].rho), 5)  # with xg the dashboard rebuilds the score matrix (My Combo, same match)
-        ops = by_fx.get(f.id, [])
+        ops = by_fx.get(f.id) or est_fx.get(f.id, [])
         fx_rows.append((f.id, f.kickoff.isoformat(), f.competition, f.home, f.away, *probs.values(),
-                        ops[0].lineup_state if ops else "none", len(ops), *xg, markets, book_prices(ops), rho))
+                        ops[0].lineup_state if ops else "none", len(ops), *xg, markets, book_prices(ops), rho,
+                        int(f.id not in by_fx and f.id in est_fx)))
 
     versions = {"model": cfg.model.version, "meta": meta.version if meta else "spento", "data": data_version(store)}
     cur = store.db.execute(
@@ -166,7 +170,7 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
          json.dumps(res.optimizer.reasons, ensure_ascii=False), json.dumps(res.status_counts()), json.dumps(res.notes, ensure_ascii=False),
          json.dumps(optimizer_settings(cfg)), json.dumps(versions)))
     run_id = int(cur.fetchall()[0][0])  # not lastrowid: the remote libsql driver does not report it reliably
-    store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes,xg_home,xg_away,markets,book,rho)",
+    store._bulk("INSERT INTO pub_fixtures(run_id,fixture_id,kickoff,competition,home,away,p_home,p_draw,p_away,p_over25,p_btts,lineup_state,n_quotes,xg_home,xg_away,markets,book,rho,estimated)",
                 [(run_id, *r) for r in fx_rows])
     # score, disagreement, sel_key, home/away and dq_lineup feed the dashboard's own slip optimizer (web/lib/optimizer.ts)
     store._bulk("INSERT INTO pub_opportunities(run_id,fixture_id,kickoff,competition,match,market,bookmaker,odds,fair_odds,p_final,p_market,ev,"
@@ -179,7 +183,7 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                   json.dumps({k: explain_leg(o)[k] for k in ("positive_factors", "negative_factors")}, ensure_ascii=False),
                   o.ref.key, o.home, o.away, round(o.score, 6), round(o.model_disagreement, 6), o.data_quality_parts.get("lineup", 0.0))
                  for o in res.opportunities if o.status in SHOWN])
-    book = [(run_id, fid, js) for fid, ops in by_fx.items() if (js := book_rows(ops, cfg.thresholds.min_probability))]
+    book = [(run_id, fid, js) for fid, ops in {**est_fx, **by_fx}.items() if (js := book_rows(ops, cfg.thresholds.min_probability))]
     store._bulk("INSERT OR REPLACE INTO pub_book(run_id,fixture_id,sels)", book)
     store._bulk("INSERT INTO pub_slips(run_id,rank,total_odds,joint_probability,ev,ev_lower,stake,legs,explanation,horizon_h,max_legs)",
                 [(run_id, k + 1, round(s.total_odds, 3), round(s.joint_probability, 4), round(s.ev, 4), round(s.ev_lower, 4), round(s.stake, 2),

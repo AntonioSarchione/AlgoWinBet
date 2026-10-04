@@ -93,7 +93,8 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
                         <input
                           type="checkbox" form="pick" name="fx" value={f.fixture_id} data-off={f.n_quotes ? "0" : "1"} disabled={!f.n_quotes}
                           aria-label={`Scegli ${f.home} - ${f.away}`}
-                          title={f.n_quotes ? "Aggiungi alla schedina manuale" : "Nessuna giocata Sisal pubblicata per questa partita"}
+                          title={f.n_quotes ? (f.estimated ? "Aggiungi alla schedina manuale (quote Sisal stimate da Pinnacle: controlla la quota vera)" : "Aggiungi alla schedina manuale")
+                            : "Nessuna quota Sisal né Pinnacle per questa partita"}
                         />
                       </td>
                       <td className="num">{hour(f.kickoff)}</td>
@@ -110,7 +111,7 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
                       <td className="muted" style={{ fontSize: 12 }}>
                         {[
                           f.lineup_state === "confirmed" ? "XI ufficiali" : f.lineup_state === "probable" ? "XI probabili" : null,
-                          f.n_quotes ? `${f.n_quotes} mercati quotati` : null,
+                          f.n_quotes ? (f.estimated ? `${f.n_quotes} quote Sisal stimate` : `${f.n_quotes} mercati quotati`) : null,
                           f.p_home == null ? "storico insufficiente" : null,
                         ].filter(Boolean).join(" · ")}
                       </td>

@@ -17,6 +17,7 @@ from .markets import family_of, stat_of
 from .models import DixonColes
 from .opportunity import FixtureAnalysis, analyze_fixture
 from .optimizer import OptimizerResult, optimize
+from .pricing import payout_ratios
 from .risk import assign_stakes
 from .models.counts import CountModel
 from .state import _dedupe, build_state, history_at, season_start
@@ -31,6 +32,7 @@ class AnalysisResult:
     optimizer: OptimizerResult
     notes: list[str] = field(default_factory=list)
     changes: list[dict] = field(default_factory=list)  # filled by handle_event
+    estimated: list[Opportunity] = field(default_factory=list)  # estimated Sisal prices (manual slips only, see analyze)
 
     @property
     def n_markets(self) -> int:
@@ -245,7 +247,8 @@ class Engine:
     # -------------------------------------------------------------- analysis
     def analyze_fixtures(self, fixtures: list[Fixture], cutoff: datetime, markets: set[str] | None = None,
                          notes: list[str] | None = None, model_cutoff: datetime | None = None,
-                         extra_events: list[InformationEvent] | None = None) -> tuple[dict[str, FixtureAnalysis], list[Opportunity]]:
+                         extra_events: list[InformationEvent] | None = None,
+                         estimate: dict[str, float] | None = None) -> tuple[dict[str, FixtureAnalysis], list[Opportunity]]:
         analyses: dict[str, FixtureAnalysis] = {}
         opps: list[Opportunity] = []
         mc = model_cutoff or cutoff
@@ -262,7 +265,8 @@ class Engine:
             if extra_events:
                 state.events = _dedupe(state.events + [e for e in extra_events if e.observed_at <= cutoff])
             a = analyze_fixture(state, fitted[0], fitted[1], self.cfg, self.calib, self.impact(f.competition, mc), roster, self.meta,
-                                stats=self.stat_matrices(f, mc) if any(stat_of(q.market_code) for q in state.quotes) else None)
+                                stats=self.stat_matrices(f, mc) if any(stat_of(q.market_code) for q in state.quotes) else None,
+                                estimate=estimate)
             if markets:
                 a.opportunities = [o for o in a.opportunities if o.ref.market_code in markets]
             if a.opportunities:
@@ -282,7 +286,25 @@ class Engine:
         notes: list[str] = []
         fixtures = [f for f in self.provider.list_fixtures(competitions, start, end) if f.kickoff > cutoff]
         analyses, opps = self.analyze_fixtures(fixtures, cutoff, markets, notes)
-        return self._finish(cutoff, fixtures, analyses, opps, notes)
+        estimated = self._estimate_unquoted(fixtures, analyses, cutoff, markets, notes)
+        res = self._finish(cutoff, fixtures, analyses, opps, notes)
+        res.estimated = estimated
+        return res
+
+    def _estimate_unquoted(self, fixtures, analyses, cutoff, markets, notes) -> list[Opportunity]:
+        """Second pass over the matches no bet bookmaker prices: estimated prices from the usual payout of the priced ones.
+        Kept apart from the opportunities, so they never reach the automatic slips or the registry."""
+        if not (self.cfg.bet_bookmakers and self.cfg.estimate_unquoted):
+            return []
+        missing = [f for f in fixtures if f.id not in analyses]
+        ratios = payout_ratios([s for a in analyses.values() for s in a.payouts])
+        if not missing or not ratios:
+            return []
+        _, est = self.analyze_fixtures(missing, cutoff, markets, None, estimate=ratios)
+        if est:
+            notes.append(f"quote Sisal stimate da Pinnacle per {len({o.fixture_id for o in est})} partite non quotate da Sisal sul feed "
+                         f"(rendimento Sisal abituale {ratios['*']:.1%} della quota equa)")
+        return est
 
     # ----------------------------------------------------- event-driven update
     def handle_event(self, prev: AnalysisResult, event: InformationEvent, new_cutoff: datetime | None = None) -> AnalysisResult:

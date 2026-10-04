@@ -142,6 +142,41 @@ class OddsCollector:
         db.executemany("DELETE FROM blobs WHERE hash=? AND NOT EXISTS (SELECT 1 FROM raw_requests WHERE hash=?)", [(h, h) for _, h in old])
         db.commit()
 
+    def link_unquoted(self, tournaments: dict[str, str], hours: float = 48, max_requests: int = 2) -> CollectStats:
+        """Matches the Sisal snapshot does not carry (Sisal on OddsPapi skips some, e.g. a Nations League match) never get
+        linked, so the free price path (Pinnacle) is never read and the match has no price at all. For matches within `hours`
+        not linked yet, one /fixtures per tournament (billable) links them; each match is tried once (jobs row), so a match
+        OddsPapi does not list costs one request, not one per tick."""
+        st = CollectStats("link")
+
+        def work():
+            t = self.now()
+            links = {fid for (fid,) in self.store.db.execute("SELECT fixture_id FROM fixture_links WHERE source=?", (SOURCE,)).fetchall()}
+            tried = {n for (n,) in self.store.db.execute("SELECT name FROM jobs WHERE name LIKE 'odds-link-try:%'").fetchall()}
+            comp_tid = {self.names.canon(c): str(tid) for c, tid in tournaments.items()}
+            todo: dict[str, list] = {}
+            for f in self.provider.list_fixtures(None, t, t + timedelta(hours=hours)):
+                tid = comp_tid.get(self.names.canon(f.competition))
+                if tid and f.id not in links and f"odds-link-try:{f.id}" not in tried:
+                    todo.setdefault(tid, []).append(f)
+            if not todo:
+                return
+            m = self.mapper()
+            for tid, fxs in list(todo.items())[:max_requests]:
+                rows = self.client.get("/fixtures", {"tournamentId": tid})["data"]
+                for row in rows if isinstance(rows, list) else []:
+                    fx = m.match_fixture(row, fxs)
+                    if fx is not None:
+                        self._link(str(row.get("fixtureId")), fx.id)
+                        st.add("links", 1)
+                self.store.db.executemany("INSERT OR REPLACE INTO jobs(name, done_at, detail) VALUES(?,?,?)",
+                                          [(f"odds-link-try:{f.id}", t.isoformat(), tid) for f in fxs])
+                self.store.db.commit()
+            if len(todo) > max_requests:
+                st.skipped.append(f"{len(todo) - max_requests} tornei rimandati al prossimo giro")
+        self._run(st, work)
+        return st
+
     def sync_prematch_history(self, days_ahead: int = 10, max_fixtures: int = 80, max_seconds: float = 600,
                               clock: Callable[[], float] = time.monotonic, only: list[str] | None = None) -> CollectStats:
         """Free /historical-odds (verified live on 2026-09-30: the provider's request counter did not move) for linked fixtures

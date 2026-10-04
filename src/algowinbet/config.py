@@ -165,6 +165,9 @@ class Config(BaseModel):
     optimizer: OptimizerCfg = Field(default_factory=OptimizerCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
     bet_bookmakers: list[str] = Field(default_factory=list)  # empty: any bookmaker; e.g. ["sisal"]: only its prices are playable
+    # a match no bet bookmaker prices (Sisal on the feed skips it): estimated Sisal prices from Pinnacle's fair price x the
+    # usual Sisal payout of this run's matches. Manual slips only: never recorded, never in the automatic slips
+    estimate_unquoted: bool = True
     calibration_path: str = "configs/calibration.json"
     db_path: str = "algowinbet.db"
 
