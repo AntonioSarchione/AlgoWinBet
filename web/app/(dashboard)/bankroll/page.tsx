@@ -46,6 +46,11 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
   const slips = (all ?? []).filter((s) => !profile || s.profile === profile);
   const r = simulate(slips, plan);
   const growth = r.equity / plan.start - 1;
+  // every recorded slip, newest first: the staked ones and those this plan leaves out (with the reason)
+  const rows = [
+    ...r.bets.map((b) => ({ ...b, skip: null as string | null })),
+    ...r.skipped.map((x) => ({ slip: x.slip, at: x.slip.created_at, stake: 0, ret: null, balanceAfter: null, skip: x.reason })),
+  ].sort((a, b) => b.at.localeCompare(a.at) || b.slip.id - a.slip.id);
 
   return (
     <>
@@ -118,7 +123,8 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
           <button type="submit" className="btn btn-primary">Simula</button>
         </div>
         <p className="note bank-hint">
-          {METHOD[plan.method].label}: {METHOD[plan.method].hint}. Puntata minima Sisal 2 €: sotto, la schedina si salta.
+          {METHOD[plan.method].label}: {METHOD[plan.method].hint}. Puntata minima Sisal 2 €: sotto, la schedina non si punta (resta in tabella
+          con il motivo). Il Registro conta 1 unità su ogni schedina; qui conta solo quello che il piano punta davvero.
         </p>
       </form>
 
@@ -135,7 +141,9 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
             </Kpi>
             <Kpi icon={Layers} label="Schedine giocate" value={String(r.bets.length)}>
               <b>{r.won}</b> vinte, <b>{r.lost}</b> perse{r.refunded > 0 && <>, {r.refunded} rimborsate</>} · {r.open} in attesa
-              {r.skipped > 0 && <> · {r.skipped} saltate</>}
+              {r.skipped.length > 0 && (
+                <> · <b>{r.skipped.length}</b> non puntate ({r.skippedWon} vinte, {r.skippedLost} perse)</>
+              )}
             </Kpi>
             <Kpi icon={TrendingDown} label="Calo massimo" value={r.maxDd > 0 ? `−${eur(r.maxDd)}` : "–"}>
               <b>{pct(r.maxDdPct, 1)}</b> dal punto più alto · peggior serie <b>{r.worstRun}</b> perse di fila
@@ -161,10 +169,11 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
 
           <section className="card" aria-labelledby="bank-bets">
             <div className="card-head">
-              <h2 id="bank-bets">Ultime schedine</h2>
-              <span className="count">{r.bets.length}</span>
+              <h2 id="bank-bets">Schedine del registro</h2>
+              <span className="count">{rows.length}</span>
+              {r.skipped.length > 0 && <span className="muted">comprese le {r.skipped.length} non puntate con questo piano</span>}
             </div>
-            {r.bets.length ? (
+            {rows.length ? (
               <div className="table-wrap">
                 <table className="compact">
                   <thead>
@@ -174,10 +183,10 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
                     </tr>
                   </thead>
                   <tbody>
-                    {[...r.bets].reverse().slice(0, 40).map((b) => {
+                    {rows.slice(0, 60).map((b) => {
                       const legs = parseJSON<{ match: string; market: string }[]>(b.slip.legs, []);
                       return (
-                        <tr key={b.slip.id}>
+                        <tr key={b.slip.id} className={b.skip ? "muted" : undefined}>
                           <td className="num">{dayTime(b.at)}</td>
                           <td className="wrap">
                             {legs.length} eventi
@@ -185,7 +194,7 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
                           </td>
                           <td className="num">{effectiveOdds(b.slip).toFixed(2)}</td>
                           <td className="num">{pct(b.slip.joint, 1)}</td>
-                          <td className="num">{eur(b.stake)}</td>
+                          <td className="num">{b.skip ? <span title={b.skip}>non puntata</span> : eur(b.stake)}</td>
                           <td>
                             {b.slip.result ? (
                               <span className={`status ${RESULT_CLASS[b.slip.result] ?? "status-WATCH"}`}>{RESULT_LABEL[b.slip.result] ?? b.slip.result}</span>
@@ -193,7 +202,7 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
                               <span className="muted">in attesa</span>
                             )}
                           </td>
-                          <td className="num">{b.balanceAfter == null ? "–" : eur(b.balanceAfter)}</td>
+                          <td className="num">{b.skip ? <span className="note">{b.skip}</span> : b.balanceAfter == null ? "–" : eur(b.balanceAfter)}</td>
                         </tr>
                       );
                     })}
@@ -202,7 +211,7 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
               </div>
             ) : (
               <Empty icon={Layers} title="Nessuna schedina puntata">
-                Con questo piano ogni puntata resta sotto il minimo di 2 €: alza il capitale, la frazione o il tetto.
+                Il registro non ha ancora schedine.
               </Empty>
             )}
           </section>

@@ -9,9 +9,10 @@ export type Plan = { start: number; method: Method; flat: number; pct: number; k
 export const DEFAULT_PLAN: Plan = { start: 1000, method: "kelly", flat: 10, pct: 0.01, kelly: 0.25, cap: 0.02, minStake: 2 };
 
 export type Bet = { slip: BankSlip; at: string; stake: number; ret: number | null; balanceAfter: number | null };
+export type Skip = { slip: BankSlip; reason: string }; // recorded but not staked under this plan (still shown, with its result)
 export type Point = { t: number; v: number };
 export type BankResult = {
-  bets: Bet[]; skipped: number; points: Point[]; equity: number; cash: number; openStake: number; staked: number; returned: number;
+  bets: Bet[]; skipped: Skip[]; skippedLost: number; skippedWon: number; points: Point[]; equity: number; cash: number; openStake: number; staked: number; returned: number;
   profit: number; roi: number | null; won: number; lost: number; refunded: number; open: number; maxDd: number; maxDdPct: number;
   worstRun: number; avgStake: number | null; peak: number;
 };
@@ -33,6 +34,13 @@ export function stakeFor(s: BankSlip, equity: number, p: Plan): number {
   return x >= p.minStake ? x : 0;
 }
 
+function skipReason(s: BankSlip, equity: number, p: Plan): string {
+  if (p.method !== "kelly") return `puntata sotto il minimo di ${p.minStake} €`;
+  const o = effectiveOdds(s);
+  const f = (s.joint * o - 1) / (o - 1);
+  return f <= 0 ? "nessun vantaggio alla quota registrata" : `Kelly ${(equity * f * p.kelly).toFixed(2)} €, sotto il minimo di ${p.minStake} €`;
+}
+
 // gross return per unit staked: won = effective odds, void / non valutabile = stake back, lost = 0
 function unitReturn(s: BankSlip): number | null {
   if (s.result === "won") return s.payout ?? effectiveOdds(s);
@@ -43,7 +51,8 @@ function unitReturn(s: BankSlip): number | null {
 
 export function simulate(slips: BankSlip[], p: Plan): BankResult {
   type Ev = { t: string; bet: Bet };
-  let cash = p.start, open = 0, staked = 0, returned = 0, skipped = 0;
+  let cash = p.start, open = 0, staked = 0, returned = 0;
+  const skipped: Skip[] = [];
   const bets: Bet[] = [];
   const placements = [...slips].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id);
   // placements and settlements interleave in time: walk them together (a settlement at the same instant comes first)
@@ -72,9 +81,10 @@ export function simulate(slips: BankSlip[], p: Plan): BankResult {
     // first every settlement that happened before this placement
     pending.sort((a, b) => a.t.localeCompare(b.t));
     while (pending.length && pending[0].t <= e.t) settle(pending.shift()!);
-    const stake = Math.min(stakeFor(e.bet.slip, cash + open, p), Math.floor(cash * 100) / 100);
-    if (stake <= 0) {
-      skipped++;
+    const want = stakeFor(e.bet.slip, cash + open, p);
+    const stake = Math.min(want, Math.floor(cash * 100) / 100);
+    if (stake < p.minStake) {
+      skipped.push({ slip: e.bet.slip, reason: want > 0 ? "saldo libero insufficiente" : skipReason(e.bet.slip, cash + open, p) });
       continue;
     }
     e.bet.stake = stake;
@@ -90,7 +100,8 @@ export function simulate(slips: BankSlip[], p: Plan): BankResult {
   const settledStake = bets.filter((b) => b.ret != null).reduce((a, b) => a + b.stake, 0);
   const settledReturn = bets.filter((b) => b.ret != null).reduce((a, b) => a + (b.ret as number), 0);
   return {
-    bets, skipped, points, equity: cash + open, cash, openStake: open, staked, returned, profit: settledReturn - settledStake,
+    bets, skipped, skippedLost: skipped.filter((x) => x.slip.result === "lost").length,
+    skippedWon: skipped.filter((x) => x.slip.result === "won").length, points, equity: cash + open, cash, openStake: open, staked, returned, profit: settledReturn - settledStake,
     roi: settledStake > 0 ? (settledReturn - settledStake) / settledStake : null, won, lost, refunded,
     open: bets.filter((b) => b.ret == null).length, maxDd, maxDdPct, worstRun,
     avgStake: bets.length ? staked / bets.length : null, peak,
