@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:optimizer": "node scripts/optimizer-parity.mjs"
+    "test:optimizer": "node scripts/optimizer-parity.mjs",
+    "test:refresh": "node --experimental-strip-types --no-warnings scripts/refresh-check.mts"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

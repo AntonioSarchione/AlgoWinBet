@@ -42,9 +42,9 @@ jobs:
     steps:
       # job start: the tick fills the minute already paid with free price reads and records the minutes it costs
       - run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # uv installs the cached wheels in a couple of seconds (pip took ~12 s): every run is billed by the started minute
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10.2.0  # no major tags since v8: pinned to the release
         with:
           python-version: "3.12"
           activate-environment: true
@@ -54,7 +54,7 @@ jobs:
       # Local copy of the Turso database (libSQL embedded replica): reads are local instead of one network round trip each,
       # writes still go to Turso. The copy is kept between runs in the Actions cache, so a run only downloads what changed.
       - name: restore database replica
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/turso-replica.db*
           key: turso-replica-${{ github.run_id }}
@@ -76,7 +76,7 @@ jobs:
         run: algowinbet collect-auto --config configs/collect.json --db turso $FORCE_PUBLISH $MANUAL $HISTORY
       - name: save database replica
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/turso-replica.db*
           key: turso-replica-${{ github.run_id }}
