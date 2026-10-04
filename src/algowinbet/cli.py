@@ -559,6 +559,26 @@ def cmd_referees_backfill(a) -> None:
         store.close()
 
 
+def cmd_quotes_check(a) -> None:
+    """Upcoming matches (7 days, optionally of one competition / team): OddsPapi link, Sisal quotes by kind with the newest
+    observation, and the playable selections in the latest publication (no request)."""
+    store = SnapshotStore(a.db)
+    try:
+        now = datetime.now(timezone.utc)
+        run = store.db.execute("SELECT MAX(id) FROM pub_runs").fetchone()[0]
+        links = {fid for (fid,) in store.db.execute("SELECT fixture_id FROM fixture_links WHERE source = 'oddspapi'").fetchall()}
+        for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=7)):
+            if a.text and a.text.lower() not in f"{f.competition} {f.home} {f.away}".lower():
+                continue
+            kinds = store.db.execute("SELECT kind, COUNT(*), MAX(observed_at) FROM quotes WHERE fixture_id = ? AND bookmaker LIKE 'sisal%' "
+                                     "GROUP BY kind", (f.id,)).fetchall()
+            pub = store.db.execute("SELECT n_quotes FROM pub_fixtures WHERE run_id = ? AND fixture_id = ?", (run, f.id)).fetchone()
+            print(f"{f.kickoff:%d/%m %H:%M} {f.competition} | {f.home}-{f.away} | oddspapi {'sì' if f.id in links else 'NO'} | "
+                  f"sisal {', '.join(f'{k} {n} (ultima {m[5:16]})' for k, n, m in kinds) or 'nessuna'} | pubblicate {pub[0] if pub else '-'}")
+    finally:
+        store.close()
+
+
 def cmd_registry_check(a) -> None:
     """Registry diagnosis (no API request): slips recorded per day and per run, and for the matches of a team its recorded
     selections, the half-time / goal-order details stored and the API-Football day reads."""
@@ -1366,6 +1386,10 @@ def build_parser() -> argparse.ArgumentParser:
     rb.add_argument("--config", default="configs/collect.json")
     rb.add_argument("--aliases", default="configs/team_aliases.json")
     rb.set_defaults(fn=cmd_referees_backfill)
+    qk = sub.add_parser("quotes-check", help="quote Sisal delle prossime partite e collegamento OddsPapi (nessuna richiesta)")
+    qk.add_argument("text", nargs="?", default="")
+    qk.add_argument("--db", default="turso")
+    qk.set_defaults(fn=cmd_quotes_check)
     rc = sub.add_parser("registry-check", help="diagnosi del registro: schedine per giorno, dettagli di una partita (nessuna richiesta API)")
     rc.add_argument("team", nargs="?", default="")
     rc.add_argument("--db", default="turso")
