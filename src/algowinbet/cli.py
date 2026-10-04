@@ -623,6 +623,16 @@ def cmd_quotes_check(a) -> None:
         store.close()
 
 
+def cmd_registry_calibration(a) -> None:
+    """Registry calibration against Pinnacle and Sisal closing prices: model error or luck of the matches (no API request)."""
+    from .registrycal import load_rows, print_report, report
+    store = SnapshotStore(a.db)
+    try:
+        print_report(report(load_rows(store)))
+    finally:
+        store.close()
+
+
 def cmd_registry_check(a) -> None:
     """Registry diagnosis (no API request): slips recorded per day and per run, and for the matches of a team its recorded
     selections, the half-time / goal-order details stored and the API-Football day reads."""
@@ -1517,6 +1527,9 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("team", nargs="?", default="")
     rc.add_argument("--db", default="turso")
     rc.set_defaults(fn=cmd_registry_check)
+    rl = sub.add_parser("registry-calibration", help="calibrazione del registro contro le chiusure Pinnacle e Sisal (nessuna richiesta API)")
+    rl.add_argument("--db", default="turso")
+    rl.set_defaults(fn=cmd_registry_calibration)
     tm = sub.add_parser("teams", help="elenco squadre nel database (nessuna richiesta API)")
     tm.add_argument("--db", default="turso")
     tm.set_defaults(fn=cmd_teams)

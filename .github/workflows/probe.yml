@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -65,6 +65,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "model" ]; then algowinbet model-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remapstats" ]; then algowinbet remap-odds --only-stats --db "$DB" && algowinbet stat-coverage --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rules" ]; then pip install -q pypdf && python scripts/sisal_rules.py $ARG; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "calibration" ]; then algowinbet registry-calibration --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "registry" ]; then algowinbet registry-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "referees" ]; then algowinbet referees-backfill --db "$DB" && algowinbet stat-eval --stats cards --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "preview" ]; then algowinbet analysis-preview --db "$DB"; exit $?; fi
