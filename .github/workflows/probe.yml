@@ -77,7 +77,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "results" ]; then algowinbet results-day "${ARG:-$(date -u -d yesterday +%F)}" --comp "$PARAMS" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "health" ]; then
             export TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db
-            algowinbet health --db "$DB" && algowinbet db-backup --out backup/test.db.gz --skip ${ARG:-blobs}; exit $?
+            algowinbet health --save --db "$DB" && algowinbet db-backup --out backup/test.db.gz --skip ${ARG:-blobs}; exit $?
           fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "bench" ]; then algowinbet db-bench; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "raw" ]; then algowinbet raw-last "$ARG" --source "${PARAMS:-goal}" --db "$DB"; exit $?; fi

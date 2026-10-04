@@ -1,6 +1,6 @@
-import { Activity, Database } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Database, HeartPulse, XCircle } from "lucide-react";
 import { ACTIONS_BUDGET } from "@/lib/refresh";
-import { lastTick, parseJSON, systemStatus, usage } from "@/lib/db";
+import { lastTick, latestHealth, parseJSON, systemStatus, usage } from "@/lib/db";
 import { ago, dayTime, shortDate } from "@/app/_components/format";
 import { Empty, Meter } from "@/app/_components/ui";
 
@@ -16,8 +16,17 @@ const LABELS: Record<string, string> = {
   match_stats: "Statistiche partita",
 };
 
+const LEVEL = {
+  ok: { label: "Ok", cls: "status-STRONG", icon: CheckCircle2, state: "pass" },
+  warn: { label: "Attenzione", cls: "status-WATCH", icon: AlertTriangle, state: "warn" },
+  error: { label: "Errore", cls: "status-AVOID", icon: XCircle, state: "fail" },
+} as const;
+const TURSO_FREE_MB = 5000;
+
 export default async function Sistema() {
-  const [st, use, tick] = await Promise.all([systemStatus(), usage(), lastTick()]);
+  const [st, use, tick, health] = await Promise.all([systemStatus(), usage(), lastTick(), latestHealth()]);
+  const worst = health?.checks.some((c) => c.level === "error") ? "error" : health?.checks.some((c) => c.level === "warn") ? "warn" : "ok";
+  const W = LEVEL[worst];
   const backfill = st.jobs.filter((j) => j.name.startsWith("backfill:"));
   type Report = { season: string; competition: string; rows: number; linked: number; unmatched: string[] };
   const datasets = st.jobs
@@ -35,6 +44,69 @@ export default async function Sistema() {
           <p>Raccolta automatica su GitHub Actions, database Turso, analisi pubblicate. Ultima raccolta {ago(tick)}.</p>
         </div>
       </header>
+
+      <div className="split">
+        <section className="card" aria-labelledby="health-title">
+          <div className="card-head">
+            <h2 id="health-title">Controllo di salute</h2>
+            {health && <span className="count">{dayTime(health.at)}</span>}
+            {health && <span className={`status ${W.cls}`}><W.icon size={14} aria-hidden="true" /> {W.label}</span>}
+          </div>
+          {health ? (
+            <>
+              <ul className="crit-list">
+                {health.checks.map((c) => {
+                  const L = LEVEL[c.level];
+                  return (
+                    <li key={c.key}>
+                      <L.icon size={18} aria-hidden="true" className={`crit-${L.state}`} />
+                      <div>
+                        <div className="crit-head"><b>{c.label}</b></div>
+                        <div className="note">{c.detail}</div>
+                      </div>
+                      <span className={`status ${L.cls}`}>{L.label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="note card-pad">
+                Ogni mattina il giro delle 06:05 controlla tutta la catena. Un errore fa fallire quel giro dopo aver finito il lavoro: arriva una sola
+                email da GitHub. Le attenzioni restano solo qui.
+              </p>
+            </>
+          ) : (
+            <Empty icon={HeartPulse} title="Nessun controllo ancora">Il primo arriva con il giro del mattino.</Empty>
+          )}
+        </section>
+        <section className="card" aria-labelledby="space-title">
+          <div className="card-head"><h2 id="space-title">Spazio del database</h2><span className="count">piano gratuito Turso</span></div>
+          {health?.dbBytes != null ? (
+            <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Meter
+                label="Turso · totale (MB)"
+                used={Math.round(health.dbBytes / 1e6)}
+                limit={TURSO_FREE_MB}
+                hint={health.weekGrowth ? `Prezzi: circa +${Math.round(health.weekGrowth / 1e6)} MB a settimana` : undefined}
+              />
+              <table className="compact">
+                <thead><tr><th>Tabella</th><th className="num">MB</th><th className="num">Quota</th></tr></thead>
+                <tbody>
+                  {Object.entries(health.tables).slice(0, 6).map(([t, b]) => (
+                    <tr key={t}>
+                      <td>{LABELS[t] ?? t}</td>
+                      <td className="num">{(b / 1e6).toFixed(1)}</td>
+                      <td className="num muted">{health.dbBytes ? `${((100 * b) / health.dbBytes).toFixed(0)}%` : "–"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="note">Copia compatta di tutto il database ogni lunedì, tenuta 3 settimane tra gli artifact del workflow quality.</p>
+            </div>
+          ) : (
+            <Empty icon={Database} title="Misura in arrivo">Il giro del mattino misura lo spazio sulla copia locale del database.</Empty>
+          )}
+        </section>
+      </div>
 
       <div className="kpis" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
         {Object.entries(st.counts).map(([k, v]) => (

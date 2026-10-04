@@ -476,6 +476,7 @@ th.num .th-sort { justify-content: flex-end; }
 .crit-pass { color: var(--good); }
 .crit-fail, .crit-alarm { color: var(--bad); }
 .crit-open { color: var(--muted); }
+.crit-warn { color: var(--warn); }
 /* lineups drawn on a pitch: vertical on phones (home on top), horizontal on wide screens (home on the left) */
 .lineups { display: flex; flex-direction: column; gap: 12px; }
 .pitch-heads { display: grid; gap: 12px; }

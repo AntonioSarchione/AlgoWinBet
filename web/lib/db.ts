@@ -414,6 +414,21 @@ export type QualityReport = {
 };
 export type QualityRun = { id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: QualityReport };
 
+// Morning health check (src/algowinbet/health.py): one small row, read uncached so the page shows the latest report.
+export type HealthCheck = { key: string; label: string; level: "ok" | "warn" | "error"; detail: string };
+export type Health = { at: string; ok: boolean; checks: HealthCheck[]; dbBytes: number | null; tables: Record<string, number>; weekGrowth: number | null };
+export const latestHealth = cache(async (): Promise<Health | null> => {
+  try {
+    const r = await all<{ at: string; ok: number; report: string }>("SELECT at, ok, report FROM health ORDER BY id DESC LIMIT 1");
+    if (!r[0]) return null;
+    const rep = parseJSON<{ checks?: HealthCheck[]; db_bytes?: number | null; tables?: Record<string, number>; week_growth_bytes?: number | null }>(r[0].report, {});
+    return { at: r[0].at, ok: Boolean(r[0].ok), checks: rep.checks ?? [], dbBytes: rep.db_bytes ?? null, tables: rep.tables ?? {}, weekGrowth: rep.week_growth_bytes ?? null };
+  } catch (e) {
+    if (/no such table/i.test(String(e))) return null; // created by the first morning check
+    throw e;
+  }
+});
+
 export const latestQuality = cache(async (): Promise<QualityRun | null> => {
   try {
     const last = await all<{ id: number }>("SELECT id FROM quality_runs ORDER BY id DESC LIMIT 1");

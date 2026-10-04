@@ -44,3 +44,20 @@ jobs:
           TURSO_REPLICA_PATH: data/turso-replica.db
           WEEKS: ${{ inputs.weeks }}
         run: algowinbet quality --db turso --weeks "${WEEKS:-60}" --save
+      # Weekly backup: a compact, consistent copy of the whole database (VACUUM INTO + gzip, about 50 MB in October 2026),
+      # kept as a run artifact for 3 weeks (3 copies, inside the 500 MB of artifact storage of a free private repo).
+      # Restore: download the artifact, gunzip, then `turso db create <name> --from-file algowinbet-<date>.db`.
+      - name: weekly backup
+        if: success()
+        env:  # reads the local replica only: no credentials needed
+          TURSO_MODE: replica
+          TURSO_REPLICA_PATH: data/turso-replica.db
+        run: algowinbet db-backup --out "backup/algowinbet-$(date -u +%F).db.gz"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: backup/*.db.gz
+          retention-days: 21
+          compression-level: 0  # already gzipped
+          if-no-files-found: error

@@ -106,7 +106,7 @@ flowchart LR
 | **Partita** | Analisi profonda: probabilità per mercato, formazioni, andamento delle quote, indisponibili |
 | **Registro** | Risultati a carta, valore contro il mercato, criterio di passaggio, calibrazione reale |
 | **Qualità** | Replay settimanale: log loss contro mercato e chiusura, calibrazione, meta-modello |
-| **Sistema** | Stato della raccolta, budget delle fonti, minuti GitHub del mese, ultimi run |
+| **Sistema** | Controllo di salute del mattino, spazio del database per tabella, budget delle fonti, minuti GitHub del mese |
 
 ## Regole del gioco
 
@@ -170,7 +170,8 @@ partita. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il 
 2. **Calibrazione sul registro**: le prime selezioni chiuse vincono più spesso del previsto; ricontrollare con più campione, ora che
    meta-modello e calibrazione sono di nuovo attivi.
 3. **Importanza dei giocatori** (Fase 6-bis) da minuti, gol e xG di API-Football: un assente pesa per quanto vale davvero.
-4. **Fondamenta**: backup settimanale compatto del database, controllo di salute con allarmi, dimensione e pulizia dei dati in Sistema.
+4. **Spazio dei prezzi**: la tabella delle quote è già 205 MB dopo la prima settimana di raccolta; prima del limite gratuito di Turso serve una regola
+   per sfoltire lo storico delle partite finite (tenendo apertura, chiusura e i punti usati dal modello).
 5. **Taratura dell'EV prudente** quando il registro avrà circa 300 giocate chiuse.
 6. **Fase 7**: verificare corner e 1X2 cartellini sul registro (CLV) dopo 2–3 settimane; contare i doppi gialli inglesi dagli eventi.
 7. **Fase 8 · My Combo**: prima verificare se OddsPapi espone i prezzi Sisal delle combo sulla stessa partita.
@@ -202,6 +203,15 @@ Variabili Vercel: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `DASHBOARD_PASSWORD`
 
 Dettagli sulle fonti: [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md). Specifica originale:
 [docs/AlgoWinBet_Specifiche_Tecniche_e_Funzionali.pdf](docs/AlgoWinBet_Specifiche_Tecniche_e_Funzionali.pdf).
+
+## Se qualcosa va storto
+
+- **Email "collect failed" dal giro del mattino**: il controllo di salute ha trovato un errore. Il dettaglio è nella pagina Sistema e
+  nell'ultima riga del log (`::error::`). Tutto il lavoro del giro è già stato fatto prima del fallimento.
+- **Ripristino del database**: ogni lunedì il workflow `quality` salva una copia compatta (artifact `db-backup-*`, tenuto 3 settimane).
+  Scarica l'artifact, decomprimi il file `.db.gz`, poi `turso db create <nome> --from-file algowinbet-<data>.db` e aggiorna
+  `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` su GitHub e Vercel.
+- **Minuti GitHub quasi finiti**: sopra 1.700 previsti il sistema salta i giri senza partite vicine, sopra 1.900 fa solo il giro del mattino.
 
 ## Limiti onesti
 

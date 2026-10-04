@@ -21,7 +21,8 @@ from pathlib import Path
 
 SCHEMA = "CREATE TABLE IF NOT EXISTS health(id INTEGER PRIMARY KEY, at TEXT, ok INTEGER, report TEXT);"
 KEEP = 60
-TURSO_FREE_BYTES = 5 * 1024**3  # Turso free plan storage
+TURSO_FREE_BYTES = 5_000_000_000  # Turso free plan storage (5 GB)
+FULL_SOON_DAYS = 90  # warn when the growth of the last week fills the plan within this many days
 DB_WARN, DB_ERROR = 0.7, 0.9
 STALE = timedelta(hours=30)  # a daily job missed once
 SOURCES = {"goal-api": "GOAL API", "oddspapi": "OddsPapi", "api-football": "API-Football"}
@@ -147,12 +148,22 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
     path = replica_path()
     size = database_size(path)
     sizes = table_sizes(path) if path else {}
+    growth = None
     if size is not None:
         frac = size / TURSO_FREE_BYTES
         top = ", ".join(f"{k} {v / 1e6:.0f} MB" for k, v in list(sizes.items())[:3])
-        checks.append(Check("db", "Spazio del database", "error" if frac >= DB_ERROR else "warn" if frac >= DB_WARN else "ok",
-                            f"{size / 1e6:.0f} MB su {TURSO_FREE_BYTES / 1e9:.1f} GB ({frac:.0%})" + (f" · più grandi: {top}" if top else "")))
-    extra = {"db_bytes": size, "tables": sizes}
+        # weekly growth from the price rows (most of the database): rows of the last 7 days x bytes per row of the table
+        rows = _one(db, "SELECT COUNT(*) FROM quotes") or 0
+        week = _one(db, "SELECT COUNT(*) FROM quotes WHERE observed_at >= ?", ((now - timedelta(days=7)).isoformat(),)) or 0
+        if rows and sizes.get("quotes"):
+            growth = week * sizes["quotes"] / rows
+        days_left = (TURSO_FREE_BYTES - size) / (growth / 7) if growth else None
+        lvl = "error" if frac >= DB_ERROR else "warn" if frac >= DB_WARN or (days_left is not None and days_left < FULL_SOON_DAYS) else "ok"
+        checks.append(Check("db", "Spazio del database", lvl,
+                            f"{size / 1e6:.0f} MB su {TURSO_FREE_BYTES / 1e9:.0f} GB ({frac:.0%})"
+                            + (f" · prezzi +{growth / 1e6:.0f} MB a settimana, piano pieno tra circa {days_left / 30:.0f} mesi" if days_left else "")
+                            + (f" · più grandi: {top}" if top else "")))
+    extra = {"db_bytes": size, "tables": sizes, "week_growth_bytes": growth}
     return checks, extra
 
 
