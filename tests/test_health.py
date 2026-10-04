@@ -58,3 +58,18 @@ def test_backup_is_a_readable_copy_without_the_skipped_tables(tmp_path):
     assert con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='blobs'").fetchone()[0] == 0
     sizes = health.table_sizes(src)
     assert sizes == {} or max(sizes, key=sizes.get) == "blobs"
+
+
+def test_net_growth_reads_the_quote_rows_of_a_report_six_days_old():
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from algowinbet.health import SCHEMA, _rows_then
+    from algowinbet.snapshots import SnapshotStore as _S
+    store = _S(":memory:")
+    store.db.executescript(SCHEMA)
+    now = _dt(2026, 10, 20, 6, tzinfo=_tz.utc)
+    for days, n in ((8, 1000), (7, 1200), (2, 5000)):
+        store.db.execute("INSERT INTO health(at, ok, report) VALUES(?,?,?)", ((now - _td(days=days)).isoformat(), 1, _json.dumps({"quote_rows": n})))
+    days, rows = _rows_then(store.db, now)
+    assert round(days) == 7 and rows == 1200  # the newest report at least 6 days old
+    assert _rows_then(store.db, now - _td(days=5)) is None  # no report old enough yet: fall back to the rows of the last week

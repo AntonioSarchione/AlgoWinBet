@@ -703,6 +703,18 @@ def cmd_lineup_history_check(a) -> None:
         store.close()
 
 
+def cmd_quotes_prune(a) -> None:
+    """Quotes retention by hand: --dry-run counts what the morning run would delete (no API request)."""
+    from .retention import prune_quotes
+    store = SnapshotStore(a.db)
+    try:
+        pr = prune_quotes(store, datetime.now(timezone.utc), max_matches=a.max, max_seconds=a.max_seconds, dry_run=a.dry_run)
+        print(f"{'da togliere' if a.dry_run else 'tolti'}: {pr['deleted']} prezzi su {pr['before']} di {pr['matches']} partite finite "
+              f"(ultima {pr['last_kickoff'] or '-'})")
+    finally:
+        store.close()
+
+
 def cmd_registry_calibration(a) -> None:
     """Registry calibration against Pinnacle and Sisal closing prices: model error or luck of the matches (no API request)."""
     from .registrycal import load_rows, print_report, report
@@ -1157,6 +1169,15 @@ def cmd_collect_auto(a) -> None:
                     print(f"formazioni storiche: {lst.requests} lette, {lst.saved}; ancora da leggere {left}", flush=True)
             except Exception as e:  # noqa: BLE001 - history only: never a reason to lose the morning run
                 print(f"formazioni storiche: non riuscito ({type(e).__name__}: {e})")
+        if daily:
+            # quotes retention: finished matches keep only the price points anything reads again (Turso free plan: 5 GB)
+            try:
+                from .retention import prune_quotes
+                pr = prune_quotes(store, now, max_seconds=90)
+                if pr["matches"]:
+                    print(f"quote sfoltite: {pr['matches']} partite finite, tolti {pr['deleted']} prezzi su {pr['before']}", flush=True)
+            except Exception as e:  # noqa: BLE001 - housekeeping: never a reason to lose the morning run
+                print(f"sfoltimento quote: non riuscito ({type(e).__name__}: {e})")
         failed: list[str] = []
         if daily or a.health:
             from .health import print_health, run_health, save_health
@@ -1634,6 +1655,12 @@ def build_parser() -> argparse.ArgumentParser:
     lh.add_argument("--db", default="turso")
     lh.add_argument("--aliases", default="configs/team_aliases.json")
     lh.set_defaults(fn=cmd_lineup_history_check)
+    qp = sub.add_parser("quotes-prune", help="sfoltisce le quote delle partite finite da oltre 7 giorni (nessuna richiesta API)")
+    qp.add_argument("--dry-run", action="store_true", help="conta soltanto, non cancella")
+    qp.add_argument("--max", type=int, default=400)
+    qp.add_argument("--max-seconds", type=float, default=600)
+    qp.add_argument("--db", default="turso")
+    qp.set_defaults(fn=cmd_quotes_prune)
     rl = sub.add_parser("registry-calibration", help="calibrazione del registro contro le chiusure Pinnacle e Sisal (nessuna richiesta API)")
     rl.add_argument("--db", default="turso")
     rl.set_defaults(fn=cmd_registry_calibration)

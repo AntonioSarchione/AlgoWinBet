@@ -152,19 +152,39 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
     if size is not None:
         frac = size / TURSO_FREE_BYTES
         top = ", ".join(f"{k} {v / 1e6:.0f} MB" for k, v in list(sizes.items())[:3])
-        # weekly growth from the price rows (most of the database): rows of the last 7 days x bytes per row of the table
+        # weekly growth from the price rows (most of the database) x bytes per row of the table: the net change since a health
+        # report of 6+ days ago (finished matches get pruned, see retention.py), else the rows observed in the last 7 days
         rows = _one(db, "SELECT COUNT(*) FROM quotes") or 0
-        week = _one(db, "SELECT COUNT(*) FROM quotes WHERE observed_at >= ?", ((now - timedelta(days=7)).isoformat(),)) or 0
+        then = _rows_then(db, now)
+        if then:
+            week = (rows - then[1]) * 7 / max(then[0], 1e-9)
+        else:
+            week = _one(db, "SELECT COUNT(*) FROM quotes WHERE observed_at >= ?", ((now - timedelta(days=7)).isoformat(),)) or 0
         if rows and sizes.get("quotes"):
-            growth = week * sizes["quotes"] / rows
+            growth = max(0.0, week * sizes["quotes"] / rows)
         days_left = (TURSO_FREE_BYTES - size) / (growth / 7) if growth else None
         lvl = "error" if frac >= DB_ERROR else "warn" if frac >= DB_WARN or (days_left is not None and days_left < FULL_SOON_DAYS) else "ok"
         checks.append(Check("db", "Spazio del database", lvl,
                             f"{size / 1e6:.0f} MB su {TURSO_FREE_BYTES / 1e9:.0f} GB ({frac:.0%})"
                             + (f" · prezzi +{growth / 1e6:.0f} MB a settimana, piano pieno tra circa {days_left / 30:.0f} mesi" if days_left else "")
                             + (f" · più grandi: {top}" if top else "")))
-    extra = {"db_bytes": size, "tables": sizes, "week_growth_bytes": growth}
+    extra = {"db_bytes": size, "tables": sizes, "week_growth_bytes": growth,
+             "quote_rows": rows if size is not None else None}  # next week's net growth
     return checks, extra
+
+
+def _rows_then(db, now: datetime) -> tuple[float, int] | None:
+    """(days ago, quote rows) of the newest saved health report at least 6 days old that counted the rows."""
+    try:
+        rows = db.execute("SELECT at, report FROM health WHERE at <= ? ORDER BY id DESC LIMIT 5",
+                          ((now - timedelta(days=6)).isoformat(),)).fetchall()
+    except Exception:  # noqa: BLE001 - no health table yet
+        return None
+    for at, rep in rows:
+        n = json.loads(rep).get("quote_rows")
+        if n is not None:
+            return (now - datetime.fromisoformat(at)).total_seconds() / 86400, int(n)
+    return None
 
 
 def save_health(store, checks: list[Check], extra: dict, now: datetime) -> None:

@@ -159,9 +159,9 @@ partita. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il 
 | 6 | Paper trading automatico e criterio di passaggio | 🟡 registro attivo, criterio severo in corso |
 | 6-bis | Formazioni, indisponibili, importanza dei giocatori | 🟡 formazioni e indisponibili attivi |
 | 7 | Corner e cartellini | 🟡 attivi corner e 1X2 cartellini |
-| 8 | My Combo (più selezioni della stessa partita) | ⏳ |
+| 8 | My Combo (più selezioni della stessa partita) | ✅ quota Sisal inserita a mano |
 | 9 | Marcatori | ⏳ |
-| 9-bis | Bankroll (sezione dedicata) | ⏳ |
+| 9-bis | Bankroll (sezione dedicata) | 🟡 simulazione del saldo sul registro |
 | 10 | LightGBM | ⏳ con più storico |
 
 ## Prossimi passi
@@ -170,11 +170,13 @@ partita. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il 
 2. **Calibrazione sul registro**: le prime selezioni chiuse vincono più spesso del previsto; ricontrollare con più campione, ora che
    meta-modello e calibrazione sono di nuovo attivi.
 3. **Importanza dei giocatori** (Fase 6-bis) da minuti, gol e xG di API-Football: un assente pesa per quanto vale davvero.
-4. **Spazio dei prezzi**: la tabella delle quote è già 205 MB dopo la prima settimana di raccolta; prima del limite gratuito di Turso serve una regola
-   per sfoltire lo storico delle partite finite (tenendo apertura, chiusura e i punti usati dal modello).
+4. **Spazio dei prezzi**: dal giro del mattino le partite finite da oltre 7 giorni tengono solo apertura, chiusure e i prezzi ai
+   checkpoint usati da analisi e qualità; controllare che la crescita netta settimanale scenda nella pagina Sistema.
 5. **Taratura dell'EV prudente** quando il registro avrà circa 300 giocate chiuse.
 6. **Fase 7**: verificare corner e 1X2 cartellini sul registro (CLV) dopo 2–3 settimane; contare i doppi gialli inglesi dagli eventi.
-7. **Fase 8 · My Combo**: prima verificare se OddsPapi espone i prezzi Sisal delle combo sulla stessa partita.
+7. **Quote Sisal stimate**: per le partite che Sisal non quota sul fornitore, la quota stimata da Pinnacle va confrontata con quella vera
+   di Sisal; se lo scarto è sistematico, correggere il rendimento stimato.
+8. **Fase 9 · Marcatori** e **Bankroll**: avvisi sul saldo (calo massimo, serie negative) quando il registro avrà più schedine chiuse.
 
 Già automatico: a ogni nuova versione del modello il giro del mattino lancia subito il replay di qualità (massimo 2 tentativi, mai vicino
 al limite dei minuti), così la calibrazione non resta spenta fino al lunedì.
