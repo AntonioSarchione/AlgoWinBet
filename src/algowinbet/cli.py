@@ -1136,6 +1136,15 @@ def cmd_collect_auto(a) -> None:
             print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
                                      for s in ("goal-api", "oddspapi", "api-football")))
+        if daily and goal is not None:
+            # Fase 6-bis: XI of finished domestic matches with the GOAL requests the day leaves over (newest first: 2025/26,
+            # then 2024/25, then every new matchday); about 830 requests and 3 minutes until the backlog is gone
+            try:
+                lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240, 120)
+                if lst is not None:
+                    print(f"formazioni storiche: {lst.requests} lette, {lst.saved}; ancora da leggere {left}", flush=True)
+            except Exception as e:  # noqa: BLE001 - history only: never a reason to lose the morning run
+                print(f"formazioni storiche: non riuscito ({type(e).__name__}: {e})")
         failed: list[str] = []
         if daily or a.health:
             from .health import print_health, run_health, save_health
