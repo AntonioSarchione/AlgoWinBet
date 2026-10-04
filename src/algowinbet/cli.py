@@ -654,6 +654,18 @@ def cmd_lineups_backfill(a) -> None:
         store.close()
 
 
+def cmd_lineup_eval(a) -> None:
+    """Fase 6-bis acceptance test: log loss with and without the official XI, walk-forward (no API request)."""
+    from .lineupeval import evaluate_lineups, print_lineup_eval
+    from .modeleval import default_window
+    store = SnapshotStore(a.db)
+    try:
+        start, end = default_window(weeks=a.weeks)
+        print_lineup_eval(evaluate_lineups(SnapshotProvider(store), _cfg(a), start, end + timedelta(days=7), DOMESTIC))
+    finally:
+        store.close()
+
+
 def cmd_lineup_history_check(a) -> None:
     """One-shot check (a few GOAL requests): does GOAL return the XI of finished matches, recent and a season ago, and do
     their players resolve to the roster? Decides whether the player impact model can be trained on GOAL lineups."""
@@ -1612,6 +1624,11 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--db", default="turso")
     lb.add_argument("--aliases", default="configs/team_aliases.json")
     lb.set_defaults(fn=cmd_lineups_backfill)
+    le = sub.add_parser("lineup-eval", help="le formazioni ufficiali migliorano le probabilità? (replay, nessuna richiesta API)")
+    le.add_argument("--weeks", type=int, default=10)
+    le.add_argument("--config", default=None)
+    le.add_argument("--db", default="turso")
+    le.set_defaults(fn=cmd_lineup_eval)
     lh = sub.add_parser("lineup-history-check", help="GOAL restituisce le formazioni delle partite finite? (2 richieste GOAL)")
     lh.add_argument("--comp", default="Serie A")
     lh.add_argument("--db", default="turso")

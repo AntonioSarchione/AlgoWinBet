@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -65,6 +65,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "model" ]; then algowinbet model-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remapstats" ]; then algowinbet remap-odds --only-stats --db "$DB" && algowinbet stat-coverage --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rules" ]; then pip install -q pypdf && python scripts/sisal_rules.py $ARG; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupeval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineup-eval --weeks "${ARG:-10}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuphist" ]; then algowinbet lineup-history-check --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "calibration" ]; then algowinbet registry-calibration --db "$DB"; exit $?; fi
