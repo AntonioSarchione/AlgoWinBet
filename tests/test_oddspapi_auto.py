@@ -209,8 +209,16 @@ def test_prematch_history_saves_thinned_price_paths_and_syncs_the_budget():
     assert sum("historical-odds" in u for u in t.calls) == 2 and st.saved["quotes"] == 4 and not st.skipped
     assert {r[0] for r in store.db.execute("SELECT kind FROM quotes WHERE observed_at < '2026-10-10T09'").fetchall()} == {"current"}
     assert "/account" in t.calls[-1] and c.budget.used()[1] == 7  # provider counter synced after the free calls
+    # the price in force when read is stamped with the read time (kind 'seen'): unchanged prices stay in the 24h window
+    later = early + timedelta(hours=1)
+    col.now = lambda: later
     col.sync_prematch_history()  # a newer path replaces the older payload of the same fixture
+    seen = store.db.execute("SELECT fixture_id, odds, observed_at FROM quotes WHERE kind='seen'").fetchall()
+    assert seen and all(r[2] == later.isoformat() and r[1] == 2.4 for r in seen)
     assert store.db.execute("SELECT COUNT(*) FROM raw_requests WHERE endpoint='/historical-odds'").fetchone()[0] == 2
+    col.now = lambda: later + timedelta(hours=1)
+    col.sync_prematch_history()
+    assert store.db.execute("SELECT COUNT(*) FROM quotes WHERE kind='seen'").fetchone()[0] == len(seen)  # only the newest kept
 
 
 def test_thin_history_keeps_opening_checkpoints_and_latest():

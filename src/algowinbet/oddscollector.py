@@ -43,6 +43,18 @@ def thin_history(quotes: list[OddsQuote], kickoff: datetime, now: datetime) -> l
     return out
 
 
+def seen_at(quotes: list[OddsQuote], now: datetime) -> list[OddsQuote]:
+    """The price in force at the fetch, per selection, stamped with the fetch time (kind 'seen'). A price path dates each
+    point when the price CHANGED: a Sisal price unchanged for more than a day would fall out of the analysis' 24-hour window
+    although we have just read it as still on offer."""
+    last: dict[tuple, OddsQuote] = {}
+    for q in quotes:
+        k = (q.market_code, q.selection, q.line, q.bookmaker)
+        if k not in last or q.observed_at > last[k].observed_at:
+            last[k] = q
+    return [q.model_copy(update={"observed_at": now, "kind": "seen"}) for q in last.values() if q.observed_at <= now]
+
+
 class OddsCollector:
     def __init__(self, client: OddsPapiClient, store: SnapshotStore, tournament_ids: list[str], bookmakers: list[str],
                  names: TeamNames | None = None, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -160,9 +172,13 @@ class OddsCollector:
                 env = self.client.get("/historical-odds", {"fixtureId": ext_id, "bookmakers": ",".join(books)})
                 c1 = clock()
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
-                quotes = thin_history(m.history(env["data"], fx, closing=False), fx.kickoff, t)
+                path = m.history(env["data"], fx, closing=False)
+                quotes = thin_history(path, fx.kickoff, t)
                 c2 = clock()
                 st.add("quotes", self.store.save_quotes(SOURCE, quotes, raw_id))
+                if t < fx.kickoff:  # only the newest confirmation is kept
+                    self.store.db.execute("DELETE FROM quotes WHERE fixture_id=? AND source=? AND kind='seen'", (fid, SOURCE))
+                    self.store.save_quotes(SOURCE, seen_at(path, t), raw_id)
                 c3 = clock()
                 self._drop_older_paths(raw_id)
                 c4 = clock()
