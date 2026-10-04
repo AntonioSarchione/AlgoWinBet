@@ -155,7 +155,9 @@ def test_impact_direction_and_uncertainty():
 
 def test_impact_model_learns_from_lineup_history():
     prov = MockProvider(seed=7, past_rounds=24, player_effect_scale=3.0, stats_informed=False)
-    eng = Engine(prov, Config())
+    cfg = Config()
+    cfg.model.lineup_impact = "learned"
+    eng = Engine(prov, cfg)
     comp = prov.list_competitions()[0]
     imp = eng.impact(comp, prov.as_of)
     assert imp is not None and imp.learned and imp.n_obs.sum() > 0

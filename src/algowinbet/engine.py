@@ -211,7 +211,7 @@ class Engine:
         return model, boots
 
     def impact(self, competition: str, cutoff: datetime) -> PlayerImpactModel | None:
-        if not self.use_lineups:
+        if not self.use_lineups or self.cfg.model.lineup_impact == "off":
             return None
         key = (competition, cutoff)
         if key not in self._impact:
@@ -231,7 +231,10 @@ class Engine:
                 for r in hist:
                     lh, la = model.expected_goals(r.home, r.away)
                     offsets[(r.fixture_id, "home")], offsets[(r.fixture_id, "away")] = math.log(lh), math.log(la)
-                self._impact[key] = imp.fit(lus, hist, offsets).set_current(base_rates(roster, recent))
+                if self.cfg.model.lineup_impact == "learned":
+                    imp.fit(lus, hist, offsets)
+                imp.set_current(base_rates(roster, recent)).scale = self.cfg.model.lineup_scale
+                self._impact[key] = imp
         return self._impact[key]
 
     # -------------------------------------------------------------- analysis

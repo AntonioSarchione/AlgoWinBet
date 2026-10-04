@@ -59,6 +59,7 @@ class PlayerImpactModel:
         self.learned = False
         self.sbar = np.array([base[i] for i in self.ids])
         self.sbar_now = self.sbar  # usual start rate today (recent matches): transfers and new regulars
+        self.scale = 1.0  # multiplies the shift (lineup_scale)
 
     def set_current(self, base_now: dict[str, float]) -> "PlayerImpactModel":
         """Prediction uses the recent start rates (a player who left starts 0% now); the fit keeps the whole-window ones."""
@@ -139,6 +140,8 @@ class PlayerImpactModel:
         unc_a = (away.source != "confirmed") * (a**2 * pa * (1 - pa) * in_a)
         var_h = (self.sd_a**2 * dh_s**2).sum() + (self.sd_d**2 * da_s**2).sum() + unc_h.sum() + (d**2 * pa * (1 - pa) * in_a * (away.source != "confirmed")).sum()
         var_a = (self.sd_a**2 * da_s**2).sum() + (self.sd_d**2 * dh_s**2).sum() + unc_a.sum() + (d**2 * ph * (1 - ph) * in_h * (home.source != "confirmed")).sum()
+        eff_h, eff_a = eff_h * self.scale, eff_a * self.scale
+        var_h, var_a = var_h * self.scale**2, var_a * self.scale**2
         dh, da_ = float(np.clip(eff_h.sum(), -0.5, 0.5)), float(np.clip(eff_a.sum(), -0.5, 0.5))
         contribs: list[tuple[str, str, float]] = []
         for k, i in enumerate(self.ids):

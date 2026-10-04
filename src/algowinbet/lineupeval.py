@@ -28,8 +28,25 @@ def _ll(p: dict[str, float], hg: int, ag: int) -> tuple[float, float, float]:
             -math.log(max(p["BTTS"] if btts else 1 - p["BTTS"], 1e-12)))
 
 
-def evaluate_lineups(provider, cfg: Config, start: datetime, end: datetime, competitions: list[str]) -> dict:
+VARIANTS = {"priori per ruolo": {"lineup_impact": "prior"}, "appreso": {"lineup_impact": "learned"},
+            "appreso ×0.5": {"lineup_impact": "learned", "lineup_scale": 0.5}, "priori ×0.5": {"lineup_impact": "prior", "lineup_scale": 0.5}}
+
+
+def evaluate_lineups(provider, cfg: Config, start: datetime, end: datetime, competitions: list[str],
+                     variants: dict[str, dict] | None = None) -> dict:
+    """{variant: report}; each variant against the same matches without the XI."""
+    import copy
     frozen = _Frozen(provider, end)
+    out = {}
+    for name, changes in (variants or VARIANTS).items():
+        c = copy.deepcopy(cfg)
+        for k, v in changes.items():
+            setattr(c.model, k, v)
+        out[name] = _evaluate(frozen, provider, c, start, end, competitions)
+    return out
+
+
+def _evaluate(frozen, provider, cfg: Config, start: datetime, end: datetime, competitions: list[str]) -> dict:
     eng = Engine(frozen, cfg, use_lineups=True)
     finished = [r for r in frozen.rows if start <= r.kickoff < end and r.competition in competitions]
     weeks: dict[datetime, list] = defaultdict(list)
@@ -85,7 +102,13 @@ def evaluate_lineups(provider, cfg: Config, start: datetime, end: datetime, comp
             "weeks": len(weeks)}
 
 
-def print_lineup_eval(rep: dict) -> None:
+def print_lineup_eval(reps: dict) -> None:
+    for name, rep in reps.items():
+        print(f"\n=== {name} ===")
+        _print_one(rep)
+
+
+def _print_one(rep: dict) -> None:
     print(f"Formazioni ufficiali nel modello: {rep['weeks']} settimane, spostamento medio dei gol attesi {rep['mean_shift']:.3f} (log)")
     print("differenza di log loss con formazione − senza (negativo = meglio), ±intervallo 95%")
     print(f"  {'gruppo':<18}{'partite':>8}  {'LL 1X2 senza':>13} {'diff 1X2':>16} {'diff O2.5':>16} {'diff GG':>16}")
