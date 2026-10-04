@@ -49,7 +49,9 @@ class ModelCfg(BaseModel):
     # Official XI / injuries in the goal expectations (Fase 6-bis): "learned" fits the player effects on the stored XI,
     # "prior" uses only the per-role priors, "off" ignores lineups. lineup_scale multiplies the resulting shift.
     # Chosen by `lineup-eval` (walk-forward log loss); a change needs a clear gain (~0.005 on 1X2).
-    lineup_impact: str = "prior"
+    # 2026-10-04 on 364 matches (partial history): prior +0.0015 +/- 0.0067, learned +0.0031 +/- 0.0073 -> off (no proven
+    # gain; quality replay and calibration are measured without lineups). Re-test when the 2025/26 XI are all stored.
+    lineup_impact: str = "off"
     lineup_scale: float = 1.0
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
