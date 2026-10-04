@@ -633,8 +633,10 @@ def lineup_backfill(store, names, now: datetime, since: str, max_requests: int, 
     left = (guard.remaining()["daily"] or 0) - keep
     if left <= 0:
         return None, 0
-    coll = GoalCollector(GoalApiClient(store=store, budget=guard), store, [], names)
-    st = coll.backfill_lineups(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc), min(max_requests, left), max_seconds)
+    # no raw payloads and no per-request budget write: the backfill charges the budget once per batch
+    coll = GoalCollector(GoalApiClient(), store, [], names)
+    st = coll.backfill_lineups(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc), min(max_requests, left), max_seconds,
+                               guard=guard)
     return st, len(coll.pending_lineup_history(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc)))
 
 

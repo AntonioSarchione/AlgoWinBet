@@ -65,7 +65,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "model" ]; then algowinbet model-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remapstats" ]; then algowinbet remap-odds --only-stats --db "$DB" && algowinbet stat-coverage --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rules" ]; then pip install -q pypdf && python scripts/sisal_rules.py $ARG; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuphist" ]; then algowinbet lineup-history-check --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "calibration" ]; then algowinbet registry-calibration --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "registry" ]; then algowinbet registry-check "$ARG" --db "$DB"; exit $?; fi
