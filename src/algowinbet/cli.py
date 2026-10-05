@@ -999,6 +999,40 @@ def cmd_boost_eval(a) -> None:
         store.close()
 
 
+def cmd_boost_train(a) -> None:
+    """Fase 10 shadow test: train the booster once on the matches before boost.SHADOW_FROM and freeze it (no API request)."""
+    from .boost import DESIGN, load_booster, train_frozen
+    store = SnapshotStore(a.db)
+    try:
+        if load_booster(store) and not a.force:
+            print(f"booster {DESIGN} già congelato: il test in ombra usa quello (--force per sostituirlo e ricominciare)")
+            return
+        rid, b, n = train_frozen(SnapshotProvider(store), _cfg(a), store, datetime.now(timezone.utc))
+        print(f"booster {DESIGN} congelato (id {rid}): {n} partite di addestramento, {b.best} giri utili")
+        if b.importance():
+            print("peso delle variabili: " + ", ".join(f"{k} {v:.0%}" for k, v in list(b.importance().items())[:8]))
+    finally:
+        store.close()
+
+
+def cmd_boost_shadow(a) -> None:
+    """Fase 10 shadow test: the frozen booster against Dixon-Coles on the cup matches since it was frozen (no API request)."""
+    from .boost import print_shadow, save_shadow, shadow_report
+    from .modeleval import default_window
+    store = SnapshotStore(a.db)
+    try:
+        now = datetime.now(timezone.utc)
+        rep = shadow_report(SnapshotProvider(store), _cfg(a), store, default_window(now, 1)[1])
+        if rep is None:
+            print("nessun booster congelato: prima boost-train")
+            return
+        print_shadow(rep)
+        if a.save:
+            save_shadow(store, rep, now)
+    finally:
+        store.close()
+
+
 def cmd_model_eval(a) -> None:
     """Walk-forward comparison of model variants on the stored results (no API request)."""
     from .modeleval import VARIANTS, default_window, evaluate, print_report
@@ -1602,6 +1636,16 @@ def build_parser() -> argparse.ArgumentParser:
     qa.add_argument("--save", action="store_true", help="salva il report per la pagina Qualità del modello")
     qa.add_argument("--config")
     qa.set_defaults(fn=cmd_quality)
+    bt = sub.add_parser("boost-train", help="Fase 10: addestra e congela il booster del test in ombra (nessuna richiesta API)")
+    bt.add_argument("--db", default="turso")
+    bt.add_argument("--force", action="store_true")
+    bt.add_argument("--config")
+    bt.set_defaults(fn=cmd_boost_train)
+    bs = sub.add_parser("boost-shadow", help="Fase 10: booster congelato contro Dixon-Coles sulle coppe nuove (nessuna richiesta API)")
+    bs.add_argument("--db", default="turso")
+    bs.add_argument("--save", action="store_true")
+    bs.add_argument("--config")
+    bs.set_defaults(fn=cmd_boost_shadow)
     be = sub.add_parser("boost-eval", help="Fase 10: LightGBM sopra Dixon-Coles, replay walk-forward (nessuna richiesta API)")
     be.add_argument("--db", default="turso")
     be.add_argument("--weeks", type=int, default=60)

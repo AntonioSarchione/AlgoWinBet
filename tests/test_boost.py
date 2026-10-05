@@ -66,3 +66,22 @@ def test_verdict_needs_the_gain_and_an_interval_below_zero():
     assert verdict(rep).startswith("non basta")
     rep.groups["tutte"]["diff"] = (-MIN_GAIN / 2, 0.001)
     assert verdict(rep).startswith("non basta")
+
+
+def test_frozen_booster_roundtrip_and_shadow_verdict(rows):
+    pytest.importorskip("lightgbm")
+    from algowinbet.boost import SHADOW_MIN, Booster, load_booster, save_booster, shadow_verdict
+    from algowinbet.snapshots import SnapshotStore
+    store = SnapshotStore(":memory:")
+    assert load_booster(store) is None
+    b = Booster(params={"min_data_in_leaf": 20}).fit(rows)
+    save_booster(store, b, utc(2026, 10, 5), len(rows), utc(2026, 10, 5, 9))
+    b2, until = load_booster(store)
+    assert until == utc(2026, 10, 5) and b2.best == b.best
+    assert abs(b2.predict(rows[:20]) - b.predict(rows[:20])).max() < 1e-9  # same predictions after the database
+    rep = {"since": "2026-10-05", "groups": {"coppe": {"n": SHADOW_MIN - 1, "diff": [-0.02, 0.01]}}}
+    assert shadow_verdict(rep).startswith("in osservazione")
+    rep["groups"]["coppe"]["n"] = SHADOW_MIN
+    assert shadow_verdict(rep).startswith("CONFERMATO")
+    rep["groups"]["coppe"]["diff"] = [-0.02, 0.03]
+    assert shadow_verdict(rep).startswith("NON confermato")

@@ -60,3 +60,15 @@ jobs:
           retention-days: 21
           compression-level: 0  # already gzipped
           if-no-files-found: error
+      # Fase 10 shadow test: the frozen LightGBM correction against Dixon-Coles on the cup matches played since it was frozen
+      # (boost.py). Never a reason to fail the weekly replay or the backup.
+      - name: LightGBM shadow test
+        if: success()
+        continue-on-error: true
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+          TURSO_MODE: replica
+          TURSO_REPLICA_PATH: data/turso-replica.db
+        run: pip install -q "lightgbm>=4.3" && algowinbet boost-shadow --db turso --save

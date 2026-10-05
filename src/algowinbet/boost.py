@@ -21,7 +21,7 @@ import copy
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -248,3 +248,95 @@ def print_boost(rep: BoostReport) -> None:
     if rep.importance:
         print("peso delle variabili: " + ", ".join(f"{k} {v:.0%}" for k, v in list(rep.importance.items())[:8]))
     print("verdetto: " + verdict(rep))
+
+
+# ---- shadow test (v3, 2026-10-05): v2 helped only the club cups (-0.020 ±0.013 on 443 matches), found by looking at four
+# groups, so it is not trusted yet. The booster is trained once on everything known before SHADOW_FROM, frozen in the
+# database, and judged every Monday on the cup matches played since: matches nobody had seen when the design was fixed.
+SHADOW_FROM = datetime(2026, 10, 5, tzinfo=timezone.utc)
+DESIGN = "v2"  # features + parameters frozen for the shadow test: a change of either starts a new test
+APPLY_GROUPS = ("coppe",)  # national teams got worse (few matches, almost no statistics); leagues no change
+SHADOW_MIN = 150  # cup matches before the shadow test can confirm anything
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS boost_models(id INTEGER PRIMARY KEY, created_at TEXT, design TEXT, trained_until TEXT, rows INTEGER,
+  rounds INTEGER, model TEXT);
+CREATE TABLE IF NOT EXISTS boost_runs(id INTEGER PRIMARY KEY, created_at TEXT, design TEXT, report TEXT);
+"""
+
+
+def save_booster(store, b: Booster, until: datetime, n_rows: int, now: datetime) -> int:
+    store.db.executescript(SCHEMA)
+    cur = store.db.execute("INSERT INTO boost_models(created_at, design, trained_until, rows, rounds, model) VALUES(?,?,?,?,?,?) RETURNING id",
+                           (now.isoformat(), DESIGN, until.isoformat(), n_rows, b.best, b.model.model_to_string() if b.model else ""))
+    rid = int(cur.fetchall()[0][0])
+    store.db.commit()
+    return rid
+
+
+def load_booster(store) -> tuple[Booster, datetime] | None:
+    """The frozen booster of the current design (None: not trained yet)."""
+    store.db.executescript(SCHEMA)
+    row = store.db.execute("SELECT model, rounds, trained_until FROM boost_models WHERE design=? ORDER BY id DESC LIMIT 1", (DESIGN,)).fetchone()
+    if not row:
+        return None
+    b = Booster()
+    b.best = int(row[1])
+    if row[0]:
+        import lightgbm as lgb
+        b.model = lgb.Booster(model_str=row[0])
+    return b, datetime.fromisoformat(row[2])
+
+
+def train_frozen(provider, cfg: Config, store, now: datetime, history_weeks: int = HISTORY_WEEKS + 52) -> tuple[int, Booster, int]:
+    """Train the shadow booster on every match before SHADOW_FROM and freeze it. Returns (id, booster, rows)."""
+    rows = build_rows(provider, cfg, SHADOW_FROM - timedelta(weeks=history_weeks), SHADOW_FROM)
+    b = Booster().fit(rows)
+    return save_booster(store, b, SHADOW_FROM, len(rows), now), b, len(rows)
+
+
+def shadow_report(provider, cfg: Config, store, end: datetime) -> dict | None:
+    """The frozen booster against Dixon-Coles on the matches since SHADOW_FROM, applied only to APPLY_GROUPS."""
+    got = load_booster(store)
+    if got is None:
+        return None
+    b, _ = got
+    rows = build_rows(provider, cfg, SHADOW_FROM, end)
+    use = [r for r in rows if r.group in APPLY_GROUPS]
+    out = {"design": DESIGN, "since": SHADOW_FROM.isoformat(), "until": end.isoformat(), "rounds": b.best, "groups": {}}
+    if use:
+        pb = b.predict(use)
+        by: dict[str, list[tuple[float, float]]] = defaultdict(list)
+        for r, p in zip(use, pb):
+            by[r.group].append((-math.log(r.p_dc[r.y]), -math.log(max(float(p[r.y]), 1e-12))))
+        for g, ds in by.items():
+            d = np.array([bb - a for a, bb in ds])
+            ci = 1.96 * float(d.std(ddof=1)) / math.sqrt(len(d)) if len(d) > 1 else float("nan")
+            out["groups"][g] = {"n": len(ds), "ll_dc": float(np.mean([a for a, _ in ds])), "ll_boost": float(np.mean([x for _, x in ds])),
+                                "diff": [float(d.mean()), ci]}
+    return out
+
+
+def shadow_verdict(rep: dict) -> str:
+    g = rep["groups"].get("coppe")
+    if not g:
+        return "in osservazione: nessuna partita di coppa dal " + rep["since"][:10]
+    m, ci = g["diff"]
+    if g["n"] < SHADOW_MIN:
+        return f"in osservazione: {g['n']}/{SHADOW_MIN} partite di coppa, per ora {-m:+.4f} ±{ci:.4f}"
+    if -m >= MIN_GAIN and m + ci < 0:
+        return f"CONFERMATO sulle coppe: guadagno {-m:+.4f} ±{ci:.4f} su {g['n']} partite nuove: si può attivare"
+    return f"NON confermato sulle coppe: {-m:+.4f} ±{ci:.4f} su {g['n']} partite nuove: resta spento"
+
+
+def save_shadow(store, rep: dict, now: datetime) -> None:
+    import json
+    store.db.executescript(SCHEMA)
+    store.db.execute("INSERT INTO boost_runs(created_at, design, report) VALUES(?,?,?)", (now.isoformat(), DESIGN, json.dumps(rep)))
+    store.db.commit()
+
+
+def print_shadow(rep: dict) -> None:
+    print(f"LightGBM in ombra ({rep['design']}, congelato al {rep['since'][:10]}, {rep['rounds']} giri): partite dal {rep['since'][:10]}")
+    for g, s in rep["groups"].items():
+        print(f"  {g:<10}{s['n']:>6} partite  Dixon-Coles {s['ll_dc']:.4f}  LightGBM {s['ll_boost']:.4f}  diff {s['diff'][0]:+.4f} ±{s['diff'][1]:.4f}")
+    print("verdetto: " + shadow_verdict(rep))
