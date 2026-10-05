@@ -707,6 +707,19 @@ def cmd_quotes_check(a) -> None:
 DOMESTIC = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1", "Primeira Liga", "Eredivisie"]
 
 
+LATE_FROM_HOUR = 20  # UTC: evening runs after this hour (the pinger's results runs for the evening matches) may empty the day
+LATE_KEEP = 20  # GOAL requests a late run leaves for a later one the same night (results of the last matches)
+
+
+def late_backfill_due(provider, now: datetime) -> bool:
+    """An evening run after which no match of the calendar kicks off before the daily reset (00:00 UTC): no XI left to read
+    today, so the GOAL requests still unused can go to the history instead of being lost."""
+    if now.hour < LATE_FROM_HOUR:
+        return False
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return not provider.list_fixtures(None, now, midnight)
+
+
 def lineup_backfill(store, names, now: datetime, since: str, max_requests: int, max_seconds: float, keep: int):
     """GOAL XI and goal events of finished domestic matches, within the day's GOAL budget minus `keep` requests left for the
     normal ticks. Returns the stats and (matches still without XI, matches still without events)."""
@@ -1314,13 +1327,16 @@ def cmd_collect_auto(a) -> None:
             print("Partite in calendario: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
                                      for s in ("goal-api", "oddspapi", "api-football")))
-        if daily and goal is not None:
+        late = not daily and goal is not None and late_backfill_due(SnapshotProvider(store), now)
+        if (daily or late) and goal is not None:
             # Fase 6-bis / 9: XI and goal events of finished domestic matches with the GOAL requests the day leaves over (newest
-            # first: 2025/26, then 2024/25, then every new matchday), 8 requests at a time
+            # first: 2025/26, then 2024/25, then every new matchday), 8 requests at a time. In the morning 120 requests stay for
+            # the day's ticks; in the last evening run (no kickoff left before the reset at 00:00 UTC) only LATE_KEEP do, so the
+            # day's unused requests are not lost.
             try:
-                lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240, 120)
+                lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240 if daily else 120, 120 if daily else LATE_KEEP)
                 if lst is not None:
-                    print(f"storico formazioni ed eventi: {lst.requests} richieste, {lst.saved}; ancora da leggere: formazioni {left[0]}, "
+                    print(f"storico formazioni ed eventi{' (sera)' if late else ''}: {lst.requests} richieste, {lst.saved}; ancora da leggere: formazioni {left[0]}, "
                           f"eventi {left[1]}", flush=True)
             except Exception as e:  # noqa: BLE001 - history only: never a reason to lose the morning run
                 print(f"storico formazioni ed eventi: non riuscito ({type(e).__name__}: {e})")

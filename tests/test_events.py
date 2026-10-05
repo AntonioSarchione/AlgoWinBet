@@ -53,3 +53,21 @@ def test_backfill_reads_xi_and_events_together_and_resolves_scorers():
     assert res.saved["eventi"] == 2 and res.saved["eventi in ritardo"] == 1
     left = c.pending_history(["Serie A"], old - timedelta(days=30))
     assert [(r[0], bool(r[5]), bool(r[6])) for r in left] == [("goal:m3", False, True)]  # read again on a later morning, events only
+
+
+def test_late_backfill_only_when_no_kickoff_is_left_before_the_reset():
+    from algowinbet.cli import late_backfill_due
+    from algowinbet.domain import Fixture
+
+    class Cal:
+        def __init__(self, kickoffs):
+            self.f = [Fixture(id=f"goal:{i}", competition="Serie A", home="A", away="B", kickoff=k) for i, k in enumerate(kickoffs)]
+
+        def list_fixtures(self, comps, start, end):
+            return [f for f in self.f if start <= f.kickoff <= end]
+
+    day = datetime(2026, 10, 4, tzinfo=timezone.utc)
+    assert not late_backfill_due(Cal([]), day.replace(hour=19, minute=40))  # too early: evening lineups may still come
+    assert late_backfill_due(Cal([day.replace(hour=19)]), day.replace(hour=21, minute=30))  # results run after the last match
+    assert not late_backfill_due(Cal([day.replace(hour=22)]), day.replace(hour=20, minute=10))  # a 22:00 UTC kickoff still needs its XI
+    assert late_backfill_due(Cal([day.replace(hour=12) + timedelta(days=1)]), day.replace(hour=22))  # tomorrow's matches: after the reset
