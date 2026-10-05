@@ -765,6 +765,19 @@ def cmd_lineups_backfill(a) -> None:
         store.close()
 
 
+def cmd_events_remap(a) -> None:
+    """Goal events mapped again from the stored payloads (no request), then the kinds found."""
+    from .collector import GoalCollector
+    store = SnapshotStore(a.db)
+    try:
+        n = GoalCollector(None, store, []).remap_events()
+        print(f"eventi riscritti: {n}")
+        for kind, cnt, ok in store.db.execute("SELECT kind, COUNT(*), SUM(player_id IS NOT NULL) FROM match_events GROUP BY kind").fetchall():
+            print(f"  {kind}: {cnt}, giocatore riconosciuto {ok}")
+    finally:
+        store.close()
+
+
 def cmd_xi_eval(a) -> None:
     """Our probable lineups replayed against the official XI (no API request)."""
     from .probable import evaluate_xi, load_xi_data, print_xi_eval
@@ -1868,6 +1881,9 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--db", default="turso")
     lb.add_argument("--aliases", default="configs/team_aliases.json")
     lb.set_defaults(fn=cmd_lineups_backfill)
+    er = sub.add_parser("events-remap", help="eventi delle partite rimappati dai grezzi salvati (nessuna richiesta API)")
+    er.add_argument("--db", default="turso")
+    er.set_defaults(fn=cmd_events_remap)
     xe = sub.add_parser("xi-eval", help="probabili formazioni calcolate da noi contro le ufficiali (replay, nessuna richiesta API)")
     xe.add_argument("--since", default="2026-07-01", help="prima partita giudicata; le formazioni prima servono da base")
     xe.add_argument("--db", default="turso")

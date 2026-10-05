@@ -32,7 +32,13 @@ CANDIDATE_SHEETS = 6  # a player must be on one of the team's last 6 sheets to b
 SHORT_REST = 4.0  # days
 XI_TIME = timedelta(minutes=60)  # injury news read after this point before kickoff are not used (the XI is out)
 L2 = 1.0
-FEATURES = ("decayed", "rate10", "started_last", "bench_last", "streak", "gk", "cup_x_started", "rest_x_started", "doubtful")
+FEATURES = ("decayed", "rate10", "started_last", "bench_last", "streak", "gk", "cup_x_started", "rest_x_started", "doubtful",
+            "ban_red", "ban_red_prev", "ban_yellow")
+# Yellow cards that bring a one-match ban in the league (count within the season, league matches only). Leagues whose rule is
+# not a plain count (Ligue 1 points, Primeira Liga / Eredivisie thresholds not verified) use red cards only. Premier League:
+# the 5th only within the first 19 matches, the 10th within the first 32.
+YELLOW_BANS = {"Serie A": {5, 10, 14, 17}, "La Liga": {5, 10, 15, 20}, "Bundesliga": {5, 10, 15}, "Premier League": {5, 10, 15}}
+PREMIER_WINDOWS = {5: 19, 10: 32}
 
 
 @dataclass
@@ -52,6 +58,7 @@ class XiData:
     names: dict[str, str]
     team_of: dict[str, str]
     status: dict[tuple[str, str], list[tuple[str, datetime]]]  # (fixture, player) -> [(status, observed_at)]
+    cards: dict[tuple[str, str], list[str]] = field(default_factory=dict)  # (fixture, player) -> CARD_YELLOW / CARD_RED
 
 
 def load_xi_data(store, provider) -> XiData:
@@ -80,7 +87,32 @@ def load_xi_data(store, provider) -> XiData:
     for fid, pid, st, at in store.db.execute("SELECT fixture_id, player_id, status, observed_at FROM player_status").fetchall():
         for g in provider._to_goal([pid]):
             status[(fid, g)].append((st, datetime.fromisoformat(at)))
-    return XiData(dict(sheets), roles, names, team_of, dict(status))
+    cards: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for fid, pid, kind in store.db.execute("SELECT fixture_id, player_id, kind FROM match_events WHERE kind IN ('CARD_YELLOW', 'CARD_RED') "
+                                           "AND player_id IS NOT NULL").fetchall():
+        cards[(fid, pid)].append(kind)
+    return XiData(dict(sheets), roles, names, team_of, dict(status), dict(cards))
+
+
+def _season_start(t: datetime) -> datetime:
+    return datetime(t.year if t.month >= 7 else t.year - 1, 7, 1, tzinfo=t.tzinfo)
+
+
+def suspension(data: XiData, past: list[TeamSheet], pid: str, competition: str, kickoff: datetime) -> tuple[float, float, float]:
+    """(red card in the team's last match of this competition, red in the one before, yellow count just reached a ban threshold
+    in its last match) for this player, from the stored card events."""
+    league = [s for s in past if s.competition == competition and s.kickoff >= _season_start(kickoff)]
+    if not league:
+        return 0.0, 0.0, 0.0
+    red = [float("CARD_RED" in data.cards.get((s.fixture_id, pid), [])) for s in league[-2:]]
+    red = [0.0] * (2 - len(red)) + red
+    ban_y = 0.0
+    last = data.cards.get((league[-1].fixture_id, pid), [])
+    if "CARD_YELLOW" in last and "CARD_RED" not in last and competition in YELLOW_BANS:
+        n = sum(data.cards.get((s.fixture_id, pid), []).count("CARD_YELLOW") for s in league)
+        if n in YELLOW_BANS[competition] and (competition != "Premier League" or len(league) <= PREMIER_WINDOWS.get(n, 99)):
+            ban_y = 1.0
+    return red[1], red[0], ban_y
 
 
 def _status(data: XiData, fid: str, pid: str, before: datetime) -> str | None:
@@ -122,7 +154,8 @@ def candidates(data: XiData, team: str, kickoff: datetime, competition: str, fix
         st_last = float(started[-1])
         status = _status(data, fixture_id, pid, kickoff - XI_TIME) if fixture_id else None
         x = [dec, sum(started) / len(past), st_last, float(pid in last.bench), min(streak, 5) / 5.0,
-             float(data.roles.get(pid) == "GK"), float(cup) * st_last, float(rest < SHORT_REST) * st_last, float(status == "DOUBTFUL")]
+             float(data.roles.get(pid) == "GK"), float(cup) * st_last, float(rest < SHORT_REST) * st_last, float(status == "DOUBTFUL"),
+             *suspension(data, past, pid, competition, kickoff)]
         out.append(Candidate(pid, x, status in ("OUT", "SUSPENDED")))
     return out
 
@@ -230,27 +263,38 @@ def _ll(p: float, y: int) -> float:
     return -(y * math.log(p) + (1 - y) * math.log(1 - p))
 
 
+def training_rows(data: XiData, min_history: int = 3) -> list[tuple[datetime, list[float], float]]:
+    """(kickoff, features, started) of every candidate of every stored sheet: a sheet's features never depend on the refit
+    date, so they are computed once and filtered by kickoff at each refit."""
+    rows: list[tuple[datetime, list[float], float]] = []
+    for team, ss in data.sheets.items():
+        for k, s in enumerate(ss):
+            if k >= min_history:
+                rows += [(s.kickoff, c.x, float(c.player_id in s.starters)) for c in candidates(data, team, s.kickoff, s.competition, s.fixture_id)]
+    rows.sort(key=lambda r: r[0])
+    return rows
+
+
+def fit_until(rows: list[tuple[datetime, list[float], float]], until: datetime, min_rows: int = 500) -> XiModel | None:
+    train = [r for r in rows if r[0] < until]
+    if len(train) <= min_rows:
+        return None
+    return XiModel().fit(np.array([r[1] for r in train]), np.array([r[2] for r in train]))
+
+
 def evaluate_xi(data: XiData, start: datetime, end: datetime, min_history: int = 3, competitions: list[str] | None = None) -> XiReport:
     """Every team sheet of [start, end) predicted before kickoff, model refitted each Monday on all earlier sheets."""
     targets = sorted(((s.kickoff, team, s) for team, ss in data.sheets.items() for s in ss
                       if start <= s.kickoff < end and (not competitions or s.competition in competitions)), key=lambda t: t[0])
     scores = {"modello": XiScore(), "stessa dell'ultima": XiScore(), "titolarità ultime 8": XiScore()}
-    # the features of a sheet never depend on the refit date: computed once, filtered by kickoff at each refit
-    rows: list[tuple[datetime, list[float], float]] = []
-    for t2, ss in data.sheets.items():
-        for k, s in enumerate(ss):
-            if k >= min_history:
-                rows += [(s.kickoff, c.x, float(c.player_id in s.starters)) for c in candidates(data, t2, s.kickoff, s.competition, s.fixture_id)]
-    rows.sort(key=lambda r: r[0])
+    rows = training_rows(data, min_history)
     model, fitted_for = XiModel(), None
     diag = defaultdict(float)
     by_month: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
     for ko, team, sh in targets:
         monday = (ko - timedelta(days=ko.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         if fitted_for != monday:
-            train = [r for r in rows if r[0] < monday]
-            if len(train) > 500:
-                model = XiModel().fit(np.array([r[1] for r in train]), np.array([r[2] for r in train]))
+            model = fit_until(rows, monday) or model
             fitted_for = monday
         past = [s for s in data.sheets[team] if s.kickoff < ko]
         if len(past) < min_history:
@@ -267,6 +311,9 @@ def evaluate_xi(data: XiData, start: datetime, end: datetime, min_history: int =
         diag["titolari esordienti (mai visti prima)"] += sum(all(p not in x.starters + x.bench for x in past) for p in actual)
         diag["candidati segnati fuori"] += sum(1 for p in pool if _status(data, sh.fixture_id, p, ko - XI_TIME) in ("OUT", "SUSPENDED"))
         diag["candidati in dubbio"] += sum(1 for p in pool if _status(data, sh.fixture_id, p, ko - XI_TIME) == "DOUBTFUL")
+        sus = [(p, suspension(data, past, p, sh.competition, ko)) for p in pool]
+        diag["squalifiche previste"] += sum(1 for _, x in sus if any(x))
+        diag["squalifiche previste e rispettate"] += sum(1 for p, x in sus if any(x) and p not in actual)
         diag["formazioni con stato infortuni"] += float(any(k[0] == sh.fixture_id for k in data.status))
         diag["giorni dall'ultima partita"] += (ko - past[-1].kickoff).total_seconds() / 86400.0
         bm = by_month[f"{ko:%Y-%m}"]

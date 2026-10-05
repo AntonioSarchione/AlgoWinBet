@@ -47,3 +47,19 @@ def test_injured_regular_is_left_out_and_replay_scores():
     sc = rep.scores["modello"]
     assert sc.teams == 28 and sc.guessed / sc.teams >= 10.0  # Roma 11/11 always; Milan's last place is a coin toss at worst
     assert rep.scores["stessa dell'ultima"].guessed / sc.teams == 10.5  # a/b alternate: the last XI always misses Milan's last place
+
+
+def test_red_card_and_fifth_yellow_bring_a_ban_feature():
+    from algowinbet.probable import FEATURES, candidates
+    st = _store(8)
+    for k in range(5):  # c1: a yellow in each of the matches 3..7 (5th in the last one); c2: sent off in the last match
+        st.db.execute("INSERT INTO match_events(fixture_id, seq, team, kind, player_id, source) VALUES(?, 10, 'Milan', 'CARD_YELLOW', 'goal:c1', 'goal-api')",
+                      (f"goal:f{3 + k}",))
+    st.db.execute("INSERT INTO match_events(fixture_id, seq, team, kind, player_id, source) VALUES('goal:f7', 11, 'Milan', 'CARD_RED', 'goal:c2', 'goal-api')")
+    data = load_xi_data(st, SnapshotProvider(st))
+    cands = {c.player_id: dict(zip(FEATURES, c.x)) for c in candidates(data, "Milan", T0 + timedelta(days=56), "Serie A", "goal:f8")}
+    assert cands["goal:c1"]["ban_yellow"] == 1.0 and cands["goal:c1"]["ban_red"] == 0.0
+    assert cands["goal:c2"]["ban_red"] == 1.0 and cands["goal:c3"]["ban_yellow"] == cands["goal:c3"]["ban_red"] == 0.0
+    # a cup match is not covered by a league ban
+    cup = {c.player_id: dict(zip(FEATURES, c.x)) for c in candidates(data, "Milan", T0 + timedelta(days=56), "UEFA Champions League", "goal:cx")}
+    assert cup["goal:c2"]["ban_red"] == 0.0

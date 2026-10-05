@@ -268,6 +268,7 @@ class Score:
     hits: int = 0
     exp: float = 0.0
     ll_terms: list[float] = field(default_factory=list)
+    team_ll: list[float] = field(default_factory=list)  # per team-match sum (pre-XI lists compared on the same players)
     bins: dict[int, list[float]] = field(default_factory=lambda: defaultdict(lambda: [0, 0.0, 0]))
 
     def add(self, p: float, y: int) -> None:
@@ -303,11 +304,25 @@ def _diff(a: Score, b: Score) -> tuple[float, float]:
     return m, 1.96 * math.sqrt(var / len(d))
 
 
+def _team_diff(a: Score, b: Score) -> tuple[float, float]:
+    """Mean difference of the per team-match log loss sums (same team-matches, same players) and its 95% half-width."""
+    d = [x - y for x, y in zip(a.team_ll, b.team_ll)]
+    if len(d) < 2 or len(a.team_ll) != len(b.team_ll):
+        return 0.0, 0.0
+    m = sum(d) / len(d)
+    var = sum((x - m) ** 2 for x in d) / (len(d) - 1)
+    return m, 1.96 * math.sqrt(var / len(d))
+
+
+UNLISTED = 0.002  # anytime probability of a player missing from a pre-XI list (a debutant, a forgotten player)
+
+
 VARIANTS = {"modello": Params(), "giocatore": Params(shrink=False), "ruolo": Params(role_only=True)}
 
 
 def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetime, competitions: list[str],
-                     variants: dict[str, Params] | None = None, data: ScorerData | None = None, expected=None) -> ScorerReport:
+                     variants: dict[str, Params] | None = None, data: ScorerData | None = None, expected=None, xi: bool = True,
+                     xi_data_override=None) -> ScorerReport:
     """Week-by-week replay: each match of [start, end) predicted with the Dixon-Coles expected goals of its Monday and the
     player history before its kickoff; scored on every player of the sheet (with XI) and of the squad (before XI).
     `expected(row, monday)` -> (home, away) expected goals replaces Dixon-Coles (tests)."""
@@ -319,6 +334,14 @@ def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetim
     eng = Engine(frozen, copy.deepcopy(cfg), use_lineups=False)
     tallies = {name: Tally(p.half_life) for name, p in variants.items()}
     scores = {name: {"xi": Score(), "prima": Score()} for name in variants}
+    # before the XI, the start probabilities of our probable lineups (probable.py) instead of the plain recent start share
+    xi_data = xi_rows = xi_model = None
+    if xi:
+        from .probable import XiModel, fit_until, load_xi_data, training_rows
+        xi_data = xi_data_override or load_xi_data(store, provider)
+        xi_rows, xi_model, xi_for = training_rows(xi_data), XiModel(), None
+        for name in variants:
+            scores[name]["probabili"] = Score()
     by_fx: dict[str, list[Sheet]] = defaultdict(list)
     for sh in data.sheets:
         by_fx[sh.fixture_id].append(sh)
@@ -348,6 +371,16 @@ def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetim
         lh, la = got
         lam = {r.home: lh, r.away: la}
         n_matches += 1
+        probs = {}
+        if xi_data is not None:
+            from .probable import predict as predict_xi
+            if xi_for != monday:
+                xi_model = fit_until(xi_rows, monday) or xi_model
+                xi_for = monday
+            for sh in pair:
+                got_xi = predict_xi(xi_model, xi_data, sh.team, ko, r.competition, fid)
+                if got_xi is not None:
+                    probs[sh.team] = got_xi.probs
         for sh in pair:
             opp = r.away if sh.team == r.home else r.home
             scored = set(sh.np_goals) | set(sh.pen_goals)
@@ -355,13 +388,30 @@ def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetim
                 t = tallies[name]
                 for pp in predict_team(t, sh.team, lam[sh.team], lam[opp], prm, data.roles, data.names, sh.starters, sh.bench):
                     scores[name]["xi"].add(pp.anytime, int(pp.player_id in scored))
-                for pp in predict_team(t, sh.team, lam[sh.team], lam[opp], prm, data.roles, data.names):
-                    scores[name]["prima"].add(pp.anytime, int(pp.player_id in scored))
+                # before the XI: both lists scored on the same players (the sheet and both lists; a player a list misses
+                # gets UNLISTED), so the two are compared match by match
+                pre = {"prima": {pp.player_id: pp.anytime for pp in predict_team(t, sh.team, lam[sh.team], lam[opp], prm, data.roles, data.names)}}
+                if sh.team in probs:
+                    pre["probabili"] = {pp.player_id: pp.anytime for pp in predict_team(t, sh.team, lam[sh.team], lam[opp], prm, data.roles,
+                                                                                       data.names, squad=probs[sh.team])}
+                elif "probabili" in scores[name]:
+                    continue  # no probable lineup for this team: neither list is scored, so both cover the same team-matches
+                universe = set(sh.starters) | set(sh.bench) | {p for lst in pre.values() for p in lst}
+                for when, lst in pre.items():
+                    sc = scores[name][when]
+                    before = sc.ll
+                    for p in universe:
+                        sc.add(lst.get(p, UNLISTED), int(p in scored))
+                    sc.team_ll.append(sc.ll - before)
     diffs = {}
+    if "probabili" in scores.get("modello", {}):
+        diffs["probabili - titolarità semplice (modello, per squadra-partita)"] = _team_diff(scores["modello"]["probabili"], scores["modello"]["prima"])
     for ref in variants:
         if ref != "modello" and "modello" in variants:
-            for when in ("xi", "prima"):
-                diffs[f"modello - {ref} ({when})"] = _diff(scores["modello"][when], scores[ref][when])
+            diffs[f"modello - {ref} (xi)"] = _diff(scores["modello"]["xi"], scores[ref]["xi"])
+            for when in ("prima", "probabili"):
+                if when in scores["modello"]:
+                    diffs[f"modello - {ref} ({when}, per squadra-partita)"] = _team_diff(scores["modello"][when], scores[ref][when])
     return ScorerReport(start, end, n_matches, scores, diffs)
 
 
@@ -370,7 +420,7 @@ def print_scorer_eval(rep: ScorerReport) -> None:
     for name, by in rep.scores.items():
         for when, s in by.items():
             if s.n:
-                print(f"  {name:10} {when:6} giocatori {s.n:6}  log loss {s.ll / s.n:.4f}  Brier {s.brier / s.n:.4f}  "
+                print(f"  {name:10} {when:9} giocatori {s.n:6}  log loss {s.ll / s.n:.4f}  Brier {s.brier / s.n:.4f}  "
                       f"segnano {s.hits} (attesi {s.exp:.0f})")
     for k, (m, hw) in rep.diffs.items():
         print(f"  {k}: {m:+.4f} ± {hw:.4f}" + ("  (meglio)" if m + hw < 0 else ""))

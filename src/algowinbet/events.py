@@ -37,23 +37,48 @@ def _s(v) -> str | None:
     return v or None
 
 
+def _first(r: dict, *keys: str) -> str | None:
+    for k in keys:
+        v = _s(r.get(k))
+        if v:
+            return v
+    return None
+
+
+CARD_KEYS = {"name": ("{s}Fault", "{s}Player", "{s}PlayerName", "{s}Scorer"), "key": ("{s}FaultId", "{s}PlayerId", "{s}PlayerKey", "{s}ScorerId")}
+
+
 def parse_events(data, home: str, away: str) -> list[Event]:
+    """Goals verified on a real payload; cards read from the fields the underlying feed uses for them (homeFault / awayFault +
+    card 'yellow card' / 'red card'), unverified until the first card rows are stored: event_reads keeps every payload, so
+    `events-remap` maps them again if the names differ."""
     rows = data if isinstance(data, list) else (data or {}).get("events") if isinstance(data, dict) else None
     out: list[Event] = []
     for i, r in enumerate(rows or []):
         if not isinstance(r, dict):
             continue
-        side = "home" if _s(r.get("homeScorer")) or _s(r.get("homeScorerId")) else "away" if _s(r.get("awayScorer")) or _s(r.get("awayScorerId")) else None
         typ = str(r.get("type") or "").upper()
         info = _s(r.get("info"))
-        kind = typ
-        if typ == "GOAL":
-            low = (info or "").lower()
-            kind = "OWN_GOAL" if "own" in low else "PENALTY" if "penalty" in low and "miss" not in low else "GOAL"
+        card = _s(r.get("card")) or (typ if "CARD" in typ else None)
         try:
             minute = float(r.get("timeNum") if r.get("timeNum") is not None else str(r.get("time") or "").split("+")[0])
         except (TypeError, ValueError):
             minute = None
+        if card:
+            low = f"{card} {info or ''}".lower()
+            side = next((x for x in ("home", "away") if any(_s(r.get(k.format(s=x))) for k in CARD_KEYS["name"] + CARD_KEYS["key"])), None)
+            kind = "CARD_RED" if "red" in low or "second" in low else "CARD_YELLOW"
+            out.append(Event(seq=i, minute=minute, team=home if side == "home" else away if side == "away" else None, kind=kind,
+                             detail=card if not info else f"{card} | {info}",
+                             player_key=_first(r, *(k.format(s=side) for k in CARD_KEYS["key"])) if side else None,
+                             player_name=_first(r, *(k.format(s=side) for k in CARD_KEYS["name"])) if side else None,
+                             assist_key=None, assist_name=None))
+            continue
+        side = "home" if _s(r.get("homeScorer")) or _s(r.get("homeScorerId")) else "away" if _s(r.get("awayScorer")) or _s(r.get("awayScorerId")) else None
+        kind = typ
+        if typ == "GOAL":
+            low = (info or "").lower()
+            kind = "OWN_GOAL" if "own" in low else "PENALTY" if "penalty" in low and "miss" not in low else "GOAL"
         out.append(Event(seq=i, minute=minute, team=home if side == "home" else away if side == "away" else None, kind=kind, detail=info,
                          player_key=_s(r.get(f"{side}ScorerId")) if side else None, player_name=_s(r.get(f"{side}Scorer")) if side else None,
                          assist_key=_s(r.get(f"{side}AssistId")) if side else None, assist_name=_s(r.get(f"{side}Assist")) if side else None))

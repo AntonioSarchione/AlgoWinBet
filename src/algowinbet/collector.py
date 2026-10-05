@@ -306,6 +306,28 @@ class GoalCollector:
                     break
         return st
 
+    def remap_events(self, batch: int = 200) -> int:
+        """Map again every stored event list (event_reads.payload) with the current parser: no request. Returns the events
+        written."""
+        from .events import event_rows, parse_events, resolve
+        keys = dict(self.store.db.execute("SELECT key, player_id FROM player_keys WHERE source = ?", (SOURCE,)).fetchall())
+        rows = self.store.db.execute("SELECT e.fixture_id, r.home, r.away, e.payload FROM event_reads e JOIN results r ON r.fixture_id = e.fixture_id "
+                                     "WHERE e.payload IS NOT NULL").fetchall()
+        n = 0
+        for k in range(0, len(rows), batch):
+            chunk = rows[k:k + batch]
+            squads = self._squads([(f, None, h, a) for f, h, a, _ in chunk])
+            out = []
+            for fid, home, away, payload in chunk:
+                evs = parse_events(json.loads(payload), home, away)
+                resolve(evs, keys, squads.get(fid, {}))
+                out += event_rows(fid, evs)
+            ids = [r[0] for r in chunk]
+            self.store.db.execute(f"DELETE FROM match_events WHERE source = ? AND fixture_id IN ({','.join('?' * len(ids))})", (SOURCE, *ids))
+            n += self.store._bulk("INSERT OR REPLACE INTO match_events(fixture_id, seq, minute, team, kind, detail, player_id, player_key, "
+                                  "player_name, assist_id, assist_key, assist_name, source)", out) if out else 0
+        return n
+
     def _squads(self, chunk: list[tuple]) -> dict[str, dict[str, dict[str, str]]]:
         """{fixture: {team: {player id: name}}} from the stored XI and bench of these matches (names from the players table):
         two reads for the whole batch."""

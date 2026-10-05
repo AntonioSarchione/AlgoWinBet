@@ -69,3 +69,5 @@ def test_replay_scores_every_player_and_beats_the_role_reference():
     assert xi.n == 20 * (12 + 11) and xi.hits == 20  # the striker scored in every match; Roma never
     m, hw = rep.diffs["modello - ruolo (xi)"]
     assert m + hw < 0  # one player scores every week: the player history beats the role average
+    pre, prob = rep.scores["modello"]["prima"], rep.scores["modello"]["probabili"]
+    assert len(pre.team_ll) == len(prob.team_ll) == 40 and pre.n == prob.n  # same team-matches, same players
