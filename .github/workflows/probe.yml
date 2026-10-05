@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
