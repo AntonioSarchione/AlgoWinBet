@@ -778,6 +778,68 @@ def cmd_events_remap(a) -> None:
         store.close()
 
 
+def cmd_slip_review(a) -> None:
+    """Settled paper slips (no request): how often they won against their joint probability, which legs sank them, and the
+    legs of the slips by probability band (won rate against the model, the Pinnacle price at decision and the close)."""
+    from collections import defaultdict as _dd
+    store = SnapshotStore(a.db)
+    try:
+        legs = {(f, k): (r, pm, cf, st) for f, k, r, pm, cf, st in store.db.execute(
+            "SELECT fixture_id, sel_key, result, p_market, close_fair, status FROM paper_legs").fetchall()}
+        slips = store.db.execute("SELECT id, legs, joint, total_odds, result, profile FROM paper_slips WHERE result IN ('won', 'lost')").fetchall()
+        if not slips:
+            print("nessuna schedina chiusa")
+            return
+        by_prof = _dd(lambda: [0, 0, 0.0])
+        bands = _dd(lambda: [0, 0, 0.0, 0.0, 0, 0.0, 0])  # n, won, sum p, sum p_market, n p_market, sum close, n close
+        losers = _dd(int)
+        killers = []
+        for sid, lj, joint, odds, res, prof in slips:
+            b = by_prof[prof or "-"]
+            b[0] += 1
+            b[1] += res == "won"
+            b[2] += joint or 0
+            lost_here = []
+            for l in json.loads(lj):
+                r, pm, cf, st = legs.get((l["fixture_id"], l["sel_key"]), (None, None, None, l.get("status")))
+                if r not in ("won", "lost"):
+                    continue
+                p = l["p"]
+                band = "<40%" if p < .4 else "40-50%" if p < .5 else "50-60%" if p < .6 else "60-70%" if p < .7 else "70-80%" if p < .8 else "80%+"
+                x = bands[band]
+                x[0] += 1
+                x[1] += r == "won"
+                x[2] += p
+                if pm:
+                    x[3] += pm
+                    x[4] += 1
+                if cf:
+                    x[5] += cf
+                    x[6] += 1
+                if r == "lost":
+                    lost_here.append((p, l["market"], l["match"], st, l["odds"]))
+            if res == "lost":
+                losers[len(lost_here)] += 1
+                killers += lost_here
+        print("schedine chiuse per profilo: profilo, schedine, vinte, vinte attese (somma delle probabilità)")
+        for prof, (n, w, e) in sorted(by_prof.items()):
+            print(f"  {prof:12} {n:4}  {w:4}  {e:6.1f}")
+        print("schedine perse per numero di selezioni sbagliate: " + ", ".join(f"{k}: {v}" for k, v in sorted(losers.items())))
+        print("selezioni nelle schedine chiuse per fascia di probabilità: n, vinte, prob. modello media, Pinnacle alla scelta, Pinnacle in chiusura")
+        for band in ("<40%", "40-50%", "50-60%", "60-70%", "70-80%", "80%+"):
+            n, w, sp, spm, npm, sc, nc = bands[band]
+            if n:
+                print(f"  {band:7} {n:4}  {w / n:6.1%}  {sp / n:6.1%}  {(spm / npm if npm else float('nan')):6.1%}  {(sc / nc if nc else float('nan')):6.1%}")
+        print("selezioni perse più frequenti nelle schedine perse (prob. modello, mercato, partita, stato, quota):")
+        seen = _dd(int)
+        for k in killers:
+            seen[k] += 1
+        for (p, m, match, st, o), n in sorted(seen.items(), key=lambda kv: (-kv[1], kv[0][0]))[:25]:
+            print(f"  {n:3}x  {p:5.1%}  {m}  |  {match}  |  {st}  |  {o:.2f}")
+    finally:
+        store.close()
+
+
 def cmd_xi_eval(a) -> None:
     """Our probable lineups replayed against the official XI (no API request)."""
     from .probable import evaluate_xi, load_xi_data, print_xi_eval
@@ -1881,6 +1943,9 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--db", default="turso")
     lb.add_argument("--aliases", default="configs/team_aliases.json")
     lb.set_defaults(fn=cmd_lineups_backfill)
+    sr = sub.add_parser("slip-review", help="schedine chiuse: quali selezioni le hanno fatte perdere (nessuna richiesta API)")
+    sr.add_argument("--db", default="turso")
+    sr.set_defaults(fn=cmd_slip_review)
     er = sub.add_parser("events-remap", help="eventi delle partite rimappati dai grezzi salvati (nessuna richiesta API)")
     er.add_argument("--db", default="turso")
     er.set_defaults(fn=cmd_events_remap)
