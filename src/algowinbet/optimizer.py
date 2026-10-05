@@ -97,9 +97,13 @@ def optimize(opps: list[Opportunity], analyses: dict[str, FixtureAnalysis], cfg:
         )
         return OptimizerResult([], True, reasons, stats=stats)
     elig = [x for x in elig if x.p_final >= o.min_leg_probability and x.odds >= o.min_leg_odds]
+    value = {OpportunityStatus.STRONG, OpportunityStatus.CANDIDATE}
+    elig = [x for x in elig if not (x.status in value and x.p_final < o.national_value_min_probability
+                                    and any(k.lower() in x.competition.lower() for k in o.national_competitions))]
     stats["eligible_leg_probability"] = len(elig)
     if not elig:
-        reasons.append(f"Tutte le opportunità hanno probabilità < soglia per leg {o.min_leg_probability:.0%} o quota < {o.min_leg_odds:.2f}.")
+        reasons.append(f"Tutte le opportunità hanno probabilità < soglia per leg {o.min_leg_probability:.0%} (nazionali con valore "
+                       f"{o.national_value_min_probability:.0%}) o quota < {o.min_leg_odds:.2f}.")
         return OptimizerResult([], True, reasons, stats=stats)
     # keep the best few candidates per fixture to bound the search space
     per_fix: dict[str, list[Opportunity]] = {}

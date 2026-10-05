@@ -17,7 +17,8 @@ const EV_MIN = [
   { v: "", l: "Nessun limite" }, { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" },
   { v: "0", l: "Almeno 0% (pari)" }, { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
 ];
-const LEG_PROB = [{ v: "", l: "Qualsiasi" }, ...[30, 40, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
+// the slips never take a selection under the published floor (45%, user's rule): "" = that floor
+const LEG_PROB = [{ v: "", l: "Regola (almeno 45%)" }, ...[50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 
 const ALL_STATUSES = ["STRONG", "CANDIDATE", "FAIR", "WATCH", "NEUTRAL", "AVOID"];
 const PER_FIXTURE = 6; // kept per match and per criterion (value score, probability, EV) before the search
@@ -69,7 +70,7 @@ const manualSlips = unstable_cache(
     if (!n) return { n, results: null };
     const results = runProfiles(legs, settings, {
       min_legs: n, max_legs: n, max_legs_per_competition: n, odds_min: k.qMin || 1, odds_max: k.qMax || 1e9, min_probability: 0,
-      min_leg_probability: k.legProb, min_slip_ev: k.evMin, statuses: ALL_STATUSES,
+      min_leg_probability: Math.max(k.legProb, settings.optimizer.min_leg_probability ?? 0), min_slip_ev: k.evMin, statuses: ALL_STATUSES,
       candidates_per_fixture: 3 * PER_FIXTURE, max_candidates: 3 * PER_FIXTURE * MAX_PICK,
     });
     return { n, results };

@@ -10,6 +10,25 @@ from .config import Config
 from .domain import Opportunity, Slip
 
 
+MODEL_EDGE_PP = 0.015  # our probability this much above the sharp market's: the value is the model's, not only Sisal's price
+
+
+def leg_reason(o: Opportunity) -> tuple[str, str]:
+    """(kind, text): where a selection's value comes from (same as web/lib/optimizer.ts legReason)."""
+    no_xi = " Formazioni non ancora note." if o.data_quality_parts.get("lineup", 0) <= 0.5 else ""
+    if o.p_market is None:
+        return "solo-modello", f"Nessun prezzo di riferimento: solo il nostro modello ({o.p_final:.1%}).{no_xi}"
+    diff = o.p_final - o.p_market
+    if o.status.value == "FAIR":
+        return "equa", f"Quota equa: Sisal {o.odds:.2f} contro prezzo giusto Pinnacle {1 / o.p_market:.2f}, margine quasi nullo."
+    if diff >= MODEL_EDGE_PP:
+        return "modello", f"Valore dal modello: noi {o.p_final:.1%} contro {o.p_market:.1%} di Pinnacle (+{diff * 100:.1f} punti).{no_xi}"
+    if diff <= -MODEL_EDGE_PP:
+        return "contro", f"Il modello è meno ottimista di Pinnacle ({o.p_final:.1%} contro {o.p_market:.1%}): valore solo dal prezzo Sisal."
+    return "prezzo", (f"Valore dal prezzo: Sisal {o.odds:.2f} contro equa Pinnacle {1 / o.p_market:.2f}. Nessuna informazione nostra in più "
+                      f"sulla partita.")
+
+
 def explain_leg(o: Opportunity) -> dict[str, Any]:
     pos, neg = [], []
     if o.edge is not None and o.edge > 0:
@@ -40,7 +59,9 @@ def explain_leg(o: Opportunity) -> dict[str, Any]:
         neg.append("quota più vecchia dell'ultima informazione (formazione/notizie): verifica il prezzo attuale prima di valutarla")
     if o.data_quality_parts.get("completeness", 1) < 0.6:
         neg.append("storico squadre limitato")
+    kind, text = leg_reason(o)
     return {
+        "reason": {"kind": kind, "text": text},
         "positive_factors": pos, "negative_factors": neg,
         "model_consensus": {"struct": o.p_struct, "market": o.p_market, "final": o.p_final},
         "counterfactual": {
@@ -83,6 +104,12 @@ def explain_slip(s: Slip, cfg: Config) -> dict[str, Any]:
         neg.append("almeno una leg senza prezzo di mercato di confronto")
     if len(s.legs) >= 5:
         neg.append(f"{len(s.legs)} leg: l'errore di stima si accumula")
+    kinds = [leg_reason(l)[0] for l in s.legs]
+    price_only = sum(1 for l, k in zip(s.legs, kinds) if l.status.value != "FAIR" and k in ("prezzo", "contro"))
+    if price_only:
+        neg.append(f"{price_only} leg con valore solo dal prezzo Sisal: il nostro modello non vede nulla in più del mercato")
+    if kinds.count("modello"):
+        pos.append(f"{kinds.count('modello')} leg dove il nostro modello vede più del mercato")
     struct_joint = s.joint_probability * float(np.prod([l.p_struct / l.p_final for l in s.legs]))
     return {
         "positive_factors": pos,

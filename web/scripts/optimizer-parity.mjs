@@ -17,6 +17,7 @@ for (const c of golden.cases) {
   if (c.min_legs != null) s.optimizer.min_legs = c.min_legs;
   if (c.national_competitions) s.optimizer.national_competitions = c.national_competitions;
   if (c.multi_bonus_min_odds != null) s.optimizer.multi_bonus_min_odds = c.multi_bonus_min_odds;
+  if (c.min_leg_probability != null) s.optimizer.min_leg_probability = c.min_leg_probability;
   const r = optimize(golden.opportunities, s);
   const problems = [];
   if (r.noBet !== c.no_bet) problems.push(`no_bet ${r.noBet} != ${c.no_bet}`);

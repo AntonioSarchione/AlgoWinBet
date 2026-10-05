@@ -36,6 +36,8 @@ CASES = [
      "multi_bonus_min_odds": 1.0},
     # one competition counted as national teams: never in a slip with the others
     {"name": "nazionali-club", "odds_min": None, "odds_max": None, "max_legs": 6, "national": True},
+    # the 45% floor off: low-probability legs, the national value rule alone
+    {"name": "leg-floor-off", "odds_min": None, "odds_max": None, "max_legs": 6, "national": True, "min_leg_probability": 0.0},
 ]
 
 
@@ -71,6 +73,7 @@ def build() -> dict:
         c.optimizer.min_slip_ev = case.get("min_slip_ev", c.optimizer.min_slip_ev)
         c.optimizer.min_legs = case.get("min_legs", c.optimizer.min_legs)
         c.optimizer.multi_bonus_min_odds = case.get("multi_bonus_min_odds", c.optimizer.multi_bonus_min_odds)
+        c.optimizer.min_leg_probability = case.get("min_leg_probability", c.optimizer.min_leg_probability)
         if case.get("national"):
             case["national_competitions"] = [sorted({o.competition for o in res.opportunities})[0]]
             c.optimizer.national_competitions = case["national_competitions"]

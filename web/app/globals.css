@@ -560,3 +560,8 @@ th.num .th-sort { justify-content: flex-end; }
 .bank-hint { grid-column: 1 / -1; margin: 0; }
 @media (max-width: 900px) { .bank-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .bank-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* why a slip selection is there (legReason): price-only value is flagged, model value stands out */
+.leg-reason { font-size: 12px; line-height: 1.4; color: var(--muted); margin-top: 4px; max-width: 46ch; }
+.leg-reason-prezzo, .leg-reason-contro { color: var(--warn); }
+.leg-reason-modello { color: var(--good); }

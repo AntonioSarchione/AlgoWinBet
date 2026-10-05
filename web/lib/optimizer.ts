@@ -39,6 +39,7 @@ export type OptimizerCfg = {
   national_competitions?: string[]; // name keywords of national-team competitions (missing in older analyses: the default)
   min_leg_probability: number;
   min_leg_odds?: number; // no selection under these odds enters a slip (missing in older analyses: 1.2)
+  national_value_min_probability?: number; // value selections of national-team competitions (missing in older analyses: none)
   beam_width: number;
   output_count: number;
   max_overlap: number;
@@ -195,8 +196,13 @@ export function optimize<T extends OptOpp>(opps: T[], s: OptSettings): OptResult
   }
   const minLegOdds = Math.max(o.min_leg_odds ?? MIN_LEG_ODDS, MIN_LEG_ODDS);
   elig = elig.filter((x) => x.p_final >= o.min_leg_probability && x.odds >= minLegOdds);
+  // value selections of national-team competitions need a higher probability (config.py national_value_min_probability)
+  const natKeys = (o.national_competitions ?? NATIONAL_COMPETITIONS).map((k) => k.toLowerCase());
+  const natMin = o.national_value_min_probability ?? 0;
+  elig = elig.filter((x) => !((x.status === "STRONG" || x.status === "CANDIDATE") && x.p_final < natMin
+    && natKeys.some((k) => x.competition.toLowerCase().includes(k))));
   if (!elig.length) {
-    reasons.push(`Tutte le opportunità hanno probabilità < soglia per leg ${pct(o.min_leg_probability)} o quota < ${minLegOdds.toFixed(2)}.`);
+    reasons.push(`Tutte le opportunità hanno probabilità < soglia per leg ${pct(o.min_leg_probability)}${natMin ? ` (nazionali con valore ${pct(natMin)})` : ""} o quota < ${minLegOdds.toFixed(2)}.`);
     return { slips: [], noBet: true, reasons, eligible: 0, evaluated: 0 };
   }
   // keep the best few candidates per fixture to bound the search space (insertion order = first appearance by score)
@@ -323,6 +329,26 @@ export function legMinOdds(sl: Slip, legOdds: number, minEv: number): number {
   return Math.max((legOdds * total) / sl.total_odds, MIN_LEG_ODDS);
 }
 
+// Why a selection is there, in words (explain.py leg_reason): where its value comes from. "Price" = Sisal pays more than the
+// sharp fair odds while our model agrees with that market; "model" = our model sees more than the market.
+export const MODEL_EDGE_PP = 0.015;
+export type LegReason = { kind: "prezzo" | "modello" | "equa" | "solo-modello" | "contro"; text: string };
+
+export function legReason(l: { odds: number; p_final: number; p_market: number | null; status: string; dq_lineup?: number }): LegReason {
+  const noXi = (l.dq_lineup ?? 0) <= 0.5 ? " Formazioni non ancora note." : "";
+  if (l.p_market == null) return { kind: "solo-modello", text: `Nessun prezzo di riferimento: solo il nostro modello (${pct(l.p_final, 1)}).${noXi}` };
+  const fair = 1 / l.p_market;
+  const diff = l.p_final - l.p_market;
+  if (l.status === "FAIR") return { kind: "equa", text: `Quota equa: Sisal ${l.odds.toFixed(2)} contro prezzo giusto Pinnacle ${fair.toFixed(2)}, margine quasi nullo.` };
+  if (diff >= MODEL_EDGE_PP) {
+    return { kind: "modello", text: `Valore dal modello: noi ${pct(l.p_final, 1)} contro ${pct(l.p_market, 1)} di Pinnacle (+${(diff * 100).toFixed(1)} punti).${noXi}` };
+  }
+  if (diff <= -MODEL_EDGE_PP) {
+    return { kind: "contro", text: `Il modello è meno ottimista di Pinnacle (${pct(l.p_final, 1)} contro ${pct(l.p_market, 1)}): valore solo dal prezzo Sisal.` };
+  }
+  return { kind: "prezzo", text: `Valore dal prezzo: Sisal ${l.odds.toFixed(2)} contro equa Pinnacle ${fair.toFixed(2)}. Nessuna informazione nostra in più sulla partita.` };
+}
+
 // explain.py explain_slip (the parts the dashboard shows)
 export function explainSlip(sl: Slip, z: number, minBonusOdds = 1.25) {
   const pos: string[] = [];
@@ -342,6 +368,10 @@ export function explainSlip(sl: Slip, z: number, minBonusOdds = 1.25) {
   if (unconf) neg.push(`${unconf} ${unconf === 1 ? "evento" : "eventi"} senza formazione confermata`);
   if (sl.legs.some((l) => l.p_market == null)) neg.push("almeno un evento senza prezzo di mercato di confronto");
   if (sl.legs.length >= 5) neg.push(`${sl.legs.length} eventi: l'errore di stima si accumula`);
+  const priceOnly = sl.legs.filter((l) => l.status !== "FAIR" && ["prezzo", "contro"].includes(legReason(l).kind)).length;
+  if (priceOnly) neg.push(`${priceOnly} ${priceOnly === 1 ? "evento ha" : "eventi hanno"} valore solo dal prezzo Sisal: il nostro modello non vede nulla in più del mercato`);
+  const byModel = sl.legs.filter((l) => legReason(l).kind === "modello").length;
+  if (byModel) pos.push(`${byModel} ${byModel === 1 ? "evento" : "eventi"} dove il nostro modello vede più del mercato`);
   const pLow = sl.joint_probability * Math.exp(-z * (sl.uncertainty / Math.max(sl.joint_probability, 1e-9)));
   return {
     positive_factors: pos,

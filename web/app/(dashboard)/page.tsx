@@ -5,7 +5,7 @@ import {
   Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
 } from "lucide-react";
 import { DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
-import { explainSlip, legMinOdds, type OptSettings } from "@/lib/optimizer";
+import { explainSlip, legMinOdds, legReason, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
@@ -35,7 +35,8 @@ const MIN_EVENTS = [
   ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => ({ v: String(k), l: k === 5 ? "Almeno 5 (bonus Sisal)" : `Almeno ${k}` })),
 ];
 
-const LEG_PROB = [{ v: "", l: "Qualsiasi" }, ...[30, 40, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
+// the slips never take a selection under the published floor (45%, user's rule): "" = that floor
+const LEG_PROB = [{ v: "", l: "Regola (almeno 45%)" }, ...[50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 const EV_MIN = [
   { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" }, { v: "0", l: "Almeno 0% (pari)" },
   { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
@@ -58,7 +59,7 @@ const homeSlips = unstable_cache(
     const legs = toLegs(await slipCandidates(runId, filter, statuses)).filter((o) => !picked.size || picked.has(marketGroup(o.sel_key)));
     return runProfiles(legs, settings, {
       max_legs: k.maxEvents, min_legs: k.minEvents, odds_min: k.qMin || settings.optimizer.odds_min, odds_max: k.qMax || settings.optimizer.odds_max,
-      min_leg_probability: k.legProb, min_slip_ev: k.evMin, min_probability: k.riskMin,
+      min_leg_probability: Math.max(k.legProb, settings.optimizer.min_leg_probability ?? 0), min_slip_ev: k.evMin, min_probability: k.riskMin,
     });
   },
   ["homeSlips", DEPLOY],
@@ -416,6 +417,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                               <td className="muted num">{i + 1}</td>
                               <td className="wrap">
                                 <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={`/partita/${encodeURIComponent(o.fixture_id)}`} />
+                                <div className={`leg-reason leg-reason-${legReason(l).kind}`}>{legReason(l).text}</div>
                               </td>
                               <td className="num">{l.odds.toFixed(2)}</td>
                               <td className="num">
