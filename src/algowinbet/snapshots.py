@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS match_stats(fixture_id TEXT, period TEXT, stat TEXT, 
 CREATE TABLE IF NOT EXISTS player_status(id INTEGER PRIMARY KEY, source TEXT, fixture_id TEXT, team TEXT, player_id TEXT,
   player_name TEXT, status TEXT, reason TEXT, observed_at TEXT, UNIQUE(source, fixture_id, player_id, status, reason));
 CREATE INDEX IF NOT EXISTS ix_status_fx ON player_status(fixture_id);
+CREATE TABLE IF NOT EXISTS match_events(fixture_id TEXT, seq INTEGER, minute REAL, team TEXT, kind TEXT, detail TEXT, player_id TEXT,
+  player_key TEXT, player_name TEXT, assist_id TEXT, assist_key TEXT, assist_name TEXT, source TEXT, PRIMARY KEY(fixture_id, seq, source));
+CREATE INDEX IF NOT EXISTS ix_events_player ON match_events(player_id);
+CREATE TABLE IF NOT EXISTS event_reads(fixture_id TEXT, source TEXT, n INTEGER, observed_at TEXT, payload TEXT, PRIMARY KEY(fixture_id, source));
+CREATE TABLE IF NOT EXISTS player_keys(source TEXT, key TEXT, player_id TEXT, PRIMARY KEY(source, key));
 CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY, done_at TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS referees(fixture_id TEXT, source TEXT, name TEXT, observed_at TEXT, PRIMARY KEY(fixture_id, source));
 CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRIMARY KEY(source, period));

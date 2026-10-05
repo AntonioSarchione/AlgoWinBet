@@ -2,6 +2,7 @@
 (Windows Task Scheduler / cron): each mode is idempotent and budget-aware, so calling it too often wastes nothing."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Callable
@@ -9,7 +10,7 @@ from typing import Callable
 from .domain import Fixture, FixtureStatus, Player
 from .information.news import norm
 from .names import TeamNames
-from .providers.goalapi import (BudgetExceeded, GoalApiClient, GoalApiError, GoalMapper, MappingReport, PlanUpgradeRequired, SOURCE)
+from .providers.goalapi import (BudgetExceeded, GoalApiClient, GoalApiError, GoalMapper, MappingReport, NotFound, PlanUpgradeRequired, SOURCE)
 from .snapshots import SnapshotProvider, SnapshotStore
 
 
@@ -175,23 +176,36 @@ class GoalCollector:
 
     def pending_lineup_history(self, competitions: list[str], since: datetime) -> list[tuple]:
         """Finished matches of these competitions since `since` with no confirmed XI stored, newest first."""
+        return [r[:5] for r in self.pending_history(competitions, since) if r[5]]
+
+    def pending_history(self, competitions: list[str], since: datetime) -> list[tuple]:
+        """Finished matches since `since` missing the XI or the goal events, newest first:
+        (fixture_id, competition, home, away, kickoff, needs XI, needs events, total goals)."""
         qs = ",".join("?" * len(competitions))
         return self.store.db.execute(
-            f"SELECT r.fixture_id, r.competition, r.home, r.away, r.kickoff FROM results r WHERE r.fixture_id LIKE 'goal:%' "
-            f"AND r.competition IN ({qs}) AND r.kickoff >= ? AND NOT EXISTS (SELECT 1 FROM lineups l WHERE l.fixture_id = r.fixture_id "
-            f"AND l.status = 'confirmed') AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'no-lineup:' || r.fixture_id) "
-            f"ORDER BY r.kickoff DESC", (*competitions, since.isoformat())).fetchall()
+            f"SELECT * FROM (SELECT r.fixture_id, r.competition, r.home, r.away, r.kickoff, "
+            f"NOT EXISTS (SELECT 1 FROM lineups l WHERE l.fixture_id = r.fixture_id AND l.status = 'confirmed') "
+            f"AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'no-lineup:' || r.fixture_id) AS xi, "
+            f"NOT EXISTS (SELECT 1 FROM event_reads e WHERE e.fixture_id = r.fixture_id) AS ev, "
+            f"COALESCE(r.home_goals, 0) + COALESCE(r.away_goals, 0) AS goals FROM results r WHERE r.fixture_id LIKE 'goal:%' "
+            f"AND r.competition IN ({qs}) AND r.kickoff >= ?) WHERE xi OR ev ORDER BY kickoff DESC",
+            (*competitions, since.isoformat())).fetchall()
+
+    EVENTS_GRACE = timedelta(days=3)  # events published late: an empty or short list is read again until then
 
     def backfill_lineups(self, competitions: list[str], since: datetime, max_requests: int, max_seconds: float,
-                         clock: Callable[[], float] | None = None, workers: int = 4, batch: int = 60, guard=None) -> CollectStats:
-        """XI of finished matches (1 GOAL request each): the player impact model learns from them who really matters.
-        Requests run `workers` at a time and the database is written once per `batch` matches (one write to Turso costs
-        about 0.7 s: per-match writes made the first backfill ~4 s a match). Raw payloads of this backfill are not kept.
+                         clock: Callable[[], float] | None = None, workers: int = 8, batch: int = 50, guard=None) -> CollectStats:
+        """XI and goal events of finished matches (1 GOAL request each, both read at the same time for a match that needs both):
+        the player impact model learns from the XI who really matters, the goalscorer model (Fase 9) learns from the events who
+        scores. Requests run `workers` at a time and the database is written once per `batch` matches (one write to Turso costs
+        about 0.7 s: per-match writes made the first backfill ~4 s a match). Raw lineup payloads are not kept; the event list of
+        each match is (event_reads.payload, a few hundred bytes), so it can be mapped again without requests.
         Players keep the team of their most recent match seen (a transfer moves them)."""
         import time as _time
         from concurrent.futures import ThreadPoolExecutor
+        from .events import event_rows, goals_of, lineup_keys, parse_events, read_row, resolve
         clock = clock or _time.monotonic
-        st = CollectStats("lineups-history")
+        st = CollectStats("history")
         t0 = clock()
         # first rows of the backfill were dated at kickoff: moved to the usual publication time (idempotent)
         self.store.db.execute(
@@ -199,13 +213,22 @@ class GoalCollector:
             "published_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes') WHERE source = ? AND status = 'confirmed' "
             "AND observed_at = (SELECT kickoff FROM results WHERE results.fixture_id = lineups.fixture_id)", (SOURCE,))
         self.store.db.commit()
-        todo = self.pending_lineup_history(competitions, since)[:max_requests]
+        todo, n_req = [], 0
+        for row in self.pending_history(competitions, since):
+            cost = int(bool(row[5])) + int(bool(row[6]))
+            if n_req + cost > max_requests:
+                break
+            todo.append(row)
+            n_req += cost
+        now = datetime.now(timezone.utc)
+        all_keys = dict(self.store.db.execute("SELECT key, player_id FROM player_keys WHERE source = ?", (SOURCE,)).fetchall())
 
-        def fetch(row):
+        def fetch(task):
+            row, what = task
             try:
-                return row, self.client.get(f"/fixtures/{row[0].split(':', 1)[1]}/lineups").get("data"), None
+                return task, self.client.get(f"/fixtures/{row[0].split(':', 1)[1]}/{what}").get("data"), None
             except (GoalApiError, BudgetExceeded) as e:
-                return row, None, e
+                return task, None, e
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for k in range(0, len(todo), batch):
@@ -213,43 +236,94 @@ class GoalCollector:
                     st.skipped.append("tempo esaurito")
                     break
                 chunk = todo[k:k + batch]
+                tasks = [(r, w) for r in chunk for w, need in (("lineups", r[5]), ("events", r[6])) if need]
                 if guard is not None:
                     try:
-                        guard.check(len(chunk))
+                        guard.check(len(tasks))
                     except BudgetExceeded as e:
                         st.stopped_by_budget = True
                         st.errors.append(str(e))
                         break
-                lus, players, empty, sent = [], [], [], 0
-                for (fid, comp, home, away, ko), data, err in pool.map(fetch, chunk):
-                    if err is not None:
-                        st.errors.append(f"{home}-{away}: {err}")
+                got: dict[tuple[str, str], object] = {}
+                sent = 0
+                for (row, what), data, err in pool.map(fetch, tasks):
+                    if err is not None and not isinstance(err, NotFound):  # 404: nothing published, same as an empty answer
+                        st.errors.append(f"{row[2]}-{row[3]} {what}: {err}")
                         continue
                     sent += 1
+                    got[(row[0], what)] = data
+                st.requests += sent
+                if guard is not None and sent:
+                    guard.add(sent)
+                lus, players, empty, keys = [], [], [], {}
+                for fid, comp, home, away, ko, need_xi, _need_ev, _goals in chunk:
+                    if not need_xi or (fid, "lineups") not in got:
+                        continue
+                    data = got[(fid, "lineups")]
                     kickoff = datetime.fromisoformat(ko)
                     seen = kickoff - self.XI_BEFORE_KICKOFF
                     fx = Fixture(id=fid, competition=comp, home=home, away=away, kickoff=kickoff, status=FixtureStatus.FINISHED)
                     # a finished match: the XI listed is the one that played, whatever flag the payload carries
-                    got = [l.model_copy(update={"status": "confirmed", "published_at": seen, "observed_at": seen})
-                           for l in self.mapper.lineups(data, fx, seen) if len(l.starters) >= 7]
-                    if got:
-                        lus += got
+                    xi = [l.model_copy(update={"status": "confirmed", "published_at": seen, "observed_at": seen})
+                          for l in self.mapper.lineups(data, fx, seen) if len(l.starters) >= 7]
+                    keys.update(lineup_keys(data))
+                    if xi:
+                        lus += xi
                         players += [(p, kickoff) for p in self._lineup_players(data, home, away)]
                     else:
                         empty.append(fid)
-                st.requests += sent
-                if guard is not None and sent:
-                    guard.add(sent)
                 st.add("lineups", self.store.save_lineups(SOURCE, lus) if lus else 0)
                 st.add("players", self._save_newest_players(players))
+                if keys:
+                    all_keys.update(keys)
+                    self.store._bulk("INSERT OR REPLACE INTO player_keys(source, key, player_id)", [(SOURCE, k, v) for k, v in keys.items()])
                 if empty:  # nothing published for these matches: remembered, never asked again
-                    now = datetime.now(timezone.utc).isoformat()
                     self.store._bulk("INSERT OR REPLACE INTO jobs(name, done_at, detail)",
-                                     [(f"no-lineup:{f}", now, "GOAL senza formazione") for f in empty])
+                                     [(f"no-lineup:{f}", now.isoformat(), "GOAL senza formazione") for f in empty])
                     st.add("senza formazione", len(empty))
+                ev_rows, reads, late = [], [], 0
+                squads = self._squads([r for r in chunk if r[6] and (r[0], "events") in got])
+                for fid, comp, home, away, ko, _need_xi, need_ev, goals in chunk:
+                    if not need_ev or (fid, "events") not in got:
+                        continue
+                    data = got[(fid, "events")]
+                    evs = parse_events(data, home, away)
+                    if goals_of(evs) < goals and now - datetime.fromisoformat(ko) < self.EVENTS_GRACE:
+                        late += 1  # scorers not all published yet: read again on a later morning
+                        continue
+                    resolve(evs, all_keys, squads.get(fid, {}))
+                    ev_rows += event_rows(fid, evs)
+                    reads.append(read_row(fid, data, goals_of(evs), now))
+                if ev_rows:
+                    self.store._bulk("INSERT OR REPLACE INTO match_events(fixture_id, seq, minute, team, kind, detail, player_id, player_key, "
+                                     "player_name, assist_id, assist_key, assist_name, source)", ev_rows)
+                if reads:
+                    self.store._bulk("INSERT OR REPLACE INTO event_reads(fixture_id, source, n, observed_at, payload)", reads)
+                st.add("eventi", len(reads))
+                if late:
+                    st.add("eventi in ritardo", late)
                 if any(isinstance(e, str) and "budget" in e for e in st.errors):
                     break
         return st
+
+    def _squads(self, chunk: list[tuple]) -> dict[str, dict[str, dict[str, str]]]:
+        """{fixture: {team: {player id: name}}} from the stored XI and bench of these matches (names from the players table):
+        two reads for the whole batch."""
+        fids = [r[0] for r in chunk]
+        out: dict[str, dict[str, dict[str, str]]] = {r[0]: {r[2]: {}, r[3]: {}} for r in chunk}
+        if not fids:
+            return out
+        rows = self.store.db.execute(f"SELECT fixture_id, team, starters, bench FROM lineups WHERE status = 'confirmed' "
+                                     f"AND fixture_id IN ({','.join('?' * len(fids))})", fids).fetchall()
+        ids = [(f, t, set(json.loads(s or "[]")) | set(json.loads(b or "[]"))) for f, t, s, b in rows]
+        every = sorted(set().union(*(p for _, _, p in ids))) if ids else []
+        names: dict[str, str] = {}
+        for i in range(0, len(every), 500):
+            part = every[i:i + 500]
+            names.update(self.store.db.execute(f"SELECT id, name FROM players WHERE id IN ({','.join('?' * len(part))})", part).fetchall())
+        for f, team, pids in ids:
+            out.setdefault(f, {}).setdefault(team, {}).update({p: names[p] for p in pids if p in names})
+        return out
 
     def _lineup_players(self, data, home: str, away: str) -> list[Player]:
         out: list[Player] = []

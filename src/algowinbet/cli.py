@@ -538,6 +538,12 @@ def cmd_scorer_check(a) -> None:
     for row in store.db.execute("SELECT source, COUNT(*), SUM(start_rate IS NOT NULL), SUM(importance IS NOT NULL) FROM players GROUP BY source").fetchall():
         print(f"  {row}")
     print("lineups:", store.db.execute("SELECT source, COUNT(DISTINCT fixture_id) FROM lineups GROUP BY source").fetchall())
+    print("eventi letti:", store.db.execute("SELECT COUNT(*), SUM(n) FROM event_reads").fetchone())
+    for kind, n, ok in store.db.execute("SELECT kind, COUNT(*), SUM(player_id IS NOT NULL) FROM match_events GROUP BY kind").fetchall():
+        print(f"  {kind}: {n} eventi, giocatore riconosciuto {ok}")
+    for row in store.db.execute("SELECT fixture_id, minute, team, kind, player_name, player_id FROM match_events WHERE player_id IS NULL "
+                                "AND kind IN ('GOAL', 'PENALTY', 'OWN_GOAL') LIMIT 15").fetchall():
+        print(f"  non riconosciuto: {row}")
 
 
 def cmd_analysis_preview(a) -> None:
@@ -690,7 +696,8 @@ DOMESTIC = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1", "Pr
 
 
 def lineup_backfill(store, names, now: datetime, since: str, max_requests: int, max_seconds: float, keep: int):
-    """GOAL XI of finished domestic matches, within the day's GOAL budget minus `keep` requests left for the normal ticks."""
+    """GOAL XI and goal events of finished domestic matches, within the day's GOAL budget minus `keep` requests left for the
+    normal ticks. Returns the stats and (matches still without XI, matches still without events)."""
     from .collector import GoalCollector
     guard = BudgetGuard(store, "goal-api", daily=1000, reserve=50)
     left = (guard.remaining()["daily"] or 0) - keep
@@ -700,7 +707,8 @@ def lineup_backfill(store, names, now: datetime, since: str, max_requests: int, 
     coll = GoalCollector(GoalApiClient(), store, [], names)
     st = coll.backfill_lineups(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc), min(max_requests, left), max_seconds,
                                guard=guard)
-    return st, len(coll.pending_lineup_history(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc)))
+    left = coll.pending_history(DOMESTIC, datetime.fromisoformat(since).replace(tzinfo=timezone.utc))
+    return st, (sum(bool(r[5]) for r in left), sum(bool(r[6]) for r in left))
 
 
 def cmd_lineups_backfill(a) -> None:
@@ -712,7 +720,7 @@ def cmd_lineups_backfill(a) -> None:
             print("budget GOAL di oggi esaurito (tolta la quota lasciata ai giri normali)")
             return
         print(f"richieste {st.requests} · salvate {st.saved} · {'; '.join(st.skipped + st.errors)}")
-        print(f"partite ancora senza formazione dal {a.since}: {left}")
+        print(f"dal {a.since} ancora da leggere: formazioni {left[0]}, eventi {left[1]}")
     finally:
         store.close()
 
@@ -1283,14 +1291,15 @@ def cmd_collect_auto(a) -> None:
         print("Budget: " + ", ".join(f"{s} {store.usage(s, f'D{now:%Y-%m-%d}')} oggi / {store.usage(s, f'M{now:%Y-%m}')} mese"
                                      for s in ("goal-api", "oddspapi", "api-football")))
         if daily and goal is not None:
-            # Fase 6-bis: XI of finished domestic matches with the GOAL requests the day leaves over (newest first: 2025/26,
-            # then 2024/25, then every new matchday); about 830 requests and 3 minutes until the backlog is gone
+            # Fase 6-bis / 9: XI and goal events of finished domestic matches with the GOAL requests the day leaves over (newest
+            # first: 2025/26, then 2024/25, then every new matchday), 8 requests at a time
             try:
                 lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240, 120)
                 if lst is not None:
-                    print(f"formazioni storiche: {lst.requests} lette, {lst.saved}; ancora da leggere {left}", flush=True)
+                    print(f"storico formazioni ed eventi: {lst.requests} richieste, {lst.saved}; ancora da leggere: formazioni {left[0]}, "
+                          f"eventi {left[1]}", flush=True)
             except Exception as e:  # noqa: BLE001 - history only: never a reason to lose the morning run
-                print(f"formazioni storiche: non riuscito ({type(e).__name__}: {e})")
+                print(f"storico formazioni ed eventi: non riuscito ({type(e).__name__}: {e})")
         if daily:
             # quotes retention: finished matches keep only the price points anything reads again (Turso free plan: 5 GB)
             try:

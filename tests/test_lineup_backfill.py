@@ -32,7 +32,7 @@ def test_backfill_saves_xi_and_players_newest_team_wins():
             "/fixtures/none/lineups": {"home": {"startingLineups": []}, "away": {"startingLineups": []}}}
     c = GoalCollector(FakeClient(data), st, [])
     res = c.backfill_lineups(["Serie A"], datetime(2025, 7, 1, tzinfo=timezone.utc), 10, 60)
-    assert res.saved["lineups"] == 4 and res.saved["senza formazione"] == 1
+    assert res.saved["lineups"] == 4 and res.saved["senza formazione"] == 1 and res.saved["eventi"] == 3
     assert st.db.execute("SELECT team FROM players WHERE id='goal:h0'").fetchone()[0] == "Milan"  # most recent match decides
     assert c.pending_lineup_history(["Serie A"], datetime(2025, 7, 1, tzinfo=timezone.utc)) == []  # nothing asked twice
 
