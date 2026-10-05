@@ -124,7 +124,7 @@ def connect(path: str | Path):
         conn.sync()
         size = replica.stat().st_size / 1e6 if replica.exists() else 0.0
         print(f"replica del database: {'aggiornata' if had else 'scaricata da zero'} in {time.monotonic() - t0:.0f}s ({size:.0f} MB)", flush=True)
-        return HybridConnection(conn, libsql.connect(database=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))), True
+        return HybridConnection(conn, lambda: libsql.connect(database=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))), True
     if p != ":memory:":
         Path(p).parent.mkdir(parents=True, exist_ok=True)
     if os.environ.get("ALGOWINBET_DB_DRIVER") == "libsql":  # run the local test-suite on the same engine used in production
@@ -140,8 +140,18 @@ class HybridConnection:
 
     _READS = ("SELECT", "WITH", "PRAGMA", "EXPLAIN")
 
-    def __init__(self, replica, remote):
-        self.replica, self.remote, self.dirty, self.replica_ok = replica, remote, False, True
+    def __init__(self, replica, open_remote):
+        self.replica, self.open_remote, self.dirty, self.replica_ok = replica, open_remote, False, True
+        self.remote = open_remote()
+
+    def reset(self) -> None:
+        """A new connection to the primary after a dropped one (its open transaction is gone with it)."""
+        try:
+            self.remote.close()
+        except Exception:  # noqa: BLE001 - the old connection is already broken
+            pass
+        self.remote = self.open_remote()
+        self.dirty = True  # the replica pulls whatever was committed before the next read
 
     def execute(self, sql: str, *args):
         if sql.lstrip()[:7].upper().startswith(self._READS):
@@ -197,6 +207,12 @@ class SnapshotStore:
         if self.remote:
             self.db.sync()
         self.db.close()
+
+    def recover(self) -> None:
+        """After a dropped connection to Turso: reconnect (embedded replica mode); nothing to do on a local file."""
+        reset = getattr(self.db, "reset", None)
+        if reset:
+            reset()
 
     # ---------------------------------------------------------------- raw
     def put_raw(self, source: str, endpoint: str, params: dict | None, status: int, body: bytes, fetched_at: datetime,

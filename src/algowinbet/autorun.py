@@ -298,6 +298,12 @@ def run_datasets(store: SnapshotStore, cfg: AutoConfig, datasets: FootballDataCo
     return out
 
 
+def transient_db_error(e: BaseException) -> bool:
+    """A dropped HTTP connection to Turso (libsql reports it as ValueError("Hrana: `http error: ...`")), not a SQL error."""
+    m = str(e)
+    return "Hrana" in m and any(k in m for k in ("http error", "connection", "stream", "timed out", "502", "503", "504"))
+
+
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
              max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
@@ -336,50 +342,60 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
             continue
         if s == "apif" and apif is None:
             continue
-        if s == "fixtures":
-            out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
-        elif s == "results":
-            due = goal.stale_leagues("results")
-            due += [lid for lid in late_result_leagues(store, cfg, t) if lid not in due]
-            out.append(goal.sync_results(leagues=due))
-        elif s == "stats":
-            out.append(goal.sync_stats(3))
-        elif s == "lineups":
-            out.append(goal.sync_lineups(cfg.lineup_window_min))
-        elif s == "backfill":
-            st = goal.backfill_next(cfg.history_seasons)
-            if st:
+        try:
+            if s == "fixtures":
+                out.append(goal.sync_fixtures(cfg.fixtures_days, leagues=goal.stale_leagues("fixtures")))
+            elif s == "results":
+                due = goal.stale_leagues("results")
+                due += [lid for lid in late_result_leagues(store, cfg, t) if lid not in due]
+                out.append(goal.sync_results(leagues=due))
+            elif s == "stats":
+                out.append(goal.sync_stats(3))
+            elif s == "lineups":
+                out.append(goal.sync_lineups(cfg.lineup_window_min))
+            elif s == "backfill":
+                st = goal.backfill_next(cfg.history_seasons)
+                if st:
+                    out.append(st)
+            elif s == "odds":
+                st = odds.sync_odds()
+                if manual and st.requests:
+                    store.add_usage(MANUAL_REFRESHES, f"M{t:%Y-%m}", 1)
+                    for period in (f"D{t:%Y-%m-%d}", f"M{t:%Y-%m}"):
+                        store.add_usage(MANUAL_REQUESTS, period, st.requests)
                 out.append(st)
-        elif s == "odds":
-            st = odds.sync_odds()
-            if manual and st.requests:
-                store.add_usage(MANUAL_REFRESHES, f"M{t:%Y-%m}", 1)
-                for period in (f"D{t:%Y-%m-%d}", f"M{t:%Y-%m}"):
-                    store.add_usage(MANUAL_REQUESTS, period, st.requests)
+                # matches the Sisal snapshot skipped: link them, so the free price path brings Pinnacle (estimated Sisal price)
+                link = odds.link_unquoted({l.name: str(l.oddspapi) for l in cfg.leagues if l.oddspapi})
+                if link.requests or link.errors:
+                    out.append(link)
+            elif s == "history":
+                left = 600.0 if max_seconds is None else max(30.0, max_seconds - (clock() - t0))
+                if history:
+                    out.append(odds.sync_prematch_history(max_seconds=left))
+                elif manual:
+                    out.append(odds.sync_prematch_history(days_ahead=3, max_fixtures=40, max_seconds=left))
+                else:
+                    out.append(odds.sync_prematch_history(only=history_due(store, cfg, t), max_seconds=left))
+            elif s == "closing":
+                out.append(odds.sync_closing())
+            elif s == "apif":
+                out.append(apif.run())
+            elif s == "datasets":
+                # capped; the first load spreads over a few ticks. The CLI skips it here and runs it after the publication.
+                left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
+                for st in run_datasets(store, cfg, datasets, t, left, clock):
+                    out.append(st)
+                    if on_step:
+                        on_step(st)
+        except Exception as e:  # noqa: BLE001 - only a dropped connection to Turso is absorbed, anything else re-raised
+            if not transient_db_error(e):
+                raise
+            # the step's uncommitted writes are lost, its committed ones stay (every step is idempotent): a fresh connection
+            # and the rest of the tick go on, the next tick redoes this step. No failed run, no e-mail for a network blip.
+            store.recover()
+            st = CollectStats(s)
+            st.errors.append(f"connessione a Turso caduta ({e}): passo ripreso al prossimo giro")
             out.append(st)
-            # matches the Sisal snapshot skipped: link them, so the free price path brings Pinnacle (estimated Sisal price)
-            link = odds.link_unquoted({l.name: str(l.oddspapi) for l in cfg.leagues if l.oddspapi})
-            if link.requests or link.errors:
-                out.append(link)
-        elif s == "history":
-            left = 600.0 if max_seconds is None else max(30.0, max_seconds - (clock() - t0))
-            if history:
-                out.append(odds.sync_prematch_history(max_seconds=left))
-            elif manual:
-                out.append(odds.sync_prematch_history(days_ahead=3, max_fixtures=40, max_seconds=left))
-            else:
-                out.append(odds.sync_prematch_history(only=history_due(store, cfg, t), max_seconds=left))
-        elif s == "closing":
-            out.append(odds.sync_closing())
-        elif s == "apif":
-            out.append(apif.run())
-        elif s == "datasets":
-            # capped; the first load spreads over a few ticks. The CLI skips it here and runs it after the publication.
-            left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
-            for st in run_datasets(store, cfg, datasets, t, left, clock):
-                out.append(st)
-                if on_step:
-                    on_step(st)
         if on_step and len(out) > before:
             on_step(out[-1])
     return out

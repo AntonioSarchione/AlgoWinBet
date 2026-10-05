@@ -1125,18 +1125,31 @@ def cmd_collect_auto(a) -> None:
                            datasets=datasets, skip=("datasets",), apif=apif)
         if not results:
             print("tick: niente da fare")
-        from .autorun import should_publish
+        from .autorun import should_publish, transient_db_error
         from .publish import analyze_and_publish, last_publication
         if a.publish and (a.force_publish or should_publish(results, last_publication(store), datetime.now(timezone.utc))):
             if time.monotonic() - t0 > a.max_seconds + 60:
                 print("analisi: rimandata (tempo del giro esaurito)")
             else:
-                rid, res = analyze_and_publish(store)
-                print(f"analisi pubblicata (run {rid}): {len(res.fixtures)} partite, {len(res.opportunities)} mercati, "
-                      f"{len(res.optimizer.slips)} schedine" + (" — NO BET" if res.optimizer.no_bet else "") +
-                      f" ({time.monotonic() - t0:.0f}s dall'inizio)")
+                try:
+                    rid, res = analyze_and_publish(store)
+                    print(f"analisi pubblicata (run {rid}): {len(res.fixtures)} partite, {len(res.opportunities)} mercati, "
+                          f"{len(res.optimizer.slips)} schedine" + (" — NO BET" if res.optimizer.no_bet else "") +
+                          f" ({time.monotonic() - t0:.0f}s dall'inizio)")
+                except Exception as e:  # noqa: BLE001 - a dropped connection: the next tick publishes (the analysis is older)
+                    if not transient_db_error(e):
+                        raise
+                    store.recover()
+                    print(f"analisi: rimandata al prossimo giro (connessione a Turso caduta: {e})", flush=True)
         from .paper import settle
-        paper = settle(store, SnapshotProvider(store))
+        try:
+            paper = settle(store, SnapshotProvider(store))
+        except Exception as e:  # noqa: BLE001 - settling is idempotent: the next tick closes what is left
+            if not transient_db_error(e):
+                raise
+            store.recover()
+            paper = {}
+            print(f"registro: chiusura rimandata al prossimo giro (connessione a Turso caduta: {e})", flush=True)
         if any(paper.values()):
             print("registro: chiuse " + ", ".join(f"{v} {k}" for k, v in paper.items() if v), flush=True)
         from .autorun import DATASETS_SECONDS, run_datasets
