@@ -38,7 +38,9 @@ CREATE INDEX IF NOT EXISTS ix_status_fx ON player_status(fixture_id);
 CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TEXT, linked_at TEXT, PRIMARY KEY(source, ext_id));
 """
 
-LINEUP_FROM = timedelta(minutes=55)   # lineups are published about an hour before kickoff: with ticks every 30 min, 1-2 tries
+# Lineups are published 40-75 minutes before kickoff (Premier League ~75, most others ~60, national teams sometimes later). The
+# window opens at 75 minutes: with 55 a match kicking off on the hour or half hour got its first try only 30 minutes before.
+LINEUP_FROM = timedelta(minutes=75)
 LINEUP_UNTIL = timedelta(minutes=10)  # still worth one try just after kickoff (late publications)
 SQUAD_DAYS = 30
 FINISHED_AFTER = timedelta(hours=2, minutes=15)  # from kickoff: half-time score and goal events are final

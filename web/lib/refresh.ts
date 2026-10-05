@@ -11,6 +11,15 @@ export const MANUAL_MONTHLY = 5;
 export const MATCH_BEFORE_MS = 3 * 3600e3;
 export const MATCH_AFTER_MS = 3.5 * 3600e3;
 export const MAX_GAP_MS = 3 * 3600e3;
+// Lineup watch: a pinger may call every 10 minutes. The ordinary run starts only on the half-hour slots (minute 0-9 and 30-39);
+// the pings in between start a run only while a match kicking off in LINEUP_WATCH_FROM..LINEUP_WATCH_UNTIL still lacks both
+// official XI, so the lineups show 40-70 minutes before kickoff instead of 15-30 (2026-10-05: XI of the 20:45 matches
+// stored at 20:32). With a 30-minute pinger every ping is a slot and nothing changes.
+export const LINEUP_WATCH_FROM_MS = 5 * 60e3;
+export const LINEUP_WATCH_UNTIL_MS = 80 * 60e3;
+export function isHalfHourSlot(d: Date): boolean {
+  return d.getUTCMinutes() % 30 < 10;
+}
 // outside the collection hours: one or two runs for a match that kicked off 2.5-3.5 hours ago (result due, registry settled)
 export const RESULTS_FROM_MS = 2.5 * 3600e3;
 export const RESULTS_UNTIL_MS = 3.5 * 3600e3;

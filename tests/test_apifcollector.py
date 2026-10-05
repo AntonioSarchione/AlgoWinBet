@@ -182,3 +182,13 @@ def test_finished_matches_get_half_time_and_goal_order_for_the_registry():
     n = len(fake.calls)
     col.sync_finished(col_stats)
     assert len(fake.calls) == n  # nothing asked twice
+
+
+def test_lineup_window_opens_75_minutes_before_kickoff():
+    # a match on the hour: the tick 70 minutes before already tries (with 55 the first try came 30 minutes before kickoff)
+    s, col = _setup(FakeApi(lineups=False))
+    col.run()  # links the fixtures; no XI published yet
+    col.now = lambda: KO - timedelta(minutes=70)
+    assert [d[0] for d in col.due_lineups()] == ["g1"]  # g2 kicks off 80 minutes later: not yet
+    col.now = lambda: KO - timedelta(minutes=80)
+    assert col.due_lineups() == []

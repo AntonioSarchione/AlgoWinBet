@@ -256,6 +256,18 @@ export async function matchesBetween(from: Date, to: Date): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** Uncached: a match kicking off between `from` and `to` still without both official XI (any source), read by the tick route
+ * to start an extra run between the half-hour ticks while lineups are due. */
+export async function lineupsPending(from: Date, to: Date): Promise<boolean> {
+  const iso = (d: Date) => d.toISOString().replace("Z", "+00:00");
+  const rows = await all<{ x: number }>(
+    "SELECT 1 AS x FROM fixtures f WHERE f.kickoff BETWEEN ? AND ? AND f.status NOT IN ('POSTPONED', 'CANCELLED') " +
+      "AND (SELECT COUNT(DISTINCT l.team) FROM lineups l WHERE l.fixture_id = f.fixture_id AND l.status = 'confirmed') < 2 LIMIT 1",
+    [iso(from), iso(to)],
+  );
+  return rows.length > 0;
+}
+
 /** Uncached: GitHub Actions minutes of this month (counted by the collect job), read by the tick route before a run. */
 export async function actionsMinutesThisMonth(): Promise<number> {
   const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'actions-minutes' AND period = ?", [

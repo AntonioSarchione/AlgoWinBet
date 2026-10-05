@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { actionsMinutesThisMonth, matchesBetween } from "@/lib/db";
+import { actionsMinutesThisMonth, lineupsPending, matchesBetween } from "@/lib/db";
 import {
-  inCollectionHours, isDailySlot, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, minutesLevel, REPO, RESULTS_FROM_MS, RESULTS_UNTIL_MS, WORKFLOW,
+  inCollectionHours, isDailySlot, isHalfHourSlot, LINEUP_WATCH_FROM_MS, LINEUP_WATCH_UNTIL_MS, MATCH_AFTER_MS, MATCH_BEFORE_MS, MAX_GAP_MS, minutesLevel, REPO, RESULTS_FROM_MS, RESULTS_UNTIL_MS, WORKFLOW,
 } from "@/lib/refresh";
 
 // Scheduler tick from an external pinger (GitHub's own cron starts most runs hours late or never). The pinger calls this
@@ -34,6 +34,11 @@ async function tick(req: NextRequest) {
   // Actions minutes guard (database unreachable: normal level, the job checks again itself)
   const level = force ? 0 : minutesLevel(await actionsMinutesThisMonth().catch(() => 0), now);
   if (level === 2 && !isDailySlot(now)) return NextResponse.json({ skipped: "minuti GitHub quasi finiti: solo il giro del mattino" });
+  // between the half-hour slots (10-minute pinger): a run only while official lineups are due (database unreachable: no run)
+  if (!force && !resultsDue && !isHalfHourSlot(now)) {
+    const due = await lineupsPending(new Date(now.getTime() + LINEUP_WATCH_FROM_MS), new Date(now.getTime() + LINEUP_WATCH_UNTIL_MS)).catch(() => false);
+    if (!due) return NextResponse.json({ skipped: "tra due giri: nessuna formazione in attesa" });
+  }
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   if (!token) return NextResponse.json({ error: "manca GITHUB_DISPATCH_TOKEN" }, { status: 500 });
   const gh = (path: string, init?: RequestInit) =>
