@@ -737,6 +737,18 @@ def cmd_lineups_backfill(a) -> None:
         store.close()
 
 
+def cmd_scorer_eval(a) -> None:
+    """Fase 9 acceptance test: goalscorer probabilities replayed week by week against who really scored (no API request)."""
+    from .scorers import evaluate_scorers, print_scorer_eval
+    store = SnapshotStore(a.db)
+    try:
+        end = datetime.now(timezone.utc)
+        start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
+        print_scorer_eval(evaluate_scorers(store, SnapshotProvider(store), _cfg(a), start, end, DOMESTIC))
+    finally:
+        store.close()
+
+
 def cmd_lineup_eval(a) -> None:
     """Fase 6-bis acceptance test: log loss with and without the official XI, walk-forward (no API request)."""
     from .lineupeval import evaluate_lineups, print_lineup_eval
@@ -1811,6 +1823,11 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--db", default="turso")
     lb.add_argument("--aliases", default="configs/team_aliases.json")
     lb.set_defaults(fn=cmd_lineups_backfill)
+    se = sub.add_parser("scorer-eval", help="Fase 9: marcatori rigiocati settimana per settimana (nessuna richiesta API)")
+    se.add_argument("--since", default="2025-07-01", help="prima partita giudicata; lo storico prima serve da base")
+    se.add_argument("--db", default="turso")
+    se.add_argument("--config", default=None)
+    se.set_defaults(fn=cmd_scorer_eval)
     le = sub.add_parser("lineup-eval", help="le formazioni ufficiali migliorano le probabilità? (replay, nessuna richiesta API)")
     le.add_argument("--weeks", type=int, default=10)
     le.add_argument("--config", default=None)
