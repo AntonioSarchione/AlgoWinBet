@@ -69,6 +69,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosttrain" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-train ${ARG:+--force} --db "$DB" && algowinbet boost-shadow --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosteval" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-eval --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuptiming" ]; then algowinbet lineup-timing --days "${ARG:-7}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "slipreview" ]; then algowinbet slip-review --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-eval --since "${ARG:-2026-07-01}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-eval --since "${ARG:-2025-07-01}" --db "$DB"; exit $?; fi

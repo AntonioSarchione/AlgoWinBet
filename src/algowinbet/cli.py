@@ -482,6 +482,62 @@ def cmd_raw_last(a) -> None:
         print("\n" + _json.dumps(data, ensure_ascii=False)[: a.dump])
 
 
+def cmd_lineup_timing(a) -> None:
+    """When the XI of recent matches arrived (no API request): for each match, every lineup request sent (GOAL and API-Football)
+    with the minutes before kickoff and how many players it returned, and the first confirmed XI stored per source."""
+    import json as _json
+    store = SnapshotStore(a.db)
+    now = datetime.now(timezone.utc)
+    rows = store.db.execute(
+        "SELECT fixture_id, competition, home, away, MAX(kickoff) FROM fixtures WHERE kickoff >= ? AND kickoff <= ? "
+        "GROUP BY fixture_id ORDER BY MAX(kickoff)", ((now - timedelta(days=a.days)).isoformat(), now.isoformat())).fetchall()
+    links = {fid: ext for ext, fid in store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source='api-football'").fetchall()}
+
+    def mins(ko, at):
+        return int((ko - datetime.fromisoformat(at)).total_seconds() // 60)
+
+    def players(rid, src):
+        try:
+            d = _json.loads(store.raw_body(rid))
+        except ValueError:
+            return "?"
+        if src == "goal":
+            d = d.get("data") if isinstance(d, dict) else None
+            if not isinstance(d, dict):
+                return "vuota"
+            n = [len((d.get(side) or {}).get("startingLineups") or []) for side in ("home", "away")]
+            return f"hasLineups={d.get('hasLineups')} " + "+".join(map(str, n))
+        resp = d.get("response") or []
+        return "+".join(str(len(t.get("startXI") or [])) for t in resp) if resp else "vuota"
+
+    summary = {}
+    for fid, comp, home, away, ko in rows:
+        ko = datetime.fromisoformat(ko)
+        reqs = []
+        goal_id = fid.split(":", 1)[-1]
+        for rid, at, status in store.db.execute("SELECT id, fetched_at, status FROM raw_requests WHERE source='goal' AND endpoint=? ORDER BY id",
+                                                (f"/fixtures/{goal_id}/lineups",)).fetchall():
+            reqs.append(f"GOAL {mins(ko, at)}' {status} {players(rid, 'goal')}")
+        if fid in links:
+            for rid, at, status in store.db.execute("SELECT id, fetched_at, status FROM raw_requests WHERE source='api-football' "
+                                                    "AND endpoint='/fixtures/lineups' AND params LIKE ? ORDER BY id",
+                                                    (f'%"{links[fid]}"%',)).fetchall():
+                reqs.append(f"APIF {mins(ko, at)}' {status} {players(rid, 'apif')}")
+        first = {src: mins(ko, at) for src, at in store.db.execute(
+            "SELECT source, MIN(observed_at) FROM lineups WHERE fixture_id=? AND status='confirmed' GROUP BY source", (fid,)).fetchall()}
+        best = max(first.values()) if first else None
+        key = comp
+        s = summary.setdefault(key, [0, 0, 0])
+        s[0] += 1
+        s[1] += best is not None and best >= 30
+        s[2] += best is None
+        print(f"{ko:%d/%m %H:%M} {comp[:18]:<18} {home}-{away}: XI " +
+              (", ".join(f"{k} {v}' prima" for k, v in first.items()) if first else "MAI") + (f" | {'; '.join(reqs)}" if reqs else " | nessuna richiesta"))
+    print("\nper competizione: partite, XI almeno 30' prima, XI mai")
+    for comp, (n, ok, never) in sorted(summary.items()):
+        print(f"  {comp}: {n}, {ok}, {never}")
+
+
 def cmd_scorer_check(a) -> None:
     """Fase 9 survey (no request): which goalscorer data the stored raw responses already hold. OddsPapi player-prop markets
     per bookmaker, GOAL lineups / events fields, API-Football goal events, players table."""
@@ -1902,6 +1958,10 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
     rl.add_argument("--db", default="algowinbet.db")
     rl.set_defaults(fn=cmd_raw_last)
+    lt = sub.add_parser("lineup-timing", help="quando sono arrivate le formazioni delle ultime partite (nessuna richiesta API)")
+    lt.add_argument("--days", type=float, default=7)
+    lt.add_argument("--db", default="algowinbet.db")
+    lt.set_defaults(fn=cmd_lineup_timing)
     sc = sub.add_parser("scorer-check", help="Fase 9: dati sui marcatori già salvati (nessuna richiesta API)")
     sc.add_argument("--days", type=int, default=14)
     sc.add_argument("--max-raw", type=int, default=400)
