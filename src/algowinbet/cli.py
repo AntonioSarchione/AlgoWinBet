@@ -516,7 +516,7 @@ def cmd_scorer_check(a) -> None:
                     for odata in (mdata.get("outcomes") or {}).values():
                         keys = [k for k in (odata.get("players") or {}) if k != "0"]
                         players[book][mid] += len(keys)
-                        if sample is None and keys and book.startswith("sisal"):
+                        if keys and book.startswith("sisal") and (sample is None or (ep == "/odds-by-tournaments" and sample[0] != ep)):
                             sample = (ep, mid, row.get("fixtureId"), {k: odata["players"][k] for k in keys[:2]})
     print(f"\nrisposte quote lette: {len(raws)} (ultimi {a.days} giorni)")
     for book in sorted(seen):
@@ -535,7 +535,7 @@ def cmd_scorer_check(a) -> None:
             for line in shape_summary(last[1], max_depth=7)[: a.max_lines]:
                 print("  " + line)
     print("\ntabella players:")
-    for row in store.db.execute("SELECT source, COUNT(*), SUM(start_rate IS NOT NULL), SUM(importance IS NOT NULL) FROM players GROUP BY source"):
+    for row in store.db.execute("SELECT source, COUNT(*), SUM(start_rate IS NOT NULL), SUM(importance IS NOT NULL) FROM players GROUP BY source").fetchall():
         print(f"  {row}")
     print("lineups:", store.db.execute("SELECT source, COUNT(DISTINCT fixture_id) FROM lineups GROUP BY source").fetchall())
 
