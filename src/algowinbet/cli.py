@@ -750,6 +750,21 @@ def cmd_lineups_backfill(a) -> None:
         store.close()
 
 
+def cmd_xi_eval(a) -> None:
+    """Our probable lineups replayed against the official XI (no API request)."""
+    from .probable import evaluate_xi, load_xi_data, print_xi_eval
+    store = SnapshotStore(a.db)
+    try:
+        data = load_xi_data(store, SnapshotProvider(store))
+        start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
+        end = datetime.now(timezone.utc)
+        print_xi_eval(evaluate_xi(data, start, end))
+        print("solo i 7 campionati:")
+        print_xi_eval(evaluate_xi(data, start, end, competitions=DOMESTIC))
+    finally:
+        store.close()
+
+
 def cmd_scorer_eval(a) -> None:
     """Fase 9 acceptance test: goalscorer probabilities replayed week by week against who really scored (no API request)."""
     from .scorers import evaluate_scorers, print_scorer_eval
@@ -1839,6 +1854,10 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--db", default="turso")
     lb.add_argument("--aliases", default="configs/team_aliases.json")
     lb.set_defaults(fn=cmd_lineups_backfill)
+    xe = sub.add_parser("xi-eval", help="probabili formazioni calcolate da noi contro le ufficiali (replay, nessuna richiesta API)")
+    xe.add_argument("--since", default="2026-07-01", help="prima partita giudicata; le formazioni prima servono da base")
+    xe.add_argument("--db", default="turso")
+    xe.set_defaults(fn=cmd_xi_eval)
     se = sub.add_parser("scorer-eval", help="Fase 9: marcatori rigiocati settimana per settimana (nessuna richiesta API)")
     se.add_argument("--since", default="2025-07-01", help="prima partita giudicata; lo storico prima serve da base")
     se.add_argument("--db", default="turso")
