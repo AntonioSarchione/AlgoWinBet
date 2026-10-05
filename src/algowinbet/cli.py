@@ -477,6 +477,69 @@ def cmd_raw_last(a) -> None:
         print("\n" + _json.dumps(data, ensure_ascii=False)[: a.dump])
 
 
+def cmd_scorer_check(a) -> None:
+    """Fase 9 survey (no request): which goalscorer data the stored raw responses already hold. OddsPapi player-prop markets
+    per bookmaker, GOAL lineups / events fields, API-Football goal events, players table."""
+    import json as _json
+    from collections import Counter, defaultdict
+    from .providers.goalapi import shape_summary
+    store = SnapshotStore(a.db)
+    since = (datetime.now(timezone.utc) - timedelta(days=a.days)).isoformat()
+    cat = store.last_raw("oddspapi", "/markets")
+    props = {}
+    if cat:
+        for m in cat[1] if isinstance(cat[1], list) else cat[1].get("data") or []:
+            if m.get("playerProp"):
+                props[int(m["marketId"])] = f"{m.get('marketName')} [{m.get('marketType')}|{m.get('period')}]"
+    print(f"OddsPapi: {len(props)} mercati giocatore nel catalogo")
+    for mid, name in sorted(props.items())[:60]:
+        print(f"  {mid}: {name}")
+    seen = defaultdict(lambda: defaultdict(set))  # book -> market id -> fixture ids
+    players = defaultdict(Counter)  # book -> number of player entries per market
+    sample = None
+    raws = store.db.execute("SELECT id, endpoint FROM raw_requests WHERE source='oddspapi' AND status=200 AND fetched_at >= ? AND endpoint IN "
+                            "('/odds-by-tournaments', '/historical-odds') ORDER BY id DESC LIMIT ?", (since, a.max_raw)).fetchall()
+    for rid, ep in raws:
+        body = _json.loads(store.raw_body(rid))
+        rows = body if isinstance(body, list) else body.get("data", body) if isinstance(body, dict) else []
+        for row in rows if isinstance(rows, list) else [rows]:
+            books = row.get("bookmakerOdds") or row.get("bookmakers") or {}
+            for book, bdata in books.items():
+                for mid_s, mdata in ((bdata or {}).get("markets") or {}).items():
+                    try:
+                        mid = int(mid_s)
+                    except ValueError:
+                        continue
+                    if mid not in props:
+                        continue
+                    seen[book][mid].add(row.get("fixtureId"))
+                    for odata in (mdata.get("outcomes") or {}).values():
+                        keys = [k for k in (odata.get("players") or {}) if k != "0"]
+                        players[book][mid] += len(keys)
+                        if sample is None and keys and book.startswith("sisal"):
+                            sample = (ep, mid, row.get("fixtureId"), {k: odata["players"][k] for k in keys[:2]})
+    print(f"\nrisposte quote lette: {len(raws)} (ultimi {a.days} giorni)")
+    for book in sorted(seen):
+        fx = set().union(*seen[book].values())
+        print(f"  {book}: {len(fx)} partite con mercati giocatore")
+        for mid, fids in sorted(seen[book].items(), key=lambda kv: -len(kv[1]))[:12]:
+            print(f"    {mid} {props.get(mid)}: {len(fids)} partite, {players[book][mid]} voci giocatore")
+    if sample:
+        print(f"\nesempio Sisal ({sample[0]}, mercato {sample[1]}, partita {sample[2]}):\n  {_json.dumps(sample[3], ensure_ascii=False)[:1500]}")
+    for src, ep in (("goal-api", "%/lineups"), ("goal-api", "%/events"), ("goal-api", "/teams/%/players"), ("api-football", "/fixtures/events"),
+                    ("api-football", "/players%"), ("api-football", "/fixtures/players")):
+        n = store.db.execute("SELECT COUNT(*) FROM raw_requests WHERE source=? AND endpoint LIKE ? AND status=200", (src, ep)).fetchone()[0]
+        print(f"\n{src} {ep}: {n} risposte salvate")
+        last = store.last_raw(src, ep) if n else None
+        if last:
+            for line in shape_summary(last[1], max_depth=7)[: a.max_lines]:
+                print("  " + line)
+    print("\ntabella players:")
+    for row in store.db.execute("SELECT source, COUNT(*), SUM(start_rate IS NOT NULL), SUM(importance IS NOT NULL) FROM players GROUP BY source"):
+        print(f"  {row}")
+    print("lineups:", store.db.execute("SELECT source, COUNT(DISTINCT fixture_id) FROM lineups GROUP BY source").fetchall())
+
+
 def cmd_analysis_preview(a) -> None:
     """The next week's analysis as the next publication would run it, without publishing (no request): opportunities per
     market family and status, corners / cards ones listed."""
@@ -1686,7 +1749,13 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
     rl.add_argument("--db", default="algowinbet.db")
     rl.set_defaults(fn=cmd_raw_last)
-    ap = sub.add_parser("analysis-preview", help="analisi della prossima settimana senza pubblicarla (nessuna richiesta)")
+    sc = sub.add_parser("scorer-check", help="Fase 9: dati sui marcatori già salvati (nessuna richiesta API)")
+    sc.add_argument("--days", type=int, default=14)
+    sc.add_argument("--max-raw", type=int, default=400)
+    sc.add_argument("--max-lines", type=int, default=60)
+    sc.add_argument("--db", default="algowinbet.db")
+    sc.set_defaults(fn=cmd_scorer_check)
+    ap = sub.add_parser("analysis-preview",help="analisi della prossima settimana senza pubblicarla (nessuna richiesta)")
     ap.add_argument("--db", default="turso")
     ap.add_argument("--days", type=float, default=7.0)
     ap.set_defaults(fn=cmd_analysis_preview)
