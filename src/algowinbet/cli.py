@@ -1384,7 +1384,19 @@ def cmd_odds_collect(a) -> None:
 
 
 def cmd_collect_auto(a) -> None:
-    """One scheduler tick (GitHub Actions): runs only what is due; keys and DB credentials come from the environment."""
+    """One scheduler tick (GitHub Actions): runs only what is due; keys and DB credentials come from the environment.
+    A dropped connection to Turso anywhere in the tick ends it without a failed run: every step is idempotent, so the next tick
+    (30 minutes later) redoes what was lost, and a network blip never sends GitHub's failure e-mail. Only real errors fail."""
+    from .autorun import transient_db_error
+    try:
+        _collect_auto(a)
+    except Exception as e:  # noqa: BLE001 - re-raised unless it is a dropped connection
+        if not transient_db_error(e):
+            raise
+        print(f"::warning::connessione a Turso caduta ({type(e).__name__}: {e}): giro interrotto, il prossimo riprende da qui", flush=True)
+
+
+def _collect_auto(a) -> None:
     cfg = AutoConfig.load(a.config)
     try:
         store = SnapshotStore(a.db)

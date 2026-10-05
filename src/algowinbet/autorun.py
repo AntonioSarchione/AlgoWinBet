@@ -299,9 +299,11 @@ def run_datasets(store: SnapshotStore, cfg: AutoConfig, datasets: FootballDataCo
 
 
 def transient_db_error(e: BaseException) -> bool:
-    """A dropped HTTP connection to Turso (libsql reports it as ValueError("Hrana: `http error: ...`")), not a SQL error."""
+    """A dropped HTTP connection to Turso, not a SQL error. libsql reports it as ValueError("Hrana: `http error: ...`") on a
+    statement and as ValueError("sync error: http dispatch error: ...") on a replica sync (seen 2026-10-02 and 10-04)."""
     m = str(e)
-    return "Hrana" in m and any(k in m for k in ("http error", "connection", "stream", "timed out", "502", "503", "504"))
+    return (("Hrana" in m or "sync error" in m)
+            and any(k in m for k in ("http error", "dispatch error", "connection", "stream", "timed out", "502", "503", "504")))
 
 
 def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, odds: OddsCollector | None,

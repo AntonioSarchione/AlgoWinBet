@@ -65,3 +65,22 @@ def test_hybrid_reset_opens_a_new_primary_connection():
     h.reset()
     assert opened == ["open", "closed", "open"] and h.dirty
     SnapshotStore(":memory:").recover()  # local file: nothing to reconnect
+
+
+def test_replica_sync_drop_is_transient():
+    assert transient_db_error(ValueError("sync error: http dispatch error: connection closed before message completed"))
+    assert not transient_db_error(ValueError("sync error: invalid auth token"))
+
+
+def test_a_drop_outside_the_steps_ends_the_tick_without_failing(monkeypatch, capsys):
+    from algowinbet import cli
+
+    def boom(a):
+        raise DROP
+    monkeypatch.setattr(cli, "_collect_auto", boom)
+    cli.cmd_collect_auto(None)  # no exception: exit code 0, no failure e-mail
+    assert "Turso" in capsys.readouterr().out
+
+    monkeypatch.setattr(cli, "_collect_auto", lambda a: (_ for _ in ()).throw(KeyError("bug")))
+    with pytest.raises(KeyError):
+        cli.cmd_collect_auto(None)
