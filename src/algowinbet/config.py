@@ -53,6 +53,9 @@ class ModelCfg(BaseModel):
     # gain; quality replay and calibration are measured without lineups). Re-test when the 2025/26 XI are all stored.
     lineup_impact: str = "off"
     lineup_scale: float = 1.0
+    # Fase 10: LightGBM correction of the Dixon-Coles 1X2 (boost.py). "off" until boost-eval shows a clear gain on the
+    # walk-forward replay (>= 0.005 log loss, interval below zero); the live engine does not use it yet
+    boost: str = "off"
     l2_comp_home: float | None = None
     l2_comp_mu: float = 0.0
     aliases_path: str = "configs/team_aliases.json"  # team names shared by our feeds and the international results

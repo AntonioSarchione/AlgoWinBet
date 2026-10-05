@@ -987,6 +987,18 @@ def cmd_quality(a) -> None:
         store.close()
 
 
+def cmd_boost_eval(a) -> None:
+    """Fase 10: walk-forward replay of the LightGBM correction on top of Dixon-Coles (no API request)."""
+    from .boost import evaluate_boost, print_boost
+    from .modeleval import default_window
+    store = SnapshotStore(a.db)
+    try:
+        start, end = default_window(weeks=a.weeks)
+        print_boost(evaluate_boost(SnapshotProvider(store), _cfg(a), start, end, warmup_weeks=a.warmup, retrain_every=a.retrain))
+    finally:
+        store.close()
+
+
 def cmd_model_eval(a) -> None:
     """Walk-forward comparison of model variants on the stored results (no API request)."""
     from .modeleval import VARIANTS, default_window, evaluate, print_report
@@ -1590,6 +1602,13 @@ def build_parser() -> argparse.ArgumentParser:
     qa.add_argument("--save", action="store_true", help="salva il report per la pagina Qualità del modello")
     qa.add_argument("--config")
     qa.set_defaults(fn=cmd_quality)
+    be = sub.add_parser("boost-eval", help="Fase 10: LightGBM sopra Dixon-Coles, replay walk-forward (nessuna richiesta API)")
+    be.add_argument("--db", default="turso")
+    be.add_argument("--weeks", type=int, default=60)
+    be.add_argument("--warmup", type=int, default=12, help="settimane usate solo per addestrare")
+    be.add_argument("--retrain", type=int, default=4, help="riaddestra ogni N settimane")
+    be.add_argument("--config")
+    be.set_defaults(fn=cmd_boost_eval)
     me = sub.add_parser("model-eval", help="confronto walk-forward delle varianti del modello sui risultati salvati (nessuna richiesta)")
     me.add_argument("--db", default="turso")
     me.add_argument("--weeks", type=int, default=52)
