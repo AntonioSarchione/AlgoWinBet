@@ -1,4 +1,5 @@
 """Fase 10 skeleton: LightGBM on top of Dixon-Coles, walk-forward with no look-ahead."""
+import math
 from datetime import timedelta
 
 import pytest
@@ -23,6 +24,16 @@ def test_team_features_use_only_results_known_at_the_cutoff():
     assert load == 2.0
 
 
+def test_shot_and_xg_form_from_the_last_matches_that_have_them():
+    rows = [_r("1", "A", "B", utc(2026, 9, 1, 18), 2, 0), _r("2", "C", "A", utc(2026, 9, 5, 18), 1, 1),
+            _r("3", "A", "D", utc(2026, 9, 6, 18), 0, 0)]
+    stats = {"1": {"shots": (14.0, 6.0), "expected_goals": (1.8, 0.4)}, "2": {"shots": (10.0, 8.0)}}  # A away in match 2
+    log = TeamLog(rows, stats)
+    f = log.stat_features("A", utc(2026, 9, 7))
+    assert f[("shots", "for")] == 11.0 and f[("shots", "against")] == 8.0  # (14 + 8) / 2 for, (6 + 10) / 2 against
+    assert f[("expected_goals", "for")] == 1.8 and math.isnan(f[("shots_on_target", "for")])
+
+
 @pytest.fixture(scope="module")
 def rows():
     prov = MockProvider(seed=3, past_rounds=30, future_rounds=0)
@@ -39,9 +50,10 @@ def test_rows_carry_the_dixon_coles_probabilities_and_every_feature(rows):
 
 def test_walk_forward_evaluation_runs_and_judges_against_the_bar(rows):
     pytest.importorskip("lightgbm")
-    rep = evaluate_boost(None, Config(), None, None, warmup_weeks=6, retrain_every=4, rows=rows)
+    rep = evaluate_boost(None, Config(), None, None, retrain_every=4, rows=rows, min_train=300)
     t = rep.groups["tutte"]
-    assert rep.trained >= 1 and t["n"] > 0 and set(rep.importance) <= set(FEATURES)
+    assert rep.trained >= 1 and t["n"] > 0 and set(rep.importance) <= set(FEATURES) and len(rep.rounds) == rep.trained
+    assert rep.stats_share == 0.0  # the mock has no shots / xG
     assert abs(t["ll_boost"] - t["ll_dc"] - t["diff"][0]) < 1e-9
     # on mock data (simulated from a Dixon-Coles-like truth) there is nothing to learn: no clear gain
     assert verdict(rep).startswith("non basta")

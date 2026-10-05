@@ -533,6 +533,19 @@ class SnapshotProvider:
                 out.setdefault(canon.get(fid, fid), key)
         return out
 
+    def match_stat_values(self, names: tuple[str, ...]) -> dict[str, dict[str, tuple[float, float]]]:
+        """Full-time (home, away) values of the given stats per match, under the canonical result id, in one read.
+        football-data first when both sources have a stat (the season files are the complete record)."""
+        marks = ",".join("?" * len(names))
+        rows = self.store.db.execute(f"SELECT fixture_id, stat, home, away, source FROM match_stats WHERE period='FT' AND stat IN ({marks})",
+                                     names).fetchall()
+        canon = self._unique_results()[1]
+        out: dict[str, dict[str, tuple[float, float]]] = {}
+        for fid, name, h, a, source in sorted(rows, key=lambda r: r[4] == "football-data"):  # football-data written last, wins
+            if h is not None and a is not None:
+                out.setdefault(canon.get(fid, fid), {})[name] = (float(h), float(a))
+        return out
+
     def stat_counts(self, stat: str) -> dict[str, tuple[float, float]]:
         """Full-time (home, away) counts of 'corners' or 'cards' (yellow + red) per match, under the canonical result id.
         GOAL lists red cards only when there is one: with the yellow cards known, a missing red count is 0."""

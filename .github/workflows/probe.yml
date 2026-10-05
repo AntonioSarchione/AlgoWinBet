@@ -67,7 +67,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rules" ]; then pip install -q pypdf && python scripts/sisal_rules.py $ARG; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupeval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineup-eval --weeks "${ARG:-10}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosteval" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-eval --weeks "${ARG:-60}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosteval" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-eval --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuphist" ]; then algowinbet lineup-history-check --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "calibration" ]; then algowinbet registry-calibration --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "registry" ]; then algowinbet registry-check "$ARG" --db "$DB"; exit $?; fi

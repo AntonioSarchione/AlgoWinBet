@@ -994,7 +994,7 @@ def cmd_boost_eval(a) -> None:
     store = SnapshotStore(a.db)
     try:
         start, end = default_window(weeks=a.weeks)
-        print_boost(evaluate_boost(SnapshotProvider(store), _cfg(a), start, end, warmup_weeks=a.warmup, retrain_every=a.retrain))
+        print_boost(evaluate_boost(SnapshotProvider(store), _cfg(a), start, end, history_weeks=a.history, retrain_every=a.retrain))
     finally:
         store.close()
 
@@ -1605,7 +1605,7 @@ def build_parser() -> argparse.ArgumentParser:
     be = sub.add_parser("boost-eval", help="Fase 10: LightGBM sopra Dixon-Coles, replay walk-forward (nessuna richiesta API)")
     be.add_argument("--db", default="turso")
     be.add_argument("--weeks", type=int, default=60)
-    be.add_argument("--warmup", type=int, default=12, help="settimane usate solo per addestrare")
+    be.add_argument("--history", type=int, default=70, help="settimane prima della prova usate solo per addestrare")
     be.add_argument("--retrain", type=int, default=4, help="riaddestra ogni N settimane")
     be.add_argument("--config")
     be.set_defaults(fn=cmd_boost_eval)
