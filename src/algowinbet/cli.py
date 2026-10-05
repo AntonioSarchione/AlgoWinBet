@@ -491,11 +491,15 @@ def cmd_scorer_check(a) -> None:
         for m in cat[1] if isinstance(cat[1], list) else cat[1].get("data") or []:
             if m.get("playerProp"):
                 props[int(m["marketId"])] = f"{m.get('marketName')} [{m.get('marketType')}|{m.get('period')}]"
+    for m in (cat[1] if cat and isinstance(cat[1], list) else (cat[1].get("data") or []) if cat else []):
+        if int(m.get("marketId") or 0) in (10730, 10731, 10732, 10733):
+            print(_json.dumps(m, ensure_ascii=False)[:800])
     print(f"OddsPapi: {len(props)} mercati giocatore nel catalogo")
     for mid, name in sorted(props.items())[:60]:
         print(f"  {mid}: {name}")
     seen = defaultdict(lambda: defaultdict(set))  # book -> market id -> fixture ids
     players = defaultdict(Counter)  # book -> number of player entries per market
+    any_fx = defaultdict(set)  # book -> every fixture with prices
     sample = None
     raws = store.db.execute("SELECT id, endpoint FROM raw_requests WHERE source='oddspapi' AND status=200 AND fetched_at >= ? AND endpoint IN "
                             "('/odds-by-tournaments', '/historical-odds') ORDER BY id DESC LIMIT ?", (since, a.max_raw)).fetchall()
@@ -505,6 +509,8 @@ def cmd_scorer_check(a) -> None:
         for row in rows if isinstance(rows, list) else [rows]:
             books = row.get("bookmakerOdds") or row.get("bookmakers") or {}
             for book, bdata in books.items():
+                if (bdata or {}).get("markets"):
+                    any_fx[book].add(row.get("fixtureId"))
                 for mid_s, mdata in ((bdata or {}).get("markets") or {}).items():
                     try:
                         mid = int(mid_s)
@@ -519,9 +525,15 @@ def cmd_scorer_check(a) -> None:
                         if keys and book.startswith("sisal") and (sample is None or (ep == "/odds-by-tournaments" and sample[0] != ep)):
                             sample = (ep, mid, row.get("fixtureId"), {k: odata["players"][k] for k in keys[:2]})
     print(f"\nrisposte quote lette: {len(raws)} (ultimi {a.days} giorni)")
+    from .oddscollector import LINKS_SCHEMA
+    store.db.executescript(LINKS_SCHEMA)
+    comp_of = dict(store.db.execute("SELECT l.ext_id, r.competition FROM fixture_links l JOIN (SELECT fixture_id, competition FROM fixtures "
+                                    "GROUP BY fixture_id) r ON r.fixture_id = l.fixture_id WHERE l.source = 'oddspapi'").fetchall())
     for book in sorted(seen):
         fx = set().union(*seen[book].values())
-        print(f"  {book}: {len(fx)} partite con mercati giocatore")
+        tot = Counter(comp_of.get(str(f), "?") for f in any_fx[book])
+        print(f"  {book}: {len(fx)} partite con mercati giocatore su {len(any_fx[book])} quotate ({', '.join(f'{c} {n}' for c, n in tot.most_common())}): "
+              + ", ".join(f"{c} {n}" for c, n in Counter(comp_of.get(str(f), "?") for f in fx).most_common()))
         for mid, fids in sorted(seen[book].items(), key=lambda kv: -len(kv[1]))[:12]:
             print(f"    {mid} {props.get(mid)}: {len(fids)} partite, {players[book][mid]} voci giocatore")
     if sample:
