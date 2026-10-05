@@ -551,6 +551,16 @@ def cmd_scorer_check(a) -> None:
         if last:
             for line in shape_summary(last[1], max_depth=7)[: a.max_lines]:
                 print("  " + line)
+    miss, total, sample_m = 0, 0, None
+    for rid, ep, at in store.db.execute("SELECT id, endpoint, fetched_at FROM raw_requests WHERE source='goal-api' AND endpoint LIKE '%/lineups' "
+                                        "AND status=200 ORDER BY id DESC LIMIT 300").fetchall():
+        d = (_json.loads(store.raw_body(rid)) or {}).get("data") or {}
+        total += 1
+        got = [p for side in ("home", "away") for p in ((d.get(side) or {}).get("missingPlayers") or [])]
+        if got:
+            miss += 1
+            sample_m = sample_m or (ep, at, got[:3])
+    print(f"\nGOAL formazioni con missingPlayers: {miss} su {total}" + (f"; esempio {sample_m}" if sample_m else ""))
     print("\ntabella players:")
     for row in store.db.execute("SELECT source, COUNT(*), SUM(start_rate IS NOT NULL), SUM(importance IS NOT NULL) FROM players GROUP BY source").fetchall():
         print(f"  {row}")
