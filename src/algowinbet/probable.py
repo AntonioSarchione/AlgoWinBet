@@ -221,6 +221,8 @@ class XiReport:
     end: datetime
     scores: dict[str, XiScore]
     weights: dict[str, float]
+    diag: dict[str, float] = field(default_factory=dict)
+    by_month: dict[str, list[float]] = field(default_factory=dict)  # month -> [sheets, model guessed, last-XI guessed]
 
 
 def _ll(p: float, y: int) -> float:
@@ -241,6 +243,8 @@ def evaluate_xi(data: XiData, start: datetime, end: datetime, min_history: int =
                 rows += [(s.kickoff, c.x, float(c.player_id in s.starters)) for c in candidates(data, t2, s.kickoff, s.competition, s.fixture_id)]
     rows.sort(key=lambda r: r[0])
     model, fitted_for = XiModel(), None
+    diag = defaultdict(float)
+    by_month: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
     for ko, team, sh in targets:
         monday = (ko - timedelta(days=ko.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         if fitted_for != monday:
@@ -256,6 +260,19 @@ def evaluate_xi(data: XiData, start: datetime, end: datetime, min_history: int =
         if pred is None:
             continue
         last = past[-1].starters
+        pool = set(pred.probs)
+        diag["titolari ufficiali"] += len(actual)
+        diag["titolari tra i candidati"] += len(actual & pool)
+        diag["titolari senza ruolo"] += sum(p not in data.roles for p in actual)
+        diag["titolari esordienti (mai visti prima)"] += sum(all(p not in x.starters + x.bench for x in past) for p in actual)
+        diag["candidati segnati fuori"] += sum(1 for p in pool if _status(data, sh.fixture_id, p, ko - XI_TIME) in ("OUT", "SUSPENDED"))
+        diag["candidati in dubbio"] += sum(1 for p in pool if _status(data, sh.fixture_id, p, ko - XI_TIME) == "DOUBTFUL")
+        diag["formazioni con stato infortuni"] += float(any(k[0] == sh.fixture_id for k in data.status))
+        diag["giorni dall'ultima partita"] += (ko - past[-1].kickoff).total_seconds() / 86400.0
+        bm = by_month[f"{ko:%Y-%m}"]
+        bm[0] += 1
+        bm[1] += len(actual & set(pred.xi))
+        bm[2] += len(actual & set(last))
         last8 = past[-8:]
         rate8 = {p: sum(p in s.starters for s in last8) / len(last8) for s in last8 for p in s.starters + s.bench}
         rate8 = scale_to_xi(rate8, data.roles)
@@ -270,7 +287,8 @@ def evaluate_xi(data: XiData, start: datetime, end: datetime, min_history: int =
                 for p in set(probs) | actual:
                     sc.ll += _ll(probs.get(p, 0.0), int(p in actual))
                     sc.rows += 1
-    return XiReport(start, end, scores, dict(zip(("intercetta",) + FEATURES, model.w.tolist())) if model.w is not None else {})
+    return XiReport(start, end, scores, dict(zip(("intercetta",) + FEATURES, model.w.tolist())) if model.w is not None else {},
+                    dict(diag), dict(by_month))
 
 
 def print_xi_eval(rep: XiReport) -> None:
@@ -280,3 +298,7 @@ def print_xi_eval(rep: XiReport) -> None:
         print(f"  {name:22} {sc.line()}")
     if rep.weights:
         print("  pesi del modello: " + ", ".join(f"{k} {v:+.2f}" for k, v in rep.weights.items()))
+    for m, (k, a, b) in sorted(rep.by_month.items()):
+        print(f"  {m}: {int(k)} formazioni, modello {a / k:.2f}/11, stessa dell'ultima {b / k:.2f}/11")
+    if rep.diag:
+        print("  diagnostica (totali sulle formazioni giudicate): " + ", ".join(f"{k} {v:.0f}" for k, v in rep.diag.items()))

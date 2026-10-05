@@ -758,9 +758,8 @@ def cmd_xi_eval(a) -> None:
         data = load_xi_data(store, SnapshotProvider(store))
         start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
         end = datetime.now(timezone.utc)
+        print(f"formazioni salvate: {sum(len(v) for v in data.sheets.values())} di {len(data.sheets)} squadre; righe infortuni {len(data.status)}")
         print_xi_eval(evaluate_xi(data, start, end))
-        print("solo i 7 campionati:")
-        print_xi_eval(evaluate_xi(data, start, end, competitions=DOMESTIC))
     finally:
         store.close()
 
