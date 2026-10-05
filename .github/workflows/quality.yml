@@ -2,9 +2,8 @@ name: quality
 
 # Weekly replay of the model on the finished matches (no API request): log loss, calibration, value test and CLV, saved on
 # Turso for the "Qualità del modello" page.
+# Started by the Monday morning collect run (actionsminutes.dispatch_quality): GitHub's own schedule never fired it.
 on:
-  schedule:
-    - cron: "30 4 * * 1"   # Monday 04:30 UTC, after the weekend's results
   workflow_dispatch:
     inputs:
       weeks:

@@ -107,11 +107,16 @@ def dispatch_quality(store, version: str, now: datetime, post=None) -> str | Non
     QUALITY_TRIES starts per version (one a morning), never when the replay would bring the month to the minimum level.
     Needs GITHUB_TOKEN with actions: write (a workflow_dispatch event may be sent with it)."""
     from .meta import load_meta
-    if load_meta(store, version) or store.usage(QUALITY_SOURCE, version) >= QUALITY_TRIES:
+    if not load_meta(store, version) and store.usage(QUALITY_SOURCE, version) < QUALITY_TRIES:
+        key, why = version, f"per {version} (nessun meta-modello per questa versione)"
+    elif now.weekday() == 0 and store.usage(QUALITY_SOURCE, f"W{now:%G-%V}") < 1 and not _quality_since(store, now.replace(hour=0, minute=0, second=0, microsecond=0)):
+        # the weekly replay (and the weekly backup): GitHub's own schedule never fired it, the morning run is reliable
+        key, why = f"W{now:%G-%V}", "settimanale"
+    else:
         return None
     used = store.usage(SOURCE, month_key(now))
     if used + QUALITY_MINUTES >= MINIMUM_AT:
-        return f"verifica qualità per {version} rinviata: minuti GitHub {used}/{BUDGET}"
+        return f"verifica qualità {why} rinviata: minuti GitHub {used}/{BUDGET}"
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     if post is None:
         if not token or not repo:
@@ -122,7 +127,14 @@ def dispatch_quality(store, version: str, now: datetime, post=None) -> str | Non
                                          headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
             return urllib.request.urlopen(req, timeout=30).status
     status = post(f"https://api.github.com/repos/{repo}/actions/workflows/quality.yml/dispatches")
-    store.add_usage(QUALITY_SOURCE, version, 1)
+    store.add_usage(QUALITY_SOURCE, key, 1)
     if status == 204:
-        return f"verifica qualità avviata per {version} (nessun meta-modello per questa versione)"
-    return f"verifica qualità per {version}: GitHub {status}"
+        return f"verifica qualità avviata {why}"
+    return f"verifica qualità {why}: GitHub {status}"
+
+
+def _quality_since(store, t: datetime) -> bool:
+    try:
+        return bool(store.db.execute("SELECT 1 FROM quality_runs WHERE created_at >= ? LIMIT 1", (t.isoformat(),)).fetchone())
+    except Exception:  # noqa: BLE001 - no replay saved yet
+        return False

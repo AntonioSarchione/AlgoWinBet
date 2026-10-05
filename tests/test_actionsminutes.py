@@ -69,3 +69,20 @@ def test_dispatch_quality_skips_a_version_with_its_meta_model(monkeypatch):
     st = SnapshotStore(":memory:")
     monkeypatch.setattr("algowinbet.meta.load_meta", lambda store, version: version == "v5")
     assert actionsminutes.dispatch_quality(st, "v5", datetime(2026, 10, 4, 6, tzinfo=UTC), post=lambda url: 204) is None
+
+
+def test_monday_morning_starts_the_weekly_replay_once(monkeypatch):
+    from algowinbet import actionsminutes
+    from algowinbet.quality import SCHEMA as QSCHEMA
+    st = SnapshotStore(":memory:")
+    monkeypatch.setattr("algowinbet.meta.load_meta", lambda store, version: True)
+    monday, tuesday = datetime(2026, 10, 5, 6, 5, tzinfo=UTC), datetime(2026, 10, 6, 6, 5, tzinfo=UTC)
+    calls = []
+    post = lambda url: calls.append(url) or 204  # noqa: E731
+    assert actionsminutes.dispatch_quality(st, "v5", tuesday, post=post) is None  # not Monday
+    assert "settimanale" in actionsminutes.dispatch_quality(st, "v5", monday, post=post)
+    assert actionsminutes.dispatch_quality(st, "v5", monday, post=post) is None and len(calls) == 1  # once a week
+    st2 = SnapshotStore(":memory:")
+    st2.db.executescript(QSCHEMA)
+    st2.db.execute("INSERT INTO quality_runs(created_at) VALUES(?)", (datetime(2026, 10, 5, 5, tzinfo=UTC).isoformat(),))
+    assert actionsminutes.dispatch_quality(st2, "v5", monday, post=post) is None  # already replayed this Monday

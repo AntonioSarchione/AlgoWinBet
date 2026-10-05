@@ -60,6 +60,8 @@ def finished_matches(store, now: datetime, limit: int) -> list[tuple[str, dateti
     rows = store.db.execute(
         "SELECT f.fixture_id, f.kickoff FROM fixtures f JOIN (SELECT fixture_id, MAX(observed_at) AS t FROM fixtures GROUP BY fixture_id) l "
         "ON l.fixture_id = f.fixture_id AND l.t = f.observed_at WHERE (f.kickoff > ? OR (f.kickoff = ? AND f.fixture_id > ?)) AND f.kickoff < ? "
+        # only matches with prices to prune: the calendar also holds past seasons, collected before any price was
+        "AND EXISTS (SELECT 1 FROM quotes q WHERE q.fixture_id = f.fixture_id) "
         "ORDER BY f.kickoff, f.fixture_id LIMIT ?", (ko0, ko0, fid0, _iso(now - AFTER), limit)).fetchall()
     seen, out = set(), []
     for fid, ko in rows:
@@ -93,7 +95,7 @@ def prune_quotes(store, now: datetime, max_matches: int = 400, max_seconds: floa
             ids = sorted(keep)
             store.db.execute(f"DELETE FROM quotes WHERE fixture_id=? AND kind != 'close' AND id NOT IN ({','.join('?' * len(ids))})",
                              [fid, *ids])
-        else:
+        elif drop:
             for i in range(0, len(drop), MAX_VARS):
                 part = drop[i:i + MAX_VARS]
                 store.db.execute(f"DELETE FROM quotes WHERE id IN ({','.join('?' * len(part))})", part)
