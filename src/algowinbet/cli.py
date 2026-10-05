@@ -463,7 +463,12 @@ def cmd_raw_last(a) -> None:
         print(f"nessuna risposta salvata per {a.source} {a.endpoint}")
         return
     for rid, ep, params, at, status in rows:
-        print(f"#{rid} {at} {status} {ep} {params}")
+        body = store.raw_body(rid)
+        try:
+            n = _json.loads(body).get("results")
+        except (ValueError, AttributeError):
+            n = None
+        print(f"#{rid} {at} {status} {ep} {params} {len(body)} byte" + (f", results {n}" if n is not None else ""))
     body = store.raw_body(rows[0][0])
     try:
         data = _json.loads(body)
