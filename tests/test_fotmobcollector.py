@@ -238,3 +238,55 @@ def test_a_match_missing_from_the_stored_page_reads_the_season_once():
     assert seasons() == n + 1  # read again: the page was older than the match
     _collector(s, api, later + timedelta(minutes=30)).run(history_seconds=0)
     assert seasons() == n + 1  # read after the match and still without it: not again
+
+
+class BrokenPage(FakeFotMob):
+    """FakeFotMob where some pages answer 500 while the rest of the site works."""
+
+    def __init__(self, broken):
+        super().__init__()
+        self.broken = set(broken)
+
+    def __call__(self, url, headers):
+        path = urlparse(url).path
+        if path in self.broken:
+            self.calls.append((path, {}))
+            return 500, {}, b"error"
+        return super().__call__(url, headers)
+
+
+def test_a_broken_match_page_never_stalls_the_others():
+    s, api = _store(), BrokenPage({"/match/500"})
+    for k in range(3):  # three ticks in a row: the page fails first each time, and ends the tick
+        st = _collector(s, api, NOW + timedelta(minutes=30 * k)).run(history_seconds=240)
+        assert ("/match/400", {}) not in api.calls and any("non risponde" in m for m in st.skipped)
+    _collector(s, api, NOW + timedelta(hours=2)).run(history_seconds=240)
+    assert ("/match/400", {}) in api.calls  # the broken page waits a day: the history goes on
+    assert sum(c[0] == "/match/500" for c in api.calls) == 3
+    st = _collector(s, api, NOW + timedelta(days=4)).run(history_seconds=0)  # tried again after the day; failing for 3 days: given up
+    assert any("abbandonata" in m for m in st.skipped) and s.job_done("fotmob-none:g1")
+
+
+def test_a_page_that_comes_back_clears_its_count():
+    s, api = _store(), BrokenPage({"/match/500"})
+    for k in range(2):
+        _collector(s, api, NOW + timedelta(minutes=30 * k)).run(history_seconds=0)
+    api.broken = set()
+    _collector(s, api, NOW + timedelta(hours=1)).run(history_seconds=0)
+    assert s.db.execute("SELECT COUNT(*) FROM jobs WHERE name LIKE 'fotmob-fail:%'").fetchone()[0] == 0
+    assert s.db.execute("SELECT COUNT(*) FROM fotmob_player_stats WHERE fixture_id='g1'").fetchone()[0] == 2
+
+
+def test_a_broken_season_page_waits_a_day_and_lets_the_other_leagues_go_on():
+    s, api = _store(), BrokenPage({"/leagues/57/fixtures/x"})
+    s.save_results("goal-api", [MatchResult(fixture_id="s1", competition="Serie A", home="Roma", away="Lazio", kickoff=KO,
+                                            home_goals=1, away_goals=1)], NOW)
+    client = FotMobClient(store=s, transport=api, sleep=lambda _: None, now=lambda: NOW)
+    def col(t):
+        client.now = lambda: t
+        return FotMobCollector(client, s, [FotMobLeague(57, "Eredivisie"), FotMobLeague(55, "Serie A")], now=lambda: t)
+    for k in range(3):
+        col(NOW + timedelta(minutes=30 * k)).run(history_seconds=0)
+    assert ("/leagues/55/fixtures/x", {}) not in api.calls  # stalled behind the broken Eredivisie page
+    col(NOW + timedelta(hours=2)).run(history_seconds=0)
+    assert ("/leagues/55/fixtures/x", {}) in api.calls and sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls) == 3

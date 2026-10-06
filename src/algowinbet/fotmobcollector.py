@@ -47,6 +47,9 @@ RECENT_PER_TICK = 12
 PAUSE_AFTER_BLOCK = timedelta(hours=12)
 BLOCK_STATUS = {401, 403, 429}
 TIMEOUT_S = 20.0
+PAGE_FAILS = 3  # a page failing this many ticks in a row (a broken page, not the site) ...
+PAGE_SKIP = timedelta(hours=24)  # ... waits this long before the next try, so it never stalls the pages after it
+PAGE_GIVE_UP = timedelta(days=3)  # a match page still failing this long after its first failure is given up, like a 404
 LINK_WINDOW = timedelta(hours=36)  # dates differ by time zone between sources
 FINISHED_AFTER = timedelta(hours=2, minutes=30)  # from kickoff
 HISTORY_MIN_S = 60  # less than this is not worth the day's history slot
@@ -162,10 +165,16 @@ class FotMobCollector:
         self.provider = SnapshotProvider(store)
         self._history = None
         self._halted = False
+        self._fails: dict[str, tuple[int, datetime]] = {}
+        self._fail_at: dict[str, datetime] = {}
         store.db.executescript(SCHEMA)
 
-    def _fail(self, st: CollectStats, what: str, e: FotMobError) -> None:
+    def _fail(self, st: CollectStats, what: str, e: FotMobError, page: str | None = None) -> None:
         st.errors.append(f"{what}: {e}")
+        if page and e.status not in (0, 404) and not e.blocked:  # an error of this page (5xx...), not of the network or a refusal
+            n, first = self._fails.get(page, (0, self.now()))
+            self._fails[page] = (n + 1, first)
+            self.store.mark_job(f"fotmob-fail:{page}", self.now(), f"{n + 1} {first.isoformat()}")
         if not e.halts or self._halted:
             return
         self._halted = True
@@ -175,6 +184,26 @@ class FotMobCollector:
             st.skipped.append(f"FotMob rifiuta le richieste: in pausa fino alle {until:%H:%M} UTC del {until:%d/%m}")
         else:
             st.skipped.append("FotMob non risponde: il resto al prossimo giro")
+
+    def _load_fails(self) -> None:
+        self._fails, self._fail_at = {}, {}
+        for name, at, detail in self._jobs("fotmob-fail:"):
+            try:
+                n, first = detail.split(" ", 1)
+                self._fails[name[len("fotmob-fail:"):]] = (int(n), datetime.fromisoformat(first))
+                self._fail_at[name[len("fotmob-fail:"):]] = datetime.fromisoformat(at)
+            except ValueError:
+                continue
+
+    def _skip(self, page: str) -> bool:
+        """A page that failed PAGE_FAILS ticks in a row waits PAGE_SKIP after its last failure."""
+        n, _ = self._fails.get(page, (0, None))
+        return n >= PAGE_FAILS and self.now() - self._fail_at.get(page, self.now()) < PAGE_SKIP
+
+    def _ok(self, page: str) -> None:
+        if page in self._fails:
+            del self._fails[page]
+            self.store.db.execute("DELETE FROM jobs WHERE name=?", (f"fotmob-fail:{page}",))
 
     def paused_until(self) -> datetime | None:
         row = self.store.db.execute("SELECT detail FROM jobs WHERE name=?", (PAUSE_JOB,)).fetchone()
@@ -293,24 +322,28 @@ class FotMobCollector:
             recent = [r for r in recent if r.fixture_id not in links]
             last, stored = pages.get("current", (None, {}))
             seasons = [str(x) for x in stored.get("seasons") or []]
-            if (last is None and (recent or history)) or (last is not None and any(r.kickoff > last for r in recent)):
+            page = f"season:{lg.fotmob_id}:current"
+            if ((last is None and (recent or history)) or (last is not None and any(r.kickoff > last for r in recent))) and not self._skip(page):
                 try:
                     matches, seasons = self._season_page(lg, None)
                 except FotMobError as e:
-                    self._fail(st, lg.competition, e)
+                    self._fail(st, lg.competition, e, page)
                     continue
+                self._ok(page)
                 st.requests += 1
                 self._link(st, lg, matches, results)
             if not history:
                 continue
             for season in seasons[:self.history_seasons]:
-                if season in pages or self._halted:
+                page = f"season:{lg.fotmob_id}:{season}"
+                if season in pages or self._halted or self._skip(page):
                     continue
                 try:
                     matches, _ = self._season_page(lg, season)
                 except FotMobError as e:
-                    self._fail(st, f"{lg.competition} {season}", e)
+                    self._fail(st, f"{lg.competition} {season}", e, page)
                     continue
+                self._ok(page)
                 st.requests += 1
                 self._link(st, lg, matches, results)
         self.store.db.commit()
@@ -337,13 +370,20 @@ class FotMobCollector:
             if deadline is not None and self.clock() > deadline:
                 st.skipped.append("tempo FotMob esaurito: il resto al prossimo giro")
                 break
+            page = f"match:{ext}"
+            if self._skip(page):
+                continue
             try:
                 pp = self.client.page(f"/match/{ext}")
             except FotMobError as e:
-                self._fail(st, f"partita {ext}", e)
+                self._fail(st, f"partita {ext}", e, page)
                 if e.status == 404:
                     self.store.mark_job(f"fotmob-none:{fid}", self.now(), "pagina FotMob assente")
+                elif page in self._fails and self._fails[page][0] >= PAGE_FAILS and self.now() - self._fails[page][1] >= PAGE_GIVE_UP:
+                    self.store.mark_job(f"fotmob-none:{fid}", self.now(), f"pagina FotMob in errore da {PAGE_GIVE_UP.days} giorni ({e})")
+                    st.skipped.append(f"partita {ext} abbandonata: pagina FotMob in errore da {PAGE_GIVE_UP.days} giorni")
                 continue
+            self._ok(page)
             st.requests += 1
             r = self.provider.result_of(fid)
             stats, absences, kept = self.parse_match(pp, fid, r.home if r else None, r.away if r else None)
@@ -439,6 +479,7 @@ class FotMobCollector:
         try:
             if self.paused_until():
                 return st  # the tick that paused it wrote the reason in its log
+            self._load_fails()
             history = history_seconds >= HISTORY_MIN_S and self.history_due()
             self.sync_seasons(st, history)
             recent, past = self.due()
