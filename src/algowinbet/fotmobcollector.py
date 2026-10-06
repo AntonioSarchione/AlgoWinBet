@@ -111,15 +111,17 @@ class FotMobClient:
 
     def __init__(self, store: SnapshotStore | None = None, transport: Transport | None = None,
                  sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
-                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), base_url: str = BASE_URL):
+                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), base_url: str = BASE_URL,
+                 min_interval: float = MIN_INTERVAL_S):
         self.store, self.transport = store, transport or urllib_transport(timeout=TIMEOUT_S)
+        self.min_interval = min_interval
         self.sleep, self.clock, self.now, self.base = sleep, clock, now, base_url
         self._last = -1e9
         self.requests_sent = 0
 
     def page(self, path: str, params: dict | None = None) -> dict:
         """pageProps of the page at path (with its query), or FotMobError."""
-        wait = MIN_INTERVAL_S - (self.clock() - self._last)
+        wait = self.min_interval - (self.clock() - self._last)
         if wait > 0:
             self.sleep(wait)
         query = "&".join(f"{k}={v}" for k, v in sorted((params or {}).items()))
@@ -470,6 +472,37 @@ class FotMobCollector:
         """The history runs once a UTC day, in the first tick with at least HISTORY_MIN_S to spare (normally the morning run),
         a slice a day until nothing is left."""
         return not self.store.job_done(f"fotmob-history:{self.now().date().isoformat()}")
+
+    def backfill(self, seconds: float, progress: Callable[[str], None] | None = None) -> tuple[CollectStats, int]:
+        """The whole history in one long run (fotmob-backfill workflow), instead of a slice a day: season pages, then the
+        past matches newest first until `seconds` run out. Takes the day's history slot first, so the ticks running at the
+        same time leave the history alone (they keep the recent matches). Returns the stats and the matches still to read."""
+        from .autorun import transient_db_error
+        st = CollectStats("fotmob-backfill")
+        self._history, self._halted = None, False
+        left = -1
+        try:
+            if self.paused_until():
+                st.skipped.append(f"FotMob in pausa fino alle {self.paused_until():%H:%M} UTC")
+                return st, left
+            self._load_fails()
+            self.store.mark_job(f"fotmob-history:{self.now().date().isoformat()}", self.now(), "caricamento storico")
+            deadline = self.clock() + seconds
+            self.sync_seasons(st, True)
+            _, past = self.due()
+            for k in range(0, len(past), 100):  # progress every 100 matches
+                if self._halted or self.clock() > deadline:
+                    break
+                self.sync_matches(st, past[k:k + 100], None, deadline)
+                if progress:
+                    progress(f"{min(k + 100, len(past))}/{len(past)} partite storiche · {st.requests} pagine · "
+                             f"{st.saved.get('statistiche giocatori FotMob', 0)} righe giocatore · {len(st.errors)} errori")
+            left = len(self.due()[1])
+        except Exception as e:  # noqa: BLE001 - same rule as run(): only a dropped Turso connection goes up
+            if transient_db_error(e):
+                raise
+            st.errors.append(f"FotMob: errore imprevisto ({type(e).__name__}: {e})")
+        return st, left
 
     def run(self, history_seconds: float = 0.0) -> CollectStats:
         """One tick of FotMob. Never raises, but for a dropped connection to Turso (see the module docstring)."""

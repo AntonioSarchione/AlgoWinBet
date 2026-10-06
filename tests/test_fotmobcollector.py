@@ -290,3 +290,16 @@ def test_a_broken_season_page_waits_a_day_and_lets_the_other_leagues_go_on():
     assert ("/leagues/55/fixtures/x", {}) not in api.calls  # stalled behind the broken Eredivisie page
     col(NOW + timedelta(hours=2)).run(history_seconds=0)
     assert ("/leagues/55/fixtures/x", {}) in api.calls and sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls) == 3
+
+
+def test_backfill_reads_the_history_at_its_own_pace_and_takes_the_day_slot():
+    s, api = _store(), FakeFotMob()
+    waits = []
+    client = FotMobClient(store=s, transport=api, sleep=waits.append, clock=lambda: 0.0, now=lambda: NOW, min_interval=1.0)
+    col = FotMobCollector(client, s, [FotMobLeague(57, "Eredivisie")], now=lambda: NOW, history_seasons=1, clock=lambda: 0.0)
+    lines = []
+    st, left = col.backfill(60, progress=lines.append)
+    assert ("/match/400", {}) in api.calls and ("/match/500", {}) not in api.calls  # history only: the ticks keep the recent ones
+    assert left == 0 and lines and "1/1 partite storiche" in lines[0]
+    assert waits and max(waits) <= 1.0  # one page a second
+    assert not col.history_due()  # a tick of the same day leaves the history alone

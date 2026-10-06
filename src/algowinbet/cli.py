@@ -540,6 +540,29 @@ def cmd_lineup_timing(a) -> None:
         print(f"  {comp}: {n}, {ok}, {never}")
 
 
+def cmd_fotmob_backfill(a) -> None:
+    """The FotMob history in one long run (public pages, no key, one page every --interval seconds): what the daily
+    slice of the ticks would take two months to read."""
+    from .autorun import AutoConfig
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    try:
+        col = FotMobCollector(FotMobClient(store=store, min_interval=a.interval), store,
+                              [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], TeamNames.load(a.aliases),
+                              history_seasons=cfg.history_seasons)
+        t0 = time.monotonic()
+        st, left = col.backfill(a.minutes * 60, progress=lambda m: print(f"[{(time.monotonic() - t0) / 60:5.1f} min] {m}", flush=True))
+        print(f"pagine {st.requests} · salvati {st.saved}")
+        for m in st.skipped + st.errors[:20]:
+            print(f"  {m}")
+        if len(st.errors) > 20:
+            print(f"  ... altri {len(st.errors) - 20} errori")
+        print(f"partite storiche ancora da leggere: {left}" + (" (lancia di nuovo per continuare)" if left > 0 else ""))
+    finally:
+        store.close()
+
+
 def cmd_trends_show(a) -> None:
     """Streaks and scorer table of the latest published run (no API request): what the match page shows."""
     import json as _json
@@ -2011,6 +2034,13 @@ def build_parser() -> argparse.ArgumentParser:
     lt.add_argument("--days", type=float, default=7)
     lt.add_argument("--db", default="algowinbet.db")
     lt.set_defaults(fn=cmd_lineup_timing)
+    fb = sub.add_parser("fotmob-backfill", help="storico FotMob in un lancio solo (pagine pubbliche, nessuna chiave)")
+    fb.add_argument("--minutes", type=float, default=90)
+    fb.add_argument("--interval", type=float, default=1.0, help="secondi tra una pagina e l'altra")
+    fb.add_argument("--config", default="configs/collect.json")
+    fb.add_argument("--aliases", default="configs/team_aliases.json")
+    fb.add_argument("--db", default="algowinbet.db")
+    fb.set_defaults(fn=cmd_fotmob_backfill)
     ts = sub.add_parser("trends-show", help="ritardi e marcatori dell'ultima analisi pubblicata (nessuna richiesta API)")
     ts.add_argument("--comp", default="")
     ts.add_argument("--n", type=int, default=4)
