@@ -458,7 +458,9 @@ def cmd_raw_last(a) -> None:
     from .providers.goalapi import shape_summary
     store = SnapshotStore(a.db)
     rows = store.db.execute("SELECT id, endpoint, params, fetched_at, status FROM raw_requests WHERE source LIKE ? AND endpoint LIKE ? "
-                            "ORDER BY id DESC LIMIT ?", (f"%{a.source}%", f"%{a.endpoint}%", a.n)).fetchall()
+                            "ORDER BY id DESC LIMIT ?", (f"%{a.source}%", f"%{a.endpoint}%", a.n if not a.grep else 5000)).fetchall()
+    if a.grep:  # only the responses whose body holds this text (e.g. a non-empty list), newest first
+        rows = [r for r in rows if a.grep.encode() in store.raw_body(r[0])][: a.n]
     if not rows:
         print(f"nessuna risposta salvata per {a.source} {a.endpoint}")
         return
@@ -1980,6 +1982,7 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--n", type=int, default=10)
     rl.add_argument("--max-lines", type=int, default=120)
     rl.add_argument("--dump", type=int, default=3000, help="caratteri del JSON grezzo da stampare (0 = nessuno)")
+    rl.add_argument("--grep", default="", help="solo le risposte che contengono questo testo")
     rl.add_argument("--db", default="algowinbet.db")
     rl.set_defaults(fn=cmd_raw_last)
     lt = sub.add_parser("lineup-timing", help="quando sono arrivate le formazioni delle ultime partite (nessuna richiesta API)")
