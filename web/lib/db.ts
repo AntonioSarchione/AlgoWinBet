@@ -501,8 +501,9 @@ const registryAt = persist(async (_version: string): Promise<Registry | null> =>
     const [legs, slips, last] = await Promise.all([
       // close_sisal_fair arrives with the first settlement after the pass criterion: until then the column is missing
       all<PaperLeg>(legSql("close_sisal_fair")).catch((e) => (/no such column/i.test(String(e)) ? all<PaperLeg>(legSql("NULL")) : Promise.reject(e))),
+      // every slip, not the latest 200: the counts and the slip criterion must match the bankroll (~25 slips a day)
       all<PaperSlip>(
-        "SELECT id, created_at, legs, total_odds, bonus, joint, ev, ev_lower, first_kickoff, last_kickoff, result, payout, clv FROM paper_slips ORDER BY id DESC LIMIT 200",
+        "SELECT id, created_at, legs, total_odds, bonus, joint, ev, ev_lower, first_kickoff, last_kickoff, result, payout, clv FROM paper_slips ORDER BY id DESC",
       ),
       all<{ t: string | null }>("SELECT MAX(settled_at) AS t FROM paper_legs"),
     ]);

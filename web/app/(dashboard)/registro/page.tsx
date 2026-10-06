@@ -103,6 +103,8 @@ export default async function Registro() {
   const value = reg.legs.filter((l) => l.status === "STRONG" || l.status === "CANDIDATE");
   const fair = reg.legs.filter((l) => l.status === "FAIR");
   const sv = stats(value);
+  const sf = stats(fair);
+  const sa = stats(reg.legs);
   const crit = evaluate(reg.legs, reg.slips);
   const cal = crit.bands;
   const versions = byVersion(reg.legs);
@@ -112,6 +114,8 @@ export default async function Registro() {
   const slipPnl = settledSlips.reduce((a, s) => a + (s.payout ?? 0) - 1, 0);
   const slipsWon = settledSlips.filter((s) => s.result === "won").length;
   const slipsOpen = reg.slips.filter((s) => !s.result).length;
+  // wins the model expected: the joint probability of each settled slip (void legs make it a little conservative)
+  const slipsExpected = settledSlips.reduce((a, s) => a + (s.joint ?? 0), 0);
   const units = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)} u`;
 
   return (
@@ -139,8 +143,10 @@ export default async function Registro() {
           {crit.missing > 0 && <span className="reg-tag">Campione piccolo: mancano {crit.missing} giocate per giudicare</span>}
         </div>
         <div className="reg-kpis">
-          <Kpi icon={BookOpenCheck} label="Giocate chiuse" value={String(sv.n)}>
+          <Kpi icon={BookOpenCheck} label="Selezioni di valore chiuse" value={String(sv.n)}>
             <b>{sv.open}</b> in attesa del risultato{sv.unsettleable > 0 && <> · {sv.unsettleable} non valutabil{sv.unsettleable === 1 ? "e" : "i"}</>}
+            <br />
+            in tutto <b>{sa.n}</b> selezioni chiuse: {sv.n} di valore, {sf.n} eque
           </Kpi>
           <Kpi icon={PieChart} label="Vinte" value={sv.decided ? pct(sv.hits / sv.decided) : "–"}>
             {sv.decided ? <><b>{sv.hits}</b> su {sv.decided} · il modello ne attendeva il <b>{pct(sv.expected)}</b></> : "nessuna giocata decisa"}
@@ -167,7 +173,7 @@ export default async function Registro() {
             la quota presa misurata sul prezzo finale Pinnacle (il più preciso), su <b>{sv.nClose}</b> giocate
           </Kpi>
           <Kpi icon={Layers} label="Schedine" value={settledSlips.length ? units(slipPnl) : "–"} cls={settledSlips.length ? tone(slipPnl) : ""}>
-            {settledSlips.length ? <><b>{slipsWon}</b> vinte su {settledSlips.length} chiuse</> : "nessuna chiusa"} · {slipsOpen} in attesa
+            {settledSlips.length ? <><b>{slipsWon}</b> vinte su {settledSlips.length} chiuse (il modello ne attendeva {slipsExpected.toFixed(1)})</> : "nessuna chiusa"} · {slipsOpen} in attesa
           </Kpi>
         </div>
       </section>
@@ -269,7 +275,8 @@ export default async function Registro() {
               <StatRow label="Valore (Alta + Media)" s={sv} />
               <StatRow label="Alta" s={stats(reg.legs.filter((l) => l.status === "STRONG"))} />
               <StatRow label="Media" s={stats(reg.legs.filter((l) => l.status === "CANDIDATE"))} />
-              <StatRow label="Equa" s={stats(fair)} />
+              <StatRow label="Equa" s={sf} />
+              <StatRow label="Tutte" s={sa} />
             </tbody>
           </table>
         </div>
