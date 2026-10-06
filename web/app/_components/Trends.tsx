@@ -21,7 +21,11 @@ function Row({ s }: { s: Trend }) {
       </div>
       <div className="tr-side">
         <span className={`tr-rare ${s.r >= 50 ? "hi" : s.r >= 15 ? "mid" : ""}`} title="quanto spesso capita con le medie del campionato">1 su {s.r.toLocaleString("it-IT")}</span>
-        {s.m != null && <span className="tr-model">prossima: {Math.round(s.m * 100)}%</span>}
+        {s.m != null && (
+          <span className="tr-model" title="probabilità del modello per la prossima partita">
+            {s.k === "serie" ? "continua" : s.k === "digiuno" ? "si interrompe" : "prossima"}: {Math.round(s.m * 100)}%
+          </span>
+        )}
       </div>
     </li>
   );
@@ -69,7 +73,8 @@ export function Trends({ home, away, data }: { home: string; away: string; data:
       <p className="note">
         &quot;1 su N&quot;: quanto spesso capita una serie così lunga con le medie del campionato (ultime due stagioni) o, per i marcatori, con i gol
         che il modello attende dal giocatore. Una serie da sola non rende l&apos;evento più probabile: accanto c&apos;è la probabilità del modello per
-        la prossima partita, e xG o tiri quando ci sono, che dicono se è stata sfortuna. Solo paper trading.
+        la prossima partita (&quot;continua&quot;: la serie prosegue; &quot;si interrompe&quot;: l&apos;evento che manca accade), e xG o tiri quando
+        ci sono, che dicono se è stata sfortuna. Solo paper trading.
       </p>
     </div>
   );
