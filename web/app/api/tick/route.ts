@@ -25,8 +25,9 @@ async function tick(req: NextRequest) {
   const now = new Date();
   const force = req.nextUrl.searchParams.get("force") === "1";
   // evening matches end after the collection hours: a run when their results are due settles the registry the same night
+  // half-hour slots only: with a 15-minute pinger every ping of that hour would start a run (2026-10-05: 4 runs, 2 needed)
   const resultsDue =
-    !force && !inCollectionHours(now) &&
+    !force && !inCollectionHours(now) && isHalfHourSlot(now) &&
     (await matchesBetween(new Date(now.getTime() - RESULTS_UNTIL_MS), new Date(now.getTime() - RESULTS_FROM_MS)).catch(() => false));
   if (!inCollectionHours(now) && !resultsDue && !force) {
     return NextResponse.json({ skipped: "fuori dalle ore di raccolta" });
