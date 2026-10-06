@@ -28,7 +28,7 @@ permissions:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 180  # 130 minutes of reading: a wide margin, so a slow database never ends in a failed run
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
