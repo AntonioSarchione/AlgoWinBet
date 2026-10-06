@@ -3,7 +3,7 @@ missing, for the 7 domestic leagues and the European cups. Public pages, no key,
 
 Why FotMob: API-Football has no player xG and its free plan reads only matches linked when they were played; Understat has no
 Liga Portugal and no Eredivisie; FBref lost the Opta data in January 2026. A FotMob match page carries the whole match in its
-`__NEXT_DATA__` JSON, finished matches of past seasons included (verified 2026-10-06 on Eredivisie and Liga Portugal).
+`__NEXT_DATA__` JSON, finished matches of past seasons included (verified 2026-10-06 on Serie A, Eredivisie and Liga Portugal).
 
 Not an official API: the site may change without notice, so the collector is optional. Nothing reads its tables yet
 (fotmob_player_stats, fotmob_absences): a feature that wants them is measured first, like every new source.
@@ -78,6 +78,12 @@ def _utc(m: dict) -> datetime | None:
         return datetime.fromisoformat(str(m["status"]["utcTime"]).replace("Z", "+00:00"))
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _season_year(season: str) -> int:
+    """'2025/2026' -> 2025 (and '2026' -> 2026); 0 when unreadable."""
+    m = re.match(r"\d{4}", season)
+    return int(m.group(0)) if m else 0
 
 
 def pid(fotmob_id) -> str:
@@ -224,8 +230,12 @@ class FotMobCollector:
         matches = [{"id": str(m.get("id")), "home": {"name": (m.get("home") or {}).get("name")}, "away": {"name": (m.get("away") or {}).get("name")},
                     "status": {"utcTime": (m.get("status") or {}).get("utcTime"), "finished": bool((m.get("status") or {}).get("finished"))}}
                    for m in ((pp.get("fixtures") or {}).get("allMatches") or [])]
-        seasons = [str(s) for s in pp.get("allAvailableSeasons") or []]
-        raw = self.client.keep(f"/leagues/{league.fotmob_id}/fixtures", {"season": season or "current"}, {"matches": matches, "seasons": seasons})
+        # the seasons before the one the page shows, newest first, whatever order FotMob lists them in (newest first, 2026-10-06)
+        shown = str((pp.get("details") or {}).get("selectedSeason") or season or "")
+        seasons = sorted({str(x) for x in pp.get("allAvailableSeasons") or []} - {shown}, key=_season_year, reverse=True)
+        seasons = [x for x in seasons if not shown or _season_year(x) < _season_year(shown)]
+        raw = self.client.keep(f"/leagues/{league.fotmob_id}/fixtures", {"season": season or "current"},
+                               {"matches": matches, "seasons": seasons, "shown": shown})
         self.store.mark_job(f"fotmob-page:{league.fotmob_id}:{season or 'current'}", self.now(), str(raw or ""))
         return matches, seasons
 
@@ -293,7 +303,7 @@ class FotMobCollector:
                 self._link(st, lg, matches, results)
             if not history:
                 continue
-            for season in seasons[1:1 + self.history_seasons]:
+            for season in seasons[:self.history_seasons]:
                 if season in pages or self._halted:
                     continue
                 try:

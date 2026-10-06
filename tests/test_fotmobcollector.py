@@ -60,7 +60,7 @@ class FakeFotMob:
             if q.get("season") == "2025/2026":
                 pp = {"fixtures": {"allMatches": [_fx("400", "Go Ahead Eagles", "PEC Zwolle", OLD)]}}
             else:
-                pp = {"allAvailableSeasons": ["2026/2027", "2025/2026", "2024/2025"],
+                pp = {"allAvailableSeasons": ["2024/2025", "2026/2027", "2025/2026"], "details": {"selectedSeason": "2026/2027"},
                       "fixtures": {"allMatches": [_fx("500", "PEC Zwolle", "SC Heerenveen", KO),
                                                   _fx("501", "Ajax", "PSV", NOW + timedelta(days=3), finished=False)]}}
             return 200, {}, _html(pp)
