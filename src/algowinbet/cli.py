@@ -1469,6 +1469,11 @@ def _collect_auto(a) -> None:
         ac = ApiFootballClient(store=store, budget=BudgetGuard(store, "api-football", daily=cfg.apif_daily_limit, reserve=cfg.apif_reserve))
         apif = ApiFootballCollector(ac, store, [ApifLeague(l.apif, l.name, bool(l.fd)) for l in cfg.leagues if l.apif], names,
                                     squads_per_day=cfg.apif_squads_per_day)
+    fotmob = None
+    if any(l.fotmob for l in cfg.leagues):  # public pages, no key
+        from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
+        fotmob = FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names,
+                                 history_seasons=cfg.history_seasons)
     from .fdcollector import FootballDataCollector
     datasets = FootballDataCollector(store, cfg.divisions, names) if cfg.divisions else None  # public files, no key
     t0 = time.monotonic()
@@ -1479,7 +1484,7 @@ def _collect_auto(a) -> None:
     try:
         # season files and international results run after the publication: they are never worth a late analysis
         results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history,
-                           datasets=datasets, skip=("datasets",), apif=apif)
+                           datasets=datasets, skip=("datasets",), apif=apif, fotmob=fotmob)
         if not results:
             print("tick: niente da fare")
         from .autorun import should_publish, transient_db_error
