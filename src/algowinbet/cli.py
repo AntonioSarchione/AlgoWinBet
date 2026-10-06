@@ -542,29 +542,43 @@ def cmd_lineup_timing(a) -> None:
 
 def cmd_fotmob_backfill(a) -> None:
     """The FotMob history in one long run (public pages, no key, one page every --interval seconds): what the daily
-    slice of the ticks would take two months to read."""
+    slice of the ticks would take two months to read. Never fails the workflow run: whatever goes wrong is printed and
+    handed to the workflow (GITHUB_OUTPUT: left, saved, paused), which decides whether to launch the next run."""
     from .autorun import AutoConfig
     from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
-    cfg = AutoConfig.load(a.config)
-    store = SnapshotStore(a.db)
+    left, saved, paused = -1, 0, 0
+    store = None
     try:
+        cfg = AutoConfig.load(a.config)
+        store = SnapshotStore(a.db)
         col = FotMobCollector(FotMobClient(store=store, min_interval=a.interval), store,
                               [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], TeamNames.load(a.aliases),
                               history_seasons=cfg.history_seasons)
         t0 = time.monotonic()
         st, left = col.backfill(a.minutes * 60, progress=lambda m: print(f"[{(time.monotonic() - t0) / 60:5.1f} min] {m}", flush=True))
+        saved = st.saved.get("statistiche giocatori FotMob", 0)
         print(f"pagine {st.requests} · salvati {st.saved}")
         for m in st.skipped + st.errors[:20]:
             print(f"  {m}")
         if len(st.errors) > 20:
             print(f"  ... altri {len(st.errors) - 20} errori")
-        print(f"partite storiche ancora da leggere: {left}" + (" (lancia di nuovo per continuare)" if left > 0 else ""))
-        out = os.environ.get("GITHUB_OUTPUT")
-        if out:  # the workflow launches itself again while matches are left and this run saved something
-            with open(out, "a", encoding="utf-8") as f:
-                f.write(f"left={max(left, 0)}\nsaved={st.saved.get('statistiche giocatori FotMob', 0)}\n")
+        print(f"partite storiche ancora da leggere: {left if left >= 0 else 'non note'}")
+        try:
+            paused = int(col.paused_until() is not None)
+        except Exception:  # noqa: BLE001 - the connection may be gone: then it is not a known pause
+            paused = 0
+    except Exception as e:  # noqa: BLE001 - never a failed run (no e-mail): the workflow retries
+        print(f"::warning::caricamento FotMob interrotto ({type(e).__name__}: {e})")
     finally:
-        store.close()
+        if store is not None:
+            try:
+                store.close()
+            except Exception:  # noqa: BLE001
+                pass
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(f"left={left}\nsaved={saved}\npaused={paused}\n")
 
 
 def cmd_trends_show(a) -> None:

@@ -303,3 +303,11 @@ def test_backfill_reads_the_history_at_its_own_pace_and_takes_the_day_slot():
     assert left == 0 and lines and "1/1 partite storiche" in lines[0]
     assert waits and max(waits) <= 1.0  # one page a second
     assert not col.history_due()  # a tick of the same day leaves the history alone
+
+
+def test_backfill_never_raises_on_a_dropped_turso_connection():
+    s, api = _store(), FakeFotMob()
+    col = _collector(s, api)
+    col.due = lambda: (_ for _ in ()).throw(ValueError("Hrana: `http error: stream closed`"))
+    st, left = col.backfill(60)
+    assert left == -1 and any("Turso caduta" in e for e in st.errors)

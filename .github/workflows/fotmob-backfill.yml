@@ -1,6 +1,7 @@
 # FotMob history in one long run (public pages, no key): what the daily slice of the collect ticks would read in two
-# months. Actions > fotmob-backfill > Run workflow: it launches itself again while matches are left, and stops when the
-# history is complete or a run saved nothing (FotMob paused or not answering: launch it by hand later).
+# months. Actions > fotmob-backfill > Run workflow: it launches itself again while matches are left. A run that saved
+# nothing (FotMob not answering, Turso down) is tried again up to 3 times, 10 minutes apart; a FotMob refusal (12-hour
+# pause) stops the chain, since insisting would make the block worse. A run never fails (no e-mail).
 # Its own concurrency group: the collect ticks (quotes, lineups, recent FotMob matches) never wait for it, and it takes
 # the day's FotMob history slot first, so the ticks leave the history alone while it runs.
 name: fotmob-backfill
@@ -16,6 +17,10 @@ on:
         description: "secondi tra una pagina e l'altra"
         required: false
         default: "1"
+      retries:
+        description: "tentativi consecutivi senza righe salvate (lo imposta il workflow stesso)"
+        required: false
+        default: "0"
 
 concurrency:
   group: fotmob-backfill
@@ -47,12 +52,25 @@ jobs:
         # inputs arrive as environment variables, never interpolated into the script (no shell injection)
         run: algowinbet fotmob-backfill --minutes "${MINUTES:-130}" --interval "${INTERVAL:-1}" --db turso
       - name: next run
-        if: success() && steps.fill.outputs.left != '0' && steps.fill.outputs.left != '' && steps.fill.outputs.saved != '0'
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           MINUTES: ${{ inputs.minutes }}
           INTERVAL: ${{ inputs.interval }}
+          RETRIES: ${{ inputs.retries }}
           LEFT: ${{ steps.fill.outputs.left }}
+          SAVED: ${{ steps.fill.outputs.saved }}
+          PAUSED: ${{ steps.fill.outputs.paused }}
         run: |
-          echo "ancora $LEFT partite: nuovo lancio"
-          gh workflow run fotmob-backfill.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f minutes="${MINUTES:-130}" -f interval="${INTERVAL:-1}"
+          next() {
+            gh workflow run fotmob-backfill.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+              -f minutes="${MINUTES:-130}" -f interval="${INTERVAL:-1}" -f retries="$1"
+          }
+          if [ "${LEFT:-}" = "0" ]; then echo "storico FotMob completo"; exit 0; fi
+          if [ "${PAUSED:-0}" = "1" ]; then echo "::warning::FotMob in pausa (richieste rifiutate): catena ferma, rilanciare a mano dopo la pausa"; exit 0; fi
+          if [ "${SAVED:-0}" != "0" ]; then echo "ancora ${LEFT} partite: nuovo lancio"; next 0; exit 0; fi
+          n=$(( ${RETRIES:-0} + 1 ))
+          if [ "$n" -gt 3 ]; then echo "::warning::3 lanci di fila senza righe salvate: catena ferma, rilanciare a mano"; exit 0; fi
+          echo "nessuna riga salvata: nuovo tentativo $n di 3 tra 10 minuti"
+          sleep 600
+          next "$n"

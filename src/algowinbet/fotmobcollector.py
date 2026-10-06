@@ -476,7 +476,9 @@ class FotMobCollector:
     def backfill(self, seconds: float, progress: Callable[[str], None] | None = None) -> tuple[CollectStats, int]:
         """The whole history in one long run (fotmob-backfill workflow), instead of a slice a day: season pages, then the
         past matches newest first until `seconds` run out. Takes the day's history slot first, so the ticks running at the
-        same time leave the history alone (they keep the recent matches). Returns the stats and the matches still to read."""
+        same time leave the history alone (they keep the recent matches); the next day's slot too, for a run that goes past
+        midnight. Returns the stats and the matches still to read (-1: unknown). Never raises: a dropped connection to Turso
+        ends the run like a network error, and the workflow launches the next one."""
         from .autorun import transient_db_error
         st = CollectStats("fotmob-backfill")
         self._history, self._halted = None, False
@@ -486,7 +488,8 @@ class FotMobCollector:
                 st.skipped.append(f"FotMob in pausa fino alle {self.paused_until():%H:%M} UTC")
                 return st, left
             self._load_fails()
-            self.store.mark_job(f"fotmob-history:{self.now().date().isoformat()}", self.now(), "caricamento storico")
+            for d in (self.now().date(), self.now().date() + timedelta(days=1)):
+                self.store.mark_job(f"fotmob-history:{d.isoformat()}", self.now(), "caricamento storico")
             deadline = self.clock() + seconds
             self.sync_seasons(st, True)
             _, past = self.due()
@@ -498,10 +501,9 @@ class FotMobCollector:
                     progress(f"{min(k + 100, len(past))}/{len(past)} partite storiche · {st.requests} pagine · "
                              f"{st.saved.get('statistiche giocatori FotMob', 0)} righe giocatore · {len(st.errors)} errori")
             left = len(self.due()[1])
-        except Exception as e:  # noqa: BLE001 - same rule as run(): only a dropped Turso connection goes up
-            if transient_db_error(e):
-                raise
-            st.errors.append(f"FotMob: errore imprevisto ({type(e).__name__}: {e})")
+        except Exception as e:  # noqa: BLE001 - a long unattended run: everything is a log line, the next run goes on
+            what = "connessione a Turso caduta" if transient_db_error(e) else "errore imprevisto"
+            st.errors.append(f"FotMob: {what} ({type(e).__name__}: {e})")
         return st, left
 
     def run(self, history_seconds: float = 0.0) -> CollectStats:
