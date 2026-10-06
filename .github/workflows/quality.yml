@@ -44,22 +44,39 @@ jobs:
           WEEKS: ${{ inputs.weeks }}
         run: algowinbet quality --db turso --weeks "${WEEKS:-60}" --save
       # Weekly backup: a compact, consistent copy of the whole database (VACUUM INTO + gzip, about 50 MB in October 2026),
-      # kept as a run artifact for 3 weeks (3 copies, inside the 500 MB of artifact storage of a free private repo).
-      # Restore: download the artifact, gunzip, then `turso db create <name> --from-file algowinbet-<date>.db`.
+      # encrypted (AES-256, passphrase in the BACKUP_PASSPHRASE secret) and kept as a run artifact for 3 weeks. Artifacts of a
+      # public repository can be downloaded by anyone: the plain copy is never uploaded, and without the secret nothing is.
+      # Restore: download the artifact, then
+      #   gpg --decrypt algowinbet-<date>.db.gz.gpg | gunzip > algowinbet.db
+      #   turso db create <name> --from-file algowinbet.db
       - name: weekly backup
         if: success()
         env:  # reads the local replica only: no credentials needed
           TURSO_MODE: replica
           TURSO_REPLICA_PATH: data/turso-replica.db
         run: algowinbet db-backup --out "backup/algowinbet-$(date -u +%F).db.gz"
+      - name: encrypt backup
+        if: success()
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::warning::BACKUP_PASSPHRASE non impostato: backup NON caricato (mai in chiaro)"
+            rm -f backup/*.db.gz
+            exit 0
+          fi
+          for f in backup/*.db.gz; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$f.gpg" "$f" <<< "$BACKUP_PASSPHRASE"
+            rm -f "$f"
+          done
       - uses: actions/upload-artifact@v7
         if: success()
         with:
           name: db-backup-${{ github.run_id }}
-          path: backup/*.db.gz
+          path: backup/*.db.gz.gpg
           retention-days: 21
           compression-level: 0  # already gzipped
-          if-no-files-found: error
+          if-no-files-found: ignore  # no passphrase: nothing to upload, and no failed run for it
       # Fase 10 shadow test: the frozen LightGBM correction against Dixon-Coles on the cup matches played since it was frozen
       # (boost.py). Never a reason to fail the weekly replay or the backup.
       - name: LightGBM shadow test

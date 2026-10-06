@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "test:optimizer": "node scripts/optimizer-parity.mjs",
-    "test:refresh": "node --experimental-strip-types --no-warnings scripts/refresh-check.mts"
+    "test:refresh": "node --experimental-strip-types --no-warnings scripts/refresh-check.mts",
+    "test:loginguard": "node --experimental-strip-types --no-warnings scripts/loginguard-check.mts"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
