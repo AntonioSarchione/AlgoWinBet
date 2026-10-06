@@ -22,7 +22,7 @@
   "goal_reserve": 50,
   "oddspapi_monthly_limit": 250,
   "oddspapi_reserve": 20,
-  "lineup_window_min": 95,
+  "lineup_window_min": 60,
   "fixtures_days": 14,
   "prekick_min": [30, 75]
 }

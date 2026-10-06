@@ -36,15 +36,26 @@ CREATE TABLE IF NOT EXISTS player_status(id INTEGER PRIMARY KEY, source TEXT, fi
   player_name TEXT, status TEXT, reason TEXT, observed_at TEXT, UNIQUE(source, fixture_id, player_id, status, reason));
 CREATE INDEX IF NOT EXISTS ix_status_fx ON player_status(fixture_id);
 CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TEXT, linked_at TEXT, PRIMARY KEY(source, ext_id));
+-- per player and match (API-Football /fixtures/players): shots, fouls and cards, which no other free source gives
+CREATE TABLE IF NOT EXISTS player_match_stats(fixture_id TEXT, source TEXT, team TEXT, player_id TEXT, name TEXT, position TEXT,
+  minutes INTEGER, substitute INTEGER, rating REAL, shots INTEGER, shots_on INTEGER, goals INTEGER, assists INTEGER, key_passes INTEGER,
+  fouls_committed INTEGER, fouls_drawn INTEGER, yellow INTEGER, red INTEGER, observed_at TEXT, PRIMARY KEY(fixture_id, source, player_id));
 """
 
-# Lineups are published 40-75 minutes before kickoff (Premier League ~75, most others ~60, national teams sometimes later). The
-# window opens at 75 minutes: with 55 a match kicking off on the hour or half hour got its first try only 30 minutes before.
-LINEUP_FROM = timedelta(minutes=75)
+# Official XI from 60 minutes before kickoff, then every tick (15 minutes): before that the page shows our probable lineup
+# (user's choice, 2026-10-06: it saves the API-Football requests of the early tries, mostly empty).
+LINEUP_FROM = timedelta(minutes=60)
 LINEUP_UNTIL = timedelta(minutes=10)  # still worth one try just after kickoff (late publications)
 SQUAD_DAYS = 30
 FINISHED_AFTER = timedelta(hours=2, minutes=15)  # from kickoff: half-time score and goal events are final
 MAX_EVENTS = 10  # goal-order requests per tick
+# Player match stats: finished matches of the last PLAYER_STATS_DAYS days, at most PLAYER_STATS_PER_TICK a tick (6.5 s each on
+# the free plan), only with what the day leaves after the lineups still due today plus PLAYER_STATS_KEEP requests.
+# The free plan lists fixtures only from yesterday to tomorrow, so only matches linked when they were played can be read:
+# the history starts with the first matches after 2026-10-06 (no `last` or `season` parameter on the free plan).
+PLAYER_STATS_DAYS = 10
+PLAYER_STATS_PER_TICK = 6
+PLAYER_STATS_KEEP = 10
 INJURY_REFRESH = timedelta(hours=6)
 POS = {"g": Position.GK, "goalkeeper": Position.GK, "d": Position.DEF, "defender": Position.DEF, "m": Position.MID,
        "midfielder": Position.MID, "f": Position.FWD, "attacker": Position.FWD, "forward": Position.FWD}
@@ -336,6 +347,8 @@ class ApiFootballCollector:
             self.sync_injuries(st)
             self.sync_finished(st)
             if clock() - t0 < max_seconds:
+                self.sync_player_stats(st, reserve_for_leagues=reserve)
+            if clock() - t0 < max_seconds:
                 self.sync_squads(st, reserve_for_leagues=reserve)
         except BudgetExceeded as e:
             st.stopped_by_budget = True
@@ -416,6 +429,64 @@ class ApiFootballCollector:
         if stats:
             st.add("dettagli partite finite", self.store.save_stats(SOURCE, stats))
         self.store.db.commit()
+
+    # ------------------------------------------------------------------ player match stats
+    def player_stats_due(self) -> list[tuple[str, str]]:
+        """(our fixture id, API-Football id) of linked matches finished in the last PLAYER_STATS_DAYS days with a stored result
+        and no player stats yet, domestic leagues first, newest first."""
+        t = self.now()
+        have = {r[0] for r in self.store.db.execute("SELECT DISTINCT fixture_id FROM player_match_stats WHERE source=?", (SOURCE,)).fetchall()}
+        given_up = {r[0][len("no-player-stats:"):] for r in self.store.db.execute("SELECT name FROM jobs WHERE name LIKE 'no-player-stats:%'").fetchall()}
+        links = self._links()
+        out = []
+        for f in self.provider.list_fixtures(None, t - timedelta(days=PLAYER_STATS_DAYS), t - FINISHED_AFTER):
+            if f.id in links and f.id not in have and f.id not in given_up and self.provider.result_of(f.id) is not None:
+                out.append((not self._domestic(f.competition), -f.kickoff.timestamp(), f.id, links[f.id]))
+        return [(fid, ext) for _, _, fid, ext in sorted(out)]
+
+    def sync_player_stats(self, st: CollectStats, reserve_for_leagues: int = 0) -> None:
+        names = self._team_names()
+        for fid, ext in self.player_stats_due()[:PLAYER_STATS_PER_TICK]:
+            left = self._remaining()
+            if left is not None and left - reserve_for_leagues - PLAYER_STATS_KEEP < 1:
+                st.skipped.append("statistiche giocatori rimandate: budget del giorno tenuto per formazioni e riserva")
+                break
+            resp = self.client.get("/fixtures/players", {"fixture": ext}).get("response") or []
+            rows = self._player_rows(resp, fid, names)
+            if rows:
+                st.add("statistiche giocatori", self.store._bulk(
+                    "INSERT OR REPLACE INTO player_match_stats(fixture_id,source,team,player_id,name,position,minutes,substitute,rating,shots,"
+                    "shots_on,goals,assists,key_passes,fouls_committed,fouls_drawn,yellow,red,observed_at)", rows))
+            elif self.now() - (self.provider.result_of(fid).kickoff if self.provider.result_of(fid) else self.now()) > timedelta(days=2):
+                self.store.mark_job(f"no-player-stats:{fid}", self.now(), "API-Football senza statistiche giocatori")
+        self.store.db.commit()
+
+    def _player_rows(self, resp: list[dict], fid: str, names: dict[int, str]) -> list[tuple]:
+        def n(x):
+            try:
+                return int(x) if x is not None else None
+            except (TypeError, ValueError):
+                return None
+        out, at = [], self.now().isoformat()
+        for side in resp:
+            team = names.get(int((side.get("team") or {}).get("id") or 0))
+            if not team:
+                continue
+            for p in side.get("players") or []:
+                info, stats = p.get("player") or {}, (p.get("statistics") or [{}])[0]
+                g, sh, gl = stats.get("games") or {}, stats.get("shots") or {}, stats.get("goals") or {}
+                fo, cd, ps = stats.get("fouls") or {}, stats.get("cards") or {}, stats.get("passes") or {}
+                if not info.get("id") or not g.get("minutes"):
+                    continue  # unused substitutes: no minutes, nothing to count
+                try:
+                    rating = float(g["rating"]) if g.get("rating") else None
+                except (TypeError, ValueError):
+                    rating = None
+                out.append((fid, SOURCE, team, pid(info["id"]), info.get("name"), g.get("position"), n(g.get("minutes")), int(bool(g.get("substitute"))),
+                            rating, n(sh.get("total")) or 0, n(sh.get("on")) or 0, n(gl.get("total")) or 0, n(gl.get("assists")) or 0,
+                            n(ps.get("key")) or 0, n(fo.get("committed")) or 0, n(fo.get("drawn")) or 0, n(cd.get("yellow")) or 0,
+                            n(cd.get("red")) or 0, at))
+        return out
 
     @staticmethod
     def _goal_minutes(rows: list[dict], names: dict[int, str], r) -> tuple[tuple, tuple] | None:

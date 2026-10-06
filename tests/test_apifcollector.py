@@ -44,6 +44,13 @@ class FakeApi:
                 if q["date"] == "2026-10-03" else []
         elif u.path == "/fixtures/lineups":
             resp = ([_xi(489, 100), _xi(505, 200)] if q["fixture"] == "1" else [_xi(541, 300), _xi(157, 400)]) if self.lineups else []
+        elif u.path == "/fixtures/players":
+            def pl(i, team_id, mins, shots, on, fouls, yellow):
+                return {"player": {"id": i, "name": f"P{i}"}, "statistics": [{"games": {"minutes": mins, "position": "F", "substitute": False, "rating": "7.1"},
+                        "shots": {"total": shots, "on": on}, "goals": {"total": 0, "assists": 0}, "passes": {"key": 1},
+                        "fouls": {"committed": fouls, "drawn": 1}, "cards": {"yellow": yellow, "red": 0}}]}
+            resp = [{"team": {"id": 489}, "players": [pl(100, 489, 90, 5, 3, 0, 0), pl(101, 489, None, 0, 0, 0, 0)]},
+                    {"team": {"id": 505}, "players": [pl(200, 505, 90, 0, 0, 4, 1)]}]
         elif u.path == "/players/squads":
             resp = [{"team": {"id": int(q["team"])}, "players": [{"id": 7, "name": "Out Guy", "position": "Attacker"},
                                                                  {"id": 100, "name": "Keeper", "position": "Goalkeeper"}]}]
@@ -184,11 +191,27 @@ def test_finished_matches_get_half_time_and_goal_order_for_the_registry():
     assert len(fake.calls) == n  # nothing asked twice
 
 
-def test_lineup_window_opens_75_minutes_before_kickoff():
-    # a match on the hour: the tick 70 minutes before already tries (with 55 the first try came 30 minutes before kickoff)
+def test_lineup_window_opens_60_minutes_before_kickoff():
     s, col = _setup(FakeApi(lineups=False))
     col.run()  # links the fixtures; no XI published yet
-    col.now = lambda: KO - timedelta(minutes=70)
-    assert [d[0] for d in col.due_lineups()] == ["g1"]  # g2 kicks off 80 minutes later: not yet
-    col.now = lambda: KO - timedelta(minutes=80)
+    col.now = lambda: KO - timedelta(minutes=58)
+    assert [d[0] for d in col.due_lineups()] == ["g1"]  # g2 kicks off 68 minutes later: not yet
+    col.now = lambda: KO - timedelta(minutes=65)
     assert col.due_lineups() == []
+
+
+def test_player_stats_of_finished_matches_only_from_spare_budget():
+    from algowinbet.domain import MatchResult
+    s, col = _setup(FakeApi())
+    col.run()  # links both fixtures, reads lineups
+    s.save_results("goal-api", [MatchResult(fixture_id="g1", competition="Serie A", home="Milan", away="Inter", kickoff=KO, home_goals=1, away_goals=0)], KO)
+    col.now = lambda: KO + timedelta(hours=3)
+    assert col.player_stats_due() == [("g1", "1")]  # g2 has no result yet
+    from algowinbet.collector import CollectStats
+    st = CollectStats("x")
+    col.sync_player_stats(st, reserve_for_leagues=1000)  # the day's lineups need everything: nothing asked
+    assert "rimandate" in st.skipped[0] and col.player_stats_due() == [("g1", "1")]
+    col.sync_player_stats(st)
+    rows = s.db.execute("SELECT team, player_id, shots, shots_on, fouls_committed, yellow FROM player_match_stats ORDER BY player_id").fetchall()
+    assert rows == [("Milan", "apif:100", 5, 3, 0, 0), ("Inter", "apif:200", 0, 0, 4, 1)]  # the unused substitute is skipped
+    assert col.player_stats_due() == []

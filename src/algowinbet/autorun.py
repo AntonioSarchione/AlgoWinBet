@@ -59,7 +59,7 @@ class AutoConfig:
     goal_reserve: int = 50
     oddspapi_monthly_limit: int = 250
     oddspapi_reserve: int = 20
-    lineup_window_min: int = 95
+    lineup_window_min: int = 60  # official XI from 60 minutes before kickoff (probable lineup before)
     fixtures_days: int = 14
     history_seasons: int = 2  # backfill: current season + 2 previous, never more
     prekick_min: tuple[int, int] = (30, 75)
