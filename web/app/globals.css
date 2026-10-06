@@ -588,3 +588,23 @@ th.num .th-sort { justify-content: flex-end; }
   color: var(--text); font-family: var(--font-mono); text-align: right;
 }
 .sc-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+
+/* statistical streaks (match page, Ritardi tab) */
+.tr-block { min-width: 0; }
+.tr-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.tr-head h3 { margin: 0; font-size: 16px; }
+.tr-head .muted { font-size: 13px; }
+.tr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tr-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.tr-icon { flex: none; margin-top: 2px; color: var(--muted); }
+.tr-main { flex: 1; min-width: 0; }
+.tr-text { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
+.tr-sub { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.tr-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.tr-rare { font-family: var(--font-mono); font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--card-2); color: var(--text-2); white-space: nowrap; }
+.tr-rare.mid { background: var(--warn-soft); color: var(--warn); }
+.tr-rare.hi { background: var(--good-soft); color: var(--good); }
+.tr-model { font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.tr-more { margin-top: 6px; }
+.tr-more summary { cursor: pointer; color: var(--text-2); font-size: 13px; min-height: 32px; display: flex; align-items: center; }
+.tr-more .tr-list { margin-top: 6px; }

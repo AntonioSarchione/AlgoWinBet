@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Goal, History, Layers, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Goal, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
 import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
@@ -8,6 +8,7 @@ import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, ST
 import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
 import { Lineups } from "@/app/_components/Lineups";
 import { Scorers, type ScorersData } from "@/app/_components/Scorers";
+import { Trends, type TrendsData } from "@/app/_components/Trends";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ const TABS = [
   { v: "quote", l: "Quote", icon: LineChart },
   { v: "formazioni", l: "Formazioni", icon: Shirt },
   { v: "marcatori", l: "Marcatori", icon: Goal },
+  { v: "ritardi", l: "Ritardi", icon: Hourglass },
   { v: "forma", l: "Forma e precedenti", icon: History },
 ] as const;
 
@@ -99,6 +101,8 @@ export default async function Partita({ params, searchParams }: Props) {
                 e i gol attesi del modello.
               </Empty>
             )
+          ) : tab === "ritardi" ? (
+            <Trends home={fx.home} away={fx.away} data={parseJSON<TrendsData | null>(fx.trends, null)} />
           ) : tab === "forma" ? (
             <Form home={fx.home} away={fx.away} fh={d.formHome} fa={d.formAway} h2h={d.h2h} />
           ) : (
