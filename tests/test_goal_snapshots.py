@@ -325,6 +325,7 @@ def test_fixture_and_results_sync_store_rows_and_report_gaps():
     assert "status=SCHEDULED" in t.calls[0][0] and "from=2026-09-30" in t.calls[0][0]
     st = col.sync_results(3)
     assert st.saved == {"results": 1}
+    assert f"to={NOW + timedelta(days=1):%Y-%m-%d}" in t.calls[-1][0]  # "to" is exclusive: today's evening matches included
     assert SnapshotProvider(store).list_history(None, NOW)[0].home_goals == 3
 
 

@@ -96,7 +96,10 @@ class GoalCollector:
         def work():
             for lid in leagues or self.league_ids:
                 days = days_back if days_back is not None else self.days_since_last_results(lid)
-                rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days):%Y-%m-%d}", "to": f"{t0:%Y-%m-%d}"}, max_pages=60))
+                # GOAL's "to" date is exclusive: to=today left out today's matches, so evening matches only arrived with the
+                # next morning's request (every evening result run from 2026-10-03 to 10-05 saved 0, the morning one 8)
+                rows = list(self.client.pages(f"/leagues/{lid}/results", {"from": f"{t0 - timedelta(days=days):%Y-%m-%d}",
+                                                                          "to": f"{t0 + timedelta(days=1):%Y-%m-%d}"}, max_pages=60))
                 res = [r for r in (self.mapper.result(x) for x in rows) if r]
                 st.add("results", self.store.save_results(SOURCE, res, t0))
                 self.store.save_fixtures(SOURCE, [f for f in (self.mapper.fixture(x) for x in rows) if f], t0)  # final status
