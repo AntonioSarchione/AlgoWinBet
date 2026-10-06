@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Goal, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma, Users } from "lucide-react";
 import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
@@ -17,7 +17,7 @@ const TABS = [
   { v: "mercati", l: "Mercati", icon: ListChecks },
   { v: "quote", l: "Quote", icon: LineChart },
   { v: "formazioni", l: "Formazioni", icon: Shirt },
-  { v: "marcatori", l: "Marcatori", icon: Goal },
+  { v: "giocatori", l: "Giocatori", icon: Users },
   { v: "ritardi", l: "Ritardi", icon: Hourglass },
   { v: "forma", l: "Forma e precedenti", icon: History },
 ] as const;
@@ -33,7 +33,7 @@ export async function generateMetadata({ params }: Props) {
 export default async function Partita({ params, searchParams }: Props) {
   const id = decodeURIComponent((await params).id);
   const sp = await searchParams;
-  const tab = sp.tab ?? "probabilita";
+  const tab = sp.tab === "marcatori" ? "giocatori" : (sp.tab ?? "probabilita"); // old links to the scorers tab
   const d = await fixtureDetail(id);
   if (!d) notFound();
   const { fx } = d;
@@ -92,11 +92,11 @@ export default async function Partita({ params, searchParams }: Props) {
             <Quotes id={id} home={fx.home} away={fx.away} q={sp} />
           ) : tab === "formazioni" ? (
             <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} />
-          ) : tab === "marcatori" ? (
+          ) : tab === "giocatori" ? (
             fx.scorers ? (
               <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={parseJSON<ScorersData>(fx.scorers, {})} />
             ) : (
-              <Empty icon={Goal} title="Marcatori non disponibili">
+              <Empty icon={Users} title="Giocatori non disponibili">
                 Servono almeno 5 partite di storico con formazioni e gol per entrambe le squadre (le nazionali spesso non le hanno ancora),
                 e i gol attesi del modello.
               </Empty>

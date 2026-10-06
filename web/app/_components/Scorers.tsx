@@ -1,9 +1,10 @@
 "use client";
-// Goalscorer table (Fase 9): the published probabilities of each player (analysis run, pub_fixtures.scorers), the fair price,
-// and the EV at the Sisal price the user types. Sisal's scorer prices are not on the feed for the leagues: typed by hand,
-// like My Combo. Nothing is sent anywhere: the typed prices live in this page only.
+// Player markets (Fase 9, "Giocatori" tab): goals today (the published probabilities of each player, analysis run,
+// pub_fixtures.scorers), the fair price and the EV at the Sisal price the user types; assists, cards, fouls and shots come
+// with their models (FotMob history, each verified before use). Sisal's player prices are not on the feed for the leagues:
+// typed by hand, like My Combo. Nothing is sent anywhere: the typed prices live in this page only.
 import { useState } from "react";
-import { Shirt, Users } from "lucide-react";
+import { Clock, Shirt, Users } from "lucide-react";
 
 export type ScorerPlayer = { n: string; r: string; s: number; a: number; f: number; d: number };
 export type TeamScorers = { state: "ufficiale" | "probabile"; sheets: number; players: ScorerPlayer[] };
@@ -15,6 +16,16 @@ const MARKETS = [
   { k: "d", l: "Doppietta", hint: "almeno due gol" },
 ] as const;
 type MarketKey = (typeof MARKETS)[number]["k"];
+
+// Market groups of the tab: only goals have a model today; the others say what they will hold and what they wait for.
+const GROUPS = [
+  { k: "gol", l: "Gol" },
+  { k: "assist", l: "Assist", soon: "Probabilità di fare almeno un assist, dagli assist e dagli xA di ogni giocatore." },
+  { k: "cartellini", l: "Cartellini", soon: "Ammonito ed espulso: cartellini del giocatore ogni 90 minuti, minuti attesi e cartellini attesi della partita (arbitro compreso)." },
+  { k: "falli", l: "Falli", soon: "Over/under falli fatti e subiti: media del giocatore ogni 90 minuti, minuti attesi e avversario." },
+  { k: "tiri", l: "Tiri", soon: "Over/under tiri e tiri in porta, se Sisal li offre per la partita." },
+] as const;
+type GroupKey = (typeof GROUPS)[number]["k"];
 
 const ROLE: Record<string, string> = { GK: "Portiere", DEF: "Difensore", MID: "Centrocampista", FWD: "Attaccante" };
 const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
@@ -84,14 +95,38 @@ function TeamTable({ team, xg, t, market, prices, setPrice }: {
 export function Scorers({ home, away, xgHome, xgAway, data }: {
   home: string; away: string; xgHome: number | null; xgAway: number | null; data: ScorersData;
 }) {
+  const [group, setGroup] = useState<GroupKey>("gol");
   const [market, setMarket] = useState<MarketKey>("a");
   const [prices, setPrices] = useState<Record<string, string>>({});
   const setPrice = (key: string, v: string) => setPrices((cur) => ({ ...cur, [key]: v }));
   const m = MARKETS.find((x) => x.k === market)!;
+  const g = GROUPS.find((x) => x.k === group)!;
   return (
     <div className="col">
-      <div className="sc-bar">
-        <div className="combo-chips" role="radiogroup" aria-label="Mercato marcatori">
+      <div className="combo-chips" role="radiogroup" aria-label="Categoria di mercati del giocatore">
+        {GROUPS.map((x) => (
+          <button key={x.k} type="button" role="radio" aria-checked={group === x.k} className={`chip ${group === x.k ? "on" : ""}`}
+            onClick={() => setGroup(x.k)}>
+            {x.l}
+            {"soon" in x && <span className="chip-odds">in arrivo</span>}
+          </button>
+        ))}
+      </div>
+      {"soon" in g ? (
+        <div className="sc-soon">
+          <Clock size={18} aria-hidden="true" />
+          <div>
+            <p className="sc-name">{g.l}: in arrivo</p>
+            <p className="note">
+              {g.soon} Lo storico per giocatore (FotMob: minuti, assist, xA, falli, cartellini, tiri delle ultime tre stagioni) si sta
+              caricando; ogni mercato esce dopo la verifica sulle partite passate, come i gol.
+            </p>
+          </div>
+        </div>
+      ) : (
+      <>
+      <div className="sc-bar chips-sub">
+        <div className="combo-chips" role="radiogroup" aria-label="Mercato gol">
           {MARKETS.map((x) => (
             <button key={x.k} type="button" role="radio" aria-checked={market === x.k} className={`chip ${market === x.k ? "on" : ""}`}
               onClick={() => setMarket(x.k)}>
@@ -112,6 +147,8 @@ export function Scorers({ home, away, xgHome, xgAway, data }: {
         sotto cui la giocata non ha valore. Modello in prova: la verifica sulle partite passate è ancora in corso, quindi un EV piccolo
         non basta. Solo paper trading.
       </p>
+      </>
+      )}
     </div>
   );
 }

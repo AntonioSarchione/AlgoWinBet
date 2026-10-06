@@ -608,3 +608,7 @@ th.num .th-sort { justify-content: flex-end; }
 .tr-more { margin-top: 6px; }
 .tr-more summary { cursor: pointer; color: var(--text-2); font-size: 13px; min-height: 32px; display: flex; align-items: center; }
 .tr-more .tr-list { margin-top: 6px; }
+.sc-soon { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 12px; background: var(--card); color: var(--text-2); }
+.sc-soon svg { flex: none; margin-top: 2px; color: var(--accent); }
+.sc-soon p { margin: 0; }
+.sc-soon .note { margin-top: 4px; }
