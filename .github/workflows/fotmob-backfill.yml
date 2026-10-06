@@ -1,5 +1,6 @@
 # FotMob history in one long run (public pages, no key): what the daily slice of the collect ticks would read in two
-# months. Actions > fotmob-backfill > Run workflow; launch it again until the log says nothing is left.
+# months. Actions > fotmob-backfill > Run workflow: it launches itself again while matches are left, and stops when the
+# history is complete or a run saved nothing (FotMob paused or not answering: launch it by hand later).
 # Its own concurrency group: the collect ticks (quotes, lineups, recent FotMob matches) never wait for it, and it takes
 # the day's FotMob history slot first, so the ticks leave the history alone while it runs.
 name: fotmob-backfill
@@ -8,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: "minuti di lettura (circa 2.700 partite in 90 minuti)"
+        description: "minuti di lettura per lancio (circa 1.800 partite in 130 minuti)"
         required: false
-        default: "90"
+        default: "130"
       interval:
         description: "secondi tra una pagina e l'altra"
         required: false
@@ -22,6 +23,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write  # to launch itself again
 
 jobs:
   backfill:
@@ -35,6 +37,7 @@ jobs:
           cache: pip
       - run: pip install -e ".[turso]"
       - name: fotmob-backfill
+        id: fill
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -42,4 +45,14 @@ jobs:
           MINUTES: ${{ inputs.minutes }}
           INTERVAL: ${{ inputs.interval }}
         # inputs arrive as environment variables, never interpolated into the script (no shell injection)
-        run: algowinbet fotmob-backfill --minutes "${MINUTES:-90}" --interval "${INTERVAL:-1}" --db turso
+        run: algowinbet fotmob-backfill --minutes "${MINUTES:-130}" --interval "${INTERVAL:-1}" --db turso
+      - name: next run
+        if: success() && steps.fill.outputs.left != '0' && steps.fill.outputs.left != '' && steps.fill.outputs.saved != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINUTES: ${{ inputs.minutes }}
+          INTERVAL: ${{ inputs.interval }}
+          LEFT: ${{ steps.fill.outputs.left }}
+        run: |
+          echo "ancora $LEFT partite: nuovo lancio"
+          gh workflow run fotmob-backfill.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f minutes="${MINUTES:-130}" -f interval="${INTERVAL:-1}"

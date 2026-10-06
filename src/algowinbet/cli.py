@@ -559,6 +559,10 @@ def cmd_fotmob_backfill(a) -> None:
         if len(st.errors) > 20:
             print(f"  ... altri {len(st.errors) - 20} errori")
         print(f"partite storiche ancora da leggere: {left}" + (" (lancia di nuovo per continuare)" if left > 0 else ""))
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:  # the workflow launches itself again while matches are left and this run saved something
+            with open(out, "a", encoding="utf-8") as f:
+                f.write(f"left={max(left, 0)}\nsaved={st.saved.get('statistiche giocatori FotMob', 0)}\n")
     finally:
         store.close()
 
