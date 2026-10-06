@@ -187,8 +187,18 @@ def test_scheduler_runs_datasets_after_the_backfill():
 def test_config_maps_divisions():
     from algowinbet.autorun import AutoConfig
     cfg = AutoConfig.load("configs/collect.json")
-    assert cfg.divisions == {"I1": "Serie A", "E0": "Premier League", "D1": "Bundesliga", "F1": "Ligue 1", "SP1": "LaLiga",
-                             "P1": "Liga Portugal", "N1": "Eredivisie"}
+    assert cfg.divisions == {"I1": "Serie A", "E0": "Premier League", "D1": "Bundesliga", "F1": "Ligue 1", "SP1": "La Liga",
+                             "P1": "Primeira Liga", "N1": "Eredivisie"}
+
+
+def test_config_league_names_are_the_competitions_of_our_data():
+    """API-Football, the results request, OddsPapi links and FotMob compare the config name with fixtures.competition (as GOAL
+    names it): "LaLiga" / "Liga Portugal" silently matched nothing (found 2026-10-06)."""
+    from algowinbet.autorun import AutoConfig
+    from algowinbet.cli import DOMESTIC
+    cfg = AutoConfig.load("configs/collect.json")
+    known = set(DOMESTIC) | {"UEFA Champions League", "UEFA Europa League", "UEFA Nations League"}
+    assert {l.name for l in cfg.leagues} <= known
 
 
 def test_a_finished_match_without_result_triggers_the_results_step_early():
