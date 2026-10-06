@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, History, Layers, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Goal, History, Layers, LineChart, ListChecks, Percent, Shirt, Sigma } from "lucide-react";
 import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
 import { Lineups } from "@/app/_components/Lineups";
+import { Scorers, type ScorersData } from "@/app/_components/Scorers";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ const TABS = [
   { v: "mercati", l: "Mercati", icon: ListChecks },
   { v: "quote", l: "Quote", icon: LineChart },
   { v: "formazioni", l: "Formazioni", icon: Shirt },
+  { v: "marcatori", l: "Marcatori", icon: Goal },
   { v: "forma", l: "Forma e precedenti", icon: History },
 ] as const;
 
@@ -88,6 +90,15 @@ export default async function Partita({ params, searchParams }: Props) {
             <Quotes id={id} home={fx.home} away={fx.away} q={sp} />
           ) : tab === "formazioni" ? (
             <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} />
+          ) : tab === "marcatori" ? (
+            fx.scorers ? (
+              <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={parseJSON<ScorersData>(fx.scorers, {})} />
+            ) : (
+              <Empty icon={Goal} title="Marcatori non disponibili">
+                Servono almeno 5 partite di storico con formazioni e gol per entrambe le squadre (le nazionali spesso non le hanno ancora),
+                e i gol attesi del modello.
+              </Empty>
+            )
           ) : tab === "forma" ? (
             <Form home={fx.home} away={fx.away} fh={d.formHome} fa={d.formAway} h2h={d.h2h} />
           ) : (

@@ -565,3 +565,26 @@ th.num .th-sort { justify-content: flex-end; }
 .leg-reason { font-size: 12px; line-height: 1.4; color: var(--muted); margin-top: 4px; max-width: 46ch; }
 .leg-reason-prezzo, .leg-reason-contro { color: var(--warn); }
 .leg-reason-modello { color: var(--good); }
+
+/* goalscorer table (match page, Marcatori tab) */
+.sc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.sc-bar .note { margin: 0; }
+.sc-team { min-width: 0; }
+.sc-team-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; }
+.sc-team-head h3 { margin: 0; font-size: 16px; }
+.sc-team-head .pill { display: inline-flex; align-items: center; gap: 5px; }
+.sc-team-head .muted { font-size: 13px; }
+.sc-name { display: block; font-weight: 600; color: var(--text); }
+.sc-sub { display: block; font-size: 12px; color: var(--muted); }
+.sc-table td { vertical-align: middle; }
+.sc-table td.num .sc-sub { font-family: var(--font-mono); font-weight: 500; }
+@media (max-width: 480px) {
+  .sc-table th, .sc-table td { padding-left: 6px; padding-right: 6px; }
+  .sc-table td:first-child { white-space: normal; }
+  .sc-input { width: 60px; }
+}
+.sc-input {
+  width: 76px; min-height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-2);
+  color: var(--text); font-family: var(--font-mono); text-align: right;
+}
+.sc-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }

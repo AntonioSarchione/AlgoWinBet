@@ -46,6 +46,7 @@ export type FixtureRow = {
   xg_away: number | null;
   rho?: number | null; // Dixon-Coles low-score correction (absent on runs before My Combo)
   estimated?: number | null; // 1: Sisal does not price the match on the feed, prices estimated from Pinnacle (lib/books.ts)
+  scorers?: string | null; // JSON: goalscorer probabilities per team (Fase 9, absent on older runs and teams with little history)
   markets: string | null;
   book?: string | null; // JSON: Sisal price, market and final probability of the headline selections (absent on old runs)
 };
