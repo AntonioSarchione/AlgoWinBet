@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from .domain import Fixture, FixtureStatus, Player
+from .domain import Fixture, FixtureStatus, Player, Position
 from .information.news import norm
 from .names import TeamNames
 from .providers.goalapi import (BudgetExceeded, GoalApiClient, GoalApiError, GoalMapper, MappingReport, NotFound, PlanUpgradeRequired, SOURCE)
@@ -151,6 +151,7 @@ class GoalCollector:
 
         def work():
             done = 0
+            read: set[str] = set()
             for f in self._upcoming(timedelta(minutes=window_minutes)):
                 have = {l.team for l in self.provider.get_lineups(f.id) if l.status == "confirmed"}
                 if {f.home, f.away} <= have:
@@ -161,6 +162,7 @@ class GoalCollector:
                     continue
                 env = self.client.get(f"/fixtures/{f.provider_event_id or f.id.split(':', 1)[-1]}/lineups")
                 fetched = env["_fetched_at"]
+                read.add(f.id)
                 raw_id = self.store.db.execute("SELECT MAX(id) FROM raw_requests").fetchone()[0]
                 lus = self.mapper.lineups(env.get("data"), f, fetched)
                 roster = self.provider.list_players(f.competition)
@@ -168,7 +170,10 @@ class GoalCollector:
                     l.starters = self._reconcile_players(l.starters, l.team, roster)
                     l.bench = self._reconcile_players(l.bench, l.team, roster)
                 st.add("lineups", self.store.save_lineups(SOURCE, lus, raw_id))
+                if named := self._save_missing_players(env.get("data"), f.home, f.away, f.kickoff - self.XI_BEFORE_KICKOFF):
+                    st.add("players", named)
                 done += 1
+            self._name_unnamed_xi(st, read)
         self._run(st, work)
         st.report = self.mapper.report
         return st
@@ -350,7 +355,49 @@ class GoalCollector:
             out.setdefault(f, {}).setdefault(team, {}).update({p: names[p] for p in pids if p in names})
         return out
 
-    def _lineup_players(self, data, home: str, away: str) -> list[Player]:
+    NAMES_LOOKBACK = timedelta(days=2)
+    NAMES_PER_RUN = 4
+
+    def _save_missing_players(self, data, home: str, away: str, at: datetime) -> int:
+        """Players of a live XI the players table does not know yet (a national team's players from leagues we do not read):
+        saved with the name in the payload, so the match page shows names, not ids. A known player keeps its row (its club),
+        and a later club match moves a new one to its club (the row is dated at this XI)."""
+        new = {p.id: p for p in self._lineup_players(data, home, away, default=Position.MID)}
+        if not new:
+            return 0
+        ids = list(new)
+        known = {r[0] for r in self.store.db.execute(f"SELECT id FROM players WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()}
+        rows = [(p.id, p.name, p.team, p.position.value, 1.0, None, self.LINEUP_PLAYERS, at.isoformat()) for p in new.values() if p.id not in known]
+        if rows:
+            self.store._bulk("INSERT OR IGNORE INTO players(id,name,team,position,importance,start_rate,source,updated_at)", rows)
+        return len(rows)
+
+    def _name_unnamed_xi(self, st: CollectStats, read: set[str]) -> None:
+        """Confirmed XI of the last days holding ids the players table does not know (stored before the names were saved):
+        their lineups are read once more for the names, at most NAMES_PER_RUN matches a run, each match once (none read in this run)."""
+        since = (self.now() - self.NAMES_LOOKBACK).isoformat()
+        rows = self.store.db.execute(
+            "SELECT l.fixture_id, l.starters, l.bench FROM lineups l WHERE l.source = ? AND l.status = 'confirmed' AND l.observed_at >= ? "
+            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'xi-names:' || l.fixture_id)", (SOURCE, since)).fetchall()
+        ids: dict[str, set[str]] = {}
+        for fid, s, b in rows:
+            ids.setdefault(fid, set()).update(i for i in json.loads(s or "[]") + json.loads(b or "[]") if i.startswith("goal:"))
+        every = sorted(set().union(*ids.values())) if ids else []
+        known: set[str] = set()
+        for i in range(0, len(every), 500):
+            part = every[i:i + 500]
+            known.update(r[0] for r in self.store.db.execute(f"SELECT id FROM players WHERE id IN ({','.join('?' * len(part))})", part).fetchall())
+        todo = [f for f, p in ids.items() if p - known and f not in read][:self.NAMES_PER_RUN]
+        for fid in todo:
+            fx = self.store.db.execute("SELECT home, away, kickoff FROM fixtures WHERE fixture_id = ? ORDER BY observed_at DESC LIMIT 1", (fid,)).fetchone()
+            if fx is None:
+                continue
+            data = self.client.get(f"/fixtures/{fid.split(':', 1)[1]}/lineups").get("data")
+            if named := self._save_missing_players(data, fx[0], fx[1], datetime.fromisoformat(fx[2]) - self.XI_BEFORE_KICKOFF):
+                st.add("players", named)
+            self.store.mark_job(f"xi-names:{fid}", self.now(), "nomi dei giocatori letti")
+
+    def _lineup_players(self, data, home: str, away: str, default: Position | None = None) -> list[Player]:
         out: list[Player] = []
         for key, team in (("home", home), ("away", away)):
             side = data.get(key) if isinstance(data, dict) else None
@@ -359,7 +406,7 @@ class GoalCollector:
             for p in (side.get("startingLineups") or []) + (side.get("substitutes") or []):
                 if not isinstance(p, dict) or not p.get("playerId") or not p.get("lineupPlayer"):
                     continue
-                pos = self.mapper._POS.get(str(p.get("playerPosition") or "").strip().lower())
+                pos = self.mapper._POS.get(str(p.get("playerPosition") or p.get("lineupPosition") or "").strip().lower(), default)
                 if pos is not None:
                     out.append(Player(id=f"goal:{p['playerId']}", name=str(p["lineupPlayer"]), team=team, position=pos))
         return out

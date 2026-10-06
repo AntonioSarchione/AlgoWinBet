@@ -289,8 +289,9 @@ def test_lineup_polling_only_in_window_skips_confirmed_and_stamps_fetch_time():
     assert any("già confermate" in s for s in st.skipped)
     got = SnapshotProvider(store).get_lineups("goal:0")
     assert {l.observed_at for l in got} == {NOW} and {l.team for l in got} == {"H0", "A0"}
-    st2 = col.sync_lineups(window_minutes=95)  # second run: nothing left to fetch
-    assert st2.requests == 0
+    # second run: the XI is not polled again; this payload shape carries no GOAL names (lineupPlayer), so they are asked once
+    assert col.sync_lineups(window_minutes=95).requests == 1
+    assert col.sync_lineups(window_minutes=95).requests == 0  # third run: nothing left to fetch
 
 
 def test_lineup_names_are_reconciled_to_roster_ids():
@@ -302,6 +303,34 @@ def test_lineup_names_are_reconciled_to_roster_ids():
     col.sync_lineups()
     home = next(l for l in SnapshotProvider(store).get_lineups("goal:0") if l.team == "H0")
     assert "R-7" in home.starters and "H0::Other 0" in home.starters
+
+
+def _goal_side(prefix):
+    row = lambda k: {"playerId": f"{prefix}{k}", "lineupPlayer": f"{prefix} P{k}", "playerPosition": "Defender"}
+    return {"startingLineups": [row(k) for k in range(11)], "substitutes": [row(20)]}
+
+
+def test_live_xi_saves_the_names_of_players_we_do_not_know_and_keeps_the_known_ones():
+    store = SnapshotStore(":memory:")
+    _seed_fixtures(store, [NOW + timedelta(minutes=60)])
+    store.save_players("x", [Player(id="goal:h0", name="Club Name", team="Club", position=Position.FWD)], NOW)
+    col, _ = _collector({"/fixtures/0/lineups": [ok({"home": _goal_side("h"), "away": _goal_side("a"), "hasLineups": True})]}, store)
+    st = col.sync_lineups()
+    assert st.saved == {"lineups": 2, "players": 23}
+    names = dict(store.db.execute("SELECT id, name || '|' || team FROM players").fetchall())
+    assert names["goal:h0"] == "Club Name|Club" and names["goal:a5"] == "a P5|A0" and names["goal:h20"] == "h P20|H0"
+
+
+def test_xi_stored_without_names_is_read_once_more_for_them():
+    store = SnapshotStore(":memory:")
+    fx = _seed_fixtures(store, [NOW - timedelta(minutes=30)])  # kicked off: no longer polled for the XI
+    store.save_lineups("goal-api", [LineupSnapshot(fixture_id=fx[0].id, team=t, status="confirmed", starters=[f"goal:{p}{k}" for k in range(11)],
+                                                   published_at=NOW, observed_at=NOW - timedelta(hours=1)) for t, p in (("H0", "h"), ("A0", "a"))])
+    col, t = _collector({"/fixtures/0/lineups": [ok({"home": _goal_side("h"), "away": _goal_side("a"), "hasLineups": True})]}, store)
+    st = col.sync_lineups()
+    assert len(t.calls) == 1 and st.saved == {"players": 24}
+    assert store.db.execute("SELECT name FROM players WHERE id = 'goal:a3'").fetchone()[0] == "a P3"
+    assert col.sync_lineups().requests == 0  # each match once
 
 
 def test_collector_stops_cleanly_when_budget_runs_out():
