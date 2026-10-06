@@ -1005,6 +1005,18 @@ def cmd_registry_check(a) -> None:
         keys = store.db.execute("SELECT COUNT(*) FROM pub_slips WHERE run_id = ?", (rid,)).fetchone()[0]
         mine = store.db.execute("SELECT COUNT(*) FROM paper_slips WHERE run_id = ?", (rid,)).fetchone()[0]
         print(f"  run {rid} {at}: {keys} proposte, {mine} registrate per la prima volta in questo run")
+    now = datetime.now(timezone.utc).isoformat()
+    print("ultime chiusure: selezioni " + str(store.db.execute("SELECT MAX(settled_at), COUNT(*) FROM paper_legs WHERE settled_at IS NOT NULL").fetchone())
+          + ", schedine " + str(store.db.execute("SELECT MAX(settled_at), COUNT(*) FROM paper_slips WHERE settled_at IS NOT NULL").fetchone()))
+    print("selezioni aperte di partite già iniziate (partita, calcio d'inizio, risultato salvato):")
+    for fid, match, ko, n, res in store.db.execute(
+            "SELECT l.fixture_id, l.match, l.kickoff, COUNT(*), (SELECT home_goals || '-' || away_goals FROM results r WHERE r.fixture_id = l.fixture_id) "
+            "FROM paper_legs l WHERE l.result IS NULL AND l.kickoff <= ? GROUP BY l.fixture_id ORDER BY l.kickoff", (now,)).fetchall():
+        print(f"  {ko} {match} ({fid}): {n} aperte, risultato {res or 'MANCANTE'}")
+    print("schedine aperte con tutte le partite iniziate:")
+    for sid, created, last, legs in store.db.execute("SELECT id, created_at, last_kickoff, legs FROM paper_slips WHERE result IS NULL AND last_kickoff <= ? "
+                                                     "ORDER BY last_kickoff", (now,)).fetchall():
+        print(f"  #{sid} creata {created}, ultima partita {last}: {legs[:300]}")
     if not a.team:
         return
     legs = store.db.execute("SELECT fixture_id, sel_key, kickoff, result, settled_at, score FROM paper_legs WHERE match LIKE ? "
