@@ -91,6 +91,16 @@ def load_xi_data(store, provider) -> XiData:
     for fid, pid, kind in store.db.execute("SELECT fixture_id, player_id, kind FROM match_events WHERE kind IN ('CARD_YELLOW', 'CARD_RED') "
                                            "AND player_id IS NOT NULL").fetchall():
         cards[(fid, pid)].append(kind)
+    # GOAL events carry goals only: the cards come from API-Football player stats (one row per player and match). A second
+    # yellow is stored as yellow 1 + red 1, so it reads as a sending-off (red-card ban), never as a yellow-card ban.
+    for fid, team, pid, name, y, r in store.db.execute("SELECT fixture_id, team, player_id, name, yellow, red FROM player_match_stats "
+                                                       "WHERE yellow > 0 OR red > 0").fetchall():
+        g = provider._to_goal([pid])[0]
+        if g == pid:
+            g = provider.goal_id_by_name(team, name) or pid
+        if (fid, g) in cards:
+            continue  # the match events already have this player's cards
+        cards[(fid, g)] = ["CARD_YELLOW"] * min(y or 0, 1) + ["CARD_RED"] * min(r or 0, 1)
     return XiData(dict(sheets), roles, names, team_of, dict(status), dict(cards))
 
 
@@ -153,10 +163,12 @@ def candidates(data: XiData, team: str, kickoff: datetime, competition: str, fix
         dec = sum(w for w, st in zip(weights, started) if st) / wsum
         st_last = float(started[-1])
         status = _status(data, fixture_id, pid, kickoff - XI_TIME) if fixture_id else None
+        ban = suspension(data, past, pid, competition, kickoff)
         x = [dec, sum(started) / len(past), st_last, float(pid in last.bench), min(streak, 5) / 5.0,
-             float(data.roles.get(pid) == "GK"), float(cup) * st_last, float(rest < SHORT_REST) * st_last, float(status == "DOUBTFUL"),
-             *suspension(data, past, pid, competition, kickoff)]
-        out.append(Candidate(pid, x, status in ("OUT", "SUSPENDED")))
+             float(data.roles.get(pid) == "GK"), float(cup) * st_last, float(rest < SHORT_REST) * st_last, float(status == "DOUBTFUL"), *ban]
+        # a red card in the last league match is a sure ban: out, like a SUSPENDED status. The yellow count is only a feature,
+        # since the card history starts in October 2026 and a partial count can hit a threshold the real one has passed.
+        out.append(Candidate(pid, x, status in ("OUT", "SUSPENDED") or ban[0] == 1.0))
     return out
 
 

@@ -63,3 +63,25 @@ def test_red_card_and_fifth_yellow_bring_a_ban_feature():
     # a cup match is not covered by a league ban
     cup = {c.player_id: dict(zip(FEATURES, c.x)) for c in candidates(data, "Milan", T0 + timedelta(days=56), "UEFA Champions League", "goal:cx")}
     assert cup["goal:c2"]["ban_red"] == 0.0
+
+
+def test_api_football_cards_feed_the_ban_features():
+    """GOAL events have no cards: API-Football player stats do. Their ids map to GOAL ids through the players table or the name."""
+    from algowinbet.probable import FEATURES, candidates
+    st = _store(8)
+    st.db.execute("INSERT INTO players(id, name, team, position, source) VALUES('apif:4', 'c4', 'Milan', 'MID', 'api-football')")
+
+    def stat(fid, pid, name, y, r):
+        st.db.execute("INSERT INTO player_match_stats(fixture_id, source, team, player_id, name, minutes, yellow, red) "
+                      "VALUES(?, 'api-football', 'Milan', ?, ?, 90, ?, ?)", (fid, pid, name, y, r))
+    for k in range(5):  # c4 (known to the players table): a yellow in each of the matches 3..7
+        stat(f"goal:f{3 + k}", "apif:4", "c4", 1, 0)
+    stat("goal:f7", "apif:5", "c5", 0, 1)  # c5 only by name: straight red in the last match
+    stat("goal:f7", "apif:6", "c6", 1, 1)  # c6: second yellow, a red-card ban and never a yellow-card one
+    data = load_xi_data(st, SnapshotProvider(st))
+    cands = {c.player_id: dict(zip(FEATURES, c.x)) for c in candidates(data, "Milan", T0 + timedelta(days=56), "Serie A", "goal:f8")}
+    assert cands["goal:c4"]["ban_yellow"] == 1.0 and cands["goal:c4"]["ban_red"] == 0.0
+    assert cands["goal:c5"]["ban_red"] == 1.0
+    assert cands["goal:c6"]["ban_red"] == 1.0 and cands["goal:c6"]["ban_yellow"] == 0.0
+    xi = predict(XiModel(), data, "Milan", T0 + timedelta(days=56), "Serie A", "goal:f8")
+    assert xi.probs["goal:c5"] == 0.0 and xi.probs["goal:c4"] > 0.5  # the red card is a sure ban, the yellow count only a feature

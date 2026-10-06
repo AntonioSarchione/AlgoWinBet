@@ -20,6 +20,9 @@ from .domain import (Fixture, FixtureStatus, HistoricalLineup, InformationEvent,
 from .names import normalize
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS player_match_stats(fixture_id TEXT, source TEXT, team TEXT, player_id TEXT, name TEXT, position TEXT,
+  minutes INTEGER, substitute INTEGER, rating REAL, shots INTEGER, shots_on INTEGER, goals INTEGER, assists INTEGER, key_passes INTEGER,
+  fouls_committed INTEGER, fouls_drawn INTEGER, yellow INTEGER, red INTEGER, observed_at TEXT, PRIMARY KEY(fixture_id, source, player_id));
 CREATE TABLE IF NOT EXISTS blobs(hash TEXT PRIMARY KEY, body BLOB);
 CREATE TABLE IF NOT EXISTS raw_requests(id INTEGER PRIMARY KEY, source TEXT, endpoint TEXT, params TEXT, fetched_at TEXT,
   status INTEGER, hash TEXT, cost INTEGER);
@@ -433,6 +436,8 @@ class SnapshotProvider:
     def __init__(self, store: SnapshotStore):
         self.store = store
         self._idmap: dict[str, str] | None = None
+        self._by_name: dict[tuple[str, str], str] | None = None
+        self._by_surname: dict[tuple[str, str], list[tuple[str, str]]] = {}
 
     # One identity per player: the GOAL id when the player appears in GOAL lineups (the history the impact model learns
     # from); API-Football ids (live lineups, injuries) are translated by team and name.
@@ -440,30 +445,42 @@ class SnapshotProvider:
 
     def _goal_ids(self) -> dict[str, str]:
         if self._idmap is None:
-            from .information.news import norm
             rows = self.store.db.execute("SELECT id, name, team, source FROM players").fetchall()
-            by_name: dict[tuple[str, str], str] = {}
-            by_surname: dict[tuple[str, str], list[tuple[str, str]]] = {}
+            self._by_name, self._by_surname = {}, {}
             for pid, name, team, src in rows:
                 if src == self.GOAL_PLAYERS and name:
-                    n = norm(name).replace(".", " ").split()
-                    by_name[(team, " ".join(n))] = pid
-                    by_surname.setdefault((team, n[-1]), []).append((n[0][:1], pid))
+                    n = self._name_parts(name)
+                    self._by_name[(team, " ".join(n))] = pid
+                    self._by_surname.setdefault((team, n[-1]), []).append((n[0][:1], pid))
             m: dict[str, str] = {}
             for pid, name, team, src in rows:
                 if src == self.GOAL_PLAYERS or not name:
                     continue
-                n = norm(name).replace(".", " ").split()
-                hit = by_name.get((team, " ".join(n)))
-                if hit is None:
-                    cands = by_surname.get((team, n[-1]), [])
-                    if len(cands) > 1 and len(n) > 1:  # "M. Maignan" -> first initial
-                        cands = [c for c in cands if c[0] == n[0][:1]]
-                    hit = cands[0][1] if len(cands) == 1 else None
+                hit = self.goal_id_by_name(team, name)
                 if hit:
                     m[pid] = hit
             self._idmap = m
         return self._idmap
+
+    @staticmethod
+    def _name_parts(name: str) -> list[str]:
+        from .information.news import norm
+        return norm(name).replace(".", " ").split()
+
+    def goal_id_by_name(self, team: str, name: str) -> str | None:
+        """The GOAL player id of a player named by another source ("M. Maignan" -> first initial), or None."""
+        if self._by_name is None:
+            self._goal_ids()
+        n = self._name_parts(name or "")
+        if not n:
+            return None
+        hit = self._by_name.get((team, " ".join(n)))
+        if hit is None:
+            cands = self._by_surname.get((team, n[-1]), [])
+            if len(cands) > 1 and len(n) > 1:
+                cands = [c for c in cands if c[0] == n[0][:1]]
+            hit = cands[0][1] if len(cands) == 1 else None
+        return hit
 
     def _to_goal(self, ids: list[str]) -> list[str]:
         m = self._goal_ids()

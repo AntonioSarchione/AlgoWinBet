@@ -37,9 +37,6 @@ CREATE TABLE IF NOT EXISTS player_status(id INTEGER PRIMARY KEY, source TEXT, fi
 CREATE INDEX IF NOT EXISTS ix_status_fx ON player_status(fixture_id);
 CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TEXT, linked_at TEXT, PRIMARY KEY(source, ext_id));
 -- per player and match (API-Football /fixtures/players): shots, fouls and cards, which no other free source gives
-CREATE TABLE IF NOT EXISTS player_match_stats(fixture_id TEXT, source TEXT, team TEXT, player_id TEXT, name TEXT, position TEXT,
-  minutes INTEGER, substitute INTEGER, rating REAL, shots INTEGER, shots_on INTEGER, goals INTEGER, assists INTEGER, key_passes INTEGER,
-  fouls_committed INTEGER, fouls_drawn INTEGER, yellow INTEGER, red INTEGER, observed_at TEXT, PRIMARY KEY(fixture_id, source, player_id));
 """
 
 # Official XI from 60 minutes before kickoff, then every tick (15 minutes): before that the page shows our probable lineup
