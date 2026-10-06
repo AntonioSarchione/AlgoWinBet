@@ -9,14 +9,21 @@ Not an official API: the site may change without notice, so the collector is opt
 (fotmob_player_stats, fotmob_absences): a feature that wants them is measured first, like every new source.
 
 Per tick:
-  seasons ... /leagues/{id}/fixtures/x?season=S (one page per league and season, every match of that season): links FotMob
-              matches to our results. Past seasons once; the current one again when a finished match is still unlinked.
+  seasons ... /leagues/{id}/fixtures/x?season=S (one page per league and season, every match of that season, the coming ones
+              with their id too): links FotMob matches to our results. A new result is first linked from the stored page, with no
+              request; the current season is read again only when the stored page is older than an unlinked match's kickoff
+              (a new season, a postponed match). Past seasons once.
   matches ... /match/{id} for finished linked matches without player stats: the last RECENT_DAYS first (at most
               RECENT_PER_TICK a tick), then the history newest first within the morning's history_seconds.
 Every page is stored in the snapshot store as the compact JSON the collector reads (not the 1 MB HTML).
+
+FotMob is optional, so it never fails a tick: a network error or an unexpected page ends FotMob's part of the tick (no further
+request to a site that is not answering), a refusal (401, 403, 429, a page without the data) pauses it for PAUSE_AFTER_BLOCK,
+and any other error becomes a line of the tick's log. Only a dropped connection to Turso goes up, to the tick's own recovery.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import time
@@ -31,12 +38,16 @@ from .providers.goalapi import Transport, urllib_transport
 from .snapshots import SnapshotProvider, SnapshotStore
 
 SOURCE = "fotmob"
+PAUSE_JOB = "fotmob-pause"
 BASE_URL = "https://www.fotmob.com"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128 Safari/537.36"
 MIN_INTERVAL_S = 2.0  # one page every 2 seconds at most: a small, polite load
 RECENT_DAYS = 10
 RECENT_PER_TICK = 12
-SEASON_REFRESH = timedelta(hours=6)
+PAUSE_AFTER_BLOCK = timedelta(hours=12)
+BLOCK_STATUS = {401, 403, 429}
+TIMEOUT_S = 20.0
+LINK_WINDOW = timedelta(hours=36)  # dates differ by time zone between sources
 FINISHED_AFTER = timedelta(hours=2, minutes=30)  # from kickoff
 HISTORY_MIN_S = 60  # less than this is not worth the day's history slot
 GIVE_UP_AFTER = timedelta(days=3)  # a finished match still without player stats then has none (lower leagues, abandoned)
@@ -62,14 +73,28 @@ INT_COLS = {"minutes", "goals", "assists", "shots", "shots_on", "key_passes", "t
 _NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 
 
+def _utc(m: dict) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(m["status"]["utcTime"]).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def pid(fotmob_id) -> str:
     return f"fotmob:{fotmob_id}"
 
 
 class FotMobError(RuntimeError):
-    def __init__(self, message: str, status: int = 0):
+    """status 0: no answer (network). blocked: a refusal, or a page without the data (a challenge page)."""
+
+    def __init__(self, message: str, status: int = 0, blocked: bool = False):
         super().__init__(message)
-        self.status = status
+        self.status, self.blocked = status, blocked
+
+    @property
+    def halts(self) -> bool:
+        """Every error but a missing page (404) ends FotMob's part of the tick."""
+        return self.status != 404
 
 
 class FotMobClient:
@@ -78,7 +103,7 @@ class FotMobClient:
     def __init__(self, store: SnapshotStore | None = None, transport: Transport | None = None,
                  sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), base_url: str = BASE_URL):
-        self.store, self.transport = store, transport or urllib_transport(timeout=30.0)
+        self.store, self.transport = store, transport or urllib_transport(timeout=TIMEOUT_S)
         self.sleep, self.clock, self.now, self.base = sleep, clock, now, base_url
         self._last = -1e9
         self.requests_sent = 0
@@ -89,24 +114,29 @@ class FotMobClient:
         if wait > 0:
             self.sleep(wait)
         query = "&".join(f"{k}={v}" for k, v in sorted((params or {}).items()))
-        status, _, body = self.transport(f"{self.base}{path}" + (f"?{query}" if query else ""),
-                                         {"User-Agent": USER_AGENT, "Accept": "text/html", "Accept-Language": "en"})
-        self._last = self.clock()
-        self.requests_sent += 1
+        try:
+            status, _, body = self.transport(f"{self.base}{path}" + (f"?{query}" if query else ""),
+                                             {"User-Agent": USER_AGENT, "Accept": "text/html", "Accept-Language": "en"})
+        except (OSError, http.client.HTTPException) as e:  # timeout, refused or reset connection, DNS, TLS, truncated body
+            raise FotMobError(f"nessuna risposta su {path} ({type(e).__name__}: {e})", 0) from e
+        finally:
+            self._last = self.clock()
+            self.requests_sent += 1
         if status != 200:
-            raise FotMobError(f"{status} su {path}", status)
+            raise FotMobError(f"{status} su {path}", status, blocked=status in BLOCK_STATUS)
         m = _NEXT_DATA.search(body.decode("utf-8", "replace"))
         if not m:
-            raise FotMobError(f"pagina senza __NEXT_DATA__: {path}", status)
+            raise FotMobError(f"pagina senza __NEXT_DATA__: {path}", status, blocked=True)
         try:
             return json.loads(m.group(1))["props"]["pageProps"]
         except (ValueError, KeyError, TypeError) as e:
             raise FotMobError(f"JSON della pagina non leggibile: {path}", status) from e
 
-    def keep(self, path: str, params: dict | None, payload: dict) -> None:
-        """Stores what the collector reads from a page (the page itself is about 1 MB of HTML)."""
+    def keep(self, path: str, params: dict | None, payload: dict) -> int | None:
+        """Stores what the collector reads from a page (the page itself is about 1 MB of HTML); the stored row's id."""
         if self.store:
-            self.store.put_raw(SOURCE, path, params, 200, json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(), self.now(), cost=0)
+            return self.store.put_raw(SOURCE, path, params, 200, json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(), self.now(), cost=0)
+        return None
 
 
 @dataclass
@@ -125,7 +155,33 @@ class FotMobCollector:
         self.history_seasons = history_seasons
         self.provider = SnapshotProvider(store)
         self._history = None
+        self._halted = False
         store.db.executescript(SCHEMA)
+
+    def _fail(self, st: CollectStats, what: str, e: FotMobError) -> None:
+        st.errors.append(f"{what}: {e}")
+        if not e.halts or self._halted:
+            return
+        self._halted = True
+        if e.blocked:
+            until = self.now() + PAUSE_AFTER_BLOCK
+            self.store.mark_job(PAUSE_JOB, self.now(), until.isoformat())
+            st.skipped.append(f"FotMob rifiuta le richieste: in pausa fino alle {until:%H:%M} UTC del {until:%d/%m}")
+        else:
+            st.skipped.append("FotMob non risponde: il resto al prossimo giro")
+
+    def paused_until(self) -> datetime | None:
+        row = self.store.db.execute("SELECT detail FROM jobs WHERE name=?", (PAUSE_JOB,)).fetchone()
+        try:
+            until = datetime.fromisoformat(row[0]) if row and row[0] else None
+        except ValueError:
+            return None
+        return until if until and until > self.now() else None
+
+    def _jobs(self, prefix: str) -> list[tuple[str, str, str]]:
+        """jobs rows whose name starts with prefix, through the primary key (a LIKE would read the whole table)."""
+        return self.store.db.execute("SELECT name, done_at, detail FROM jobs WHERE name >= ? AND name < ?",
+                                     (prefix, prefix[:-1] + chr(ord(prefix[-1]) + 1))).fetchall()
 
     # ------------------------------------------------------------------ links
     def _links(self) -> dict[str, str]:
@@ -143,12 +199,14 @@ class FotMobCollector:
     def _match(self, m: dict, results) -> str | None:
         """Our result for a FotMob match: same teams within a day and a half of the kickoff (dates differ by time zone between
         sources), the best pair by name similarity when the names are spelled differently."""
+        ko = _utc(m)
         try:
-            ko = datetime.fromisoformat(str(m["status"]["utcTime"]).replace("Z", "+00:00"))
             home, away = self.names.canon(m["home"]["name"]), self.names.canon(m["away"]["name"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError):
             return None
-        near = [r for r in results if abs(r.kickoff - ko) <= timedelta(hours=36)]
+        if ko is None:
+            return None
+        near = [r for r in results if abs(r.kickoff - ko) <= LINK_WINDOW]
         exact = [r for r in near if r.home == home and r.away == away]
         if len(exact) == 1:
             return exact[0].fixture_id
@@ -167,20 +225,30 @@ class FotMobCollector:
                     "status": {"utcTime": (m.get("status") or {}).get("utcTime"), "finished": bool((m.get("status") or {}).get("finished"))}}
                    for m in ((pp.get("fixtures") or {}).get("allMatches") or [])]
         seasons = [str(s) for s in pp.get("allAvailableSeasons") or []]
-        self.client.keep(f"/leagues/{league.fotmob_id}/fixtures", {"season": season or "current"}, {"matches": matches, "seasons": seasons})
+        raw = self.client.keep(f"/leagues/{league.fotmob_id}/fixtures", {"season": season or "current"}, {"matches": matches, "seasons": seasons})
+        self.store.mark_job(f"fotmob-page:{league.fotmob_id}:{season or 'current'}", self.now(), str(raw or ""))
         return matches, seasons
 
-    def _link(self, st: CollectStats, league: FotMobLeague, matches: list[dict], results) -> None:
+    def _stored_pages(self, league: FotMobLeague) -> dict[str, tuple[datetime, dict]]:
+        """season ('current' or 'AAAA/AAAA') -> (when it was read, its stored payload), with no request."""
+        out = {}
+        for name, at, raw in self._jobs(f"fotmob-page:{league.fotmob_id}:"):
+            body = self.store.raw_body(int(raw)) if raw and raw.isdigit() else b""
+            if body:
+                out[name.split(":", 2)[2]] = (datetime.fromisoformat(at), json.loads(body))
+        return out
+
+    def _link(self, st: CollectStats, league: FotMobLeague, matches: list[dict], results, report: bool = True) -> None:
+        """Links the page's matches to our results (only a finished match has one: a coming match simply finds none).
+        report: list the finished FotMob matches without a result of ours (only for a page just read: a stored one is stale)."""
         have = set(self._links())
         rows, missed = [], []
         first = min((r.kickoff for r in results), default=None)
         for m in matches:
-            if not m["status"]["finished"]:
-                continue
             fid = self._match(m, results)
             if fid is None:
                 ko = str(m["status"]["utcTime"] or "")
-                if first is not None and ko >= first.strftime("%Y-%m-%d"):  # before our history it is simply not ours
+                if report and m["status"]["finished"] and first is not None and ko >= first.strftime("%Y-%m-%d"):  # older: not ours
                     missed.append(f"{m['home']['name']}-{m['away']['name']} {ko[:10]}")
             elif fid not in have:
                 rows.append((SOURCE, m["id"], fid, self.now().isoformat()))
@@ -189,46 +257,52 @@ class FotMobCollector:
         if missed:  # a name to add to configs/team_aliases.json, or a match our results do not have
             st.skipped.append(f"{league.competition}: {len(missed)} partite FotMob finite senza risultato nostro (es. {', '.join(missed[:3])})")
 
-    def _last_fetch(self, path: str, params: dict) -> datetime | None:
-        row = self.store.db.execute("SELECT MAX(fetched_at) FROM raw_requests WHERE source=? AND endpoint=? AND params=?",
-                                    (SOURCE, path, json.dumps(params, sort_keys=True))).fetchone()
-        return datetime.fromisoformat(row[0]) if row and row[0] else None
-
     def sync_seasons(self, st: CollectStats, history: bool) -> None:
-        """Current season when a finished match of the last RECENT_DAYS is unlinked; with history, the previous
-        history_seasons once each (the seasons our results backfill holds)."""
-        t, links = self.now(), self._links()
+        """Links the results of the last RECENT_DAYS from the stored season pages first (no request). The current season is
+        read again only when an unlinked one kicked off after the stored page was read: that page may carry the match's old
+        date, or be last season's. With history, the stored pages link everything again (an alias added since) and the
+        previous history_seasons are read once each (the seasons our results backfill holds)."""
+        t = self.now()
         for lg in self.leagues:
-            results = self._results(lg)
+            if self._halted:
+                break
+            results, links = self._results(lg), self._links()
             recent = [r for r in results if t - r.kickoff <= timedelta(days=RECENT_DAYS) and r.fixture_id not in links]
-            path = f"/leagues/{lg.fotmob_id}/fixtures"
-            last = self._last_fetch(path, {"season": "current"})
-            seasons: list[str] = []
-            if recent and (last is None or t - last >= SEASON_REFRESH) or (history and last is None):
+            if not recent and not history:
+                continue
+            pages = self._stored_pages(lg)
+            if history:
+                for _, payload in pages.values():
+                    self._link(st, lg, payload.get("matches") or [], results, report=False)
+            else:  # only the stored matches around the unlinked results: a result FotMob lacks costs nothing each tick
+                lo, hi = min(r.kickoff for r in recent) - LINK_WINDOW, max(r.kickoff for r in recent) + LINK_WINDOW
+                for _, payload in pages.values():
+                    near = [m for m in payload.get("matches") or [] if lo <= (_utc(m) or lo - LINK_WINDOW) <= hi]
+                    self._link(st, lg, near, recent, report=False)
+            links = self._links()
+            recent = [r for r in recent if r.fixture_id not in links]
+            last, stored = pages.get("current", (None, {}))
+            seasons = [str(x) for x in stored.get("seasons") or []]
+            if (last is None and (recent or history)) or (last is not None and any(r.kickoff > last for r in recent)):
                 try:
                     matches, seasons = self._season_page(lg, None)
                 except FotMobError as e:
-                    st.errors.append(f"{lg.competition}: {e}")
+                    self._fail(st, lg.competition, e)
                     continue
                 st.requests += 1
                 self._link(st, lg, matches, results)
             if not history:
                 continue
-            if not seasons:
-                got = self.store.last_raw(SOURCE, path)
-                seasons = (json.loads(self.store.raw_body(got[0])).get("seasons") or []) if got else []
             for season in seasons[1:1 + self.history_seasons]:
-                job = f"fotmob-season:{lg.fotmob_id}:{season}"
-                if self.store.job_done(job):
+                if season in pages or self._halted:
                     continue
                 try:
                     matches, _ = self._season_page(lg, season)
                 except FotMobError as e:
-                    st.errors.append(f"{lg.competition} {season}: {e}")
+                    self._fail(st, f"{lg.competition} {season}", e)
                     continue
                 st.requests += 1
                 self._link(st, lg, matches, results)
-                self.store.mark_job(job, t, f"{len(matches)} partite")
         self.store.db.commit()
 
     # ------------------------------------------------------------------ matches
@@ -236,7 +310,7 @@ class FotMobCollector:
         """(recent, history): (our fixture id, FotMob id) of linked finished matches without player stats, newest first."""
         t = self.now()
         have = {r[0] for r in self.store.db.execute("SELECT DISTINCT fixture_id FROM fotmob_player_stats").fetchall()}
-        gone = {r[0][len("fotmob-none:"):] for r in self.store.db.execute("SELECT name FROM jobs WHERE name LIKE 'fotmob-none:%'").fetchall()}
+        gone = {name[len("fotmob-none:"):] for name, _, _ in self._jobs("fotmob-none:")}
         links = self._links()
         recent, history = [], []
         for lg in self.leagues:
@@ -248,13 +322,15 @@ class FotMobCollector:
 
     def sync_matches(self, st: CollectStats, todo: list[tuple[str, str]], max_n: int | None, deadline: float | None) -> None:
         for fid, ext in todo[:max_n]:
+            if self._halted:
+                break
             if deadline is not None and self.clock() > deadline:
                 st.skipped.append("tempo FotMob esaurito: il resto al prossimo giro")
                 break
             try:
                 pp = self.client.page(f"/match/{ext}")
             except FotMobError as e:
-                st.errors.append(f"partita {ext}: {e}")
+                self._fail(st, f"partita {ext}", e)
                 if e.status == 404:
                     self.store.mark_job(f"fotmob-none:{fid}", self.now(), "pagina FotMob assente")
                 continue
@@ -346,14 +422,24 @@ class FotMobCollector:
         return not self.store.job_done(f"fotmob-history:{self.now().date().isoformat()}")
 
     def run(self, history_seconds: float = 0.0) -> CollectStats:
+        """One tick of FotMob. Never raises, but for a dropped connection to Turso (see the module docstring)."""
+        from .autorun import transient_db_error
         st = CollectStats("fotmob")
-        self._history = None
-        history = history_seconds >= HISTORY_MIN_S and self.history_due()
-        self.sync_seasons(st, history)
-        recent, past = self.due()
-        self.sync_matches(st, recent, RECENT_PER_TICK, None)
-        if history:
-            self.sync_matches(st, past, None, self.clock() + history_seconds)
-            self.store.mark_job(f"fotmob-history:{self.now().date().isoformat()}", self.now(), f"{len(past)} partite storiche da leggere")
+        self._history, self._halted = None, False
+        try:
+            if self.paused_until():
+                return st  # the tick that paused it wrote the reason in its log
+            history = history_seconds >= HISTORY_MIN_S and self.history_due()
+            self.sync_seasons(st, history)
+            recent, past = self.due()
+            self.sync_matches(st, recent, RECENT_PER_TICK, None)
+            if history and not self._halted:
+                self.sync_matches(st, past, None, self.clock() + history_seconds)
+                if not self._halted:  # a slice cut short by an error is tried again by the next tick
+                    self.store.mark_job(f"fotmob-history:{self.now().date().isoformat()}", self.now(), f"{len(past)} partite storiche da leggere")
+        except Exception as e:  # noqa: BLE001 - an optional source: a bug or a changed page is a log line, never a failed run
+            if transient_db_error(e):
+                raise
+            st.errors.append(f"FotMob: errore imprevisto ({type(e).__name__}: {e})")
         return st
 

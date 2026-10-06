@@ -155,3 +155,86 @@ def test_finished_matches_without_our_result_are_reported():
     assert st.requests == 0  # nothing recent of ours to link: the season page is not read
     st = _collector(s, api, NOW).run(history_seconds=240)
     assert any("PEC Zwolle-SC Heerenveen" in m for m in st.skipped)
+
+
+class FlakyFotMob(FakeFotMob):
+    """FakeFotMob that fails every request the way it is told: an exception (no answer) or a status code."""
+
+    def __init__(self, fail):
+        super().__init__()
+        self.fail = fail
+
+    def __call__(self, url, headers):
+        if self.fail is None:
+            return super().__call__(url, headers)
+        self.calls.append((urlparse(url).path, {}))
+        if isinstance(self.fail, BaseException):
+            raise self.fail
+        return self.fail, {}, b"<html>blocked</html>"
+
+
+def test_no_answer_ends_fotmob_for_the_tick_without_failing_it():
+    s, api = _store(), FlakyFotMob(TimeoutError("timed out"))
+    st = _collector(s, api).run(history_seconds=240)
+    assert len(api.calls) == 1  # no second request to a site that is not answering
+    assert st.errors and "nessuna risposta" in st.errors[0] and any("non risponde" in m for m in st.skipped)
+    api.fail = None  # not paused: the next tick tries again, and the day's history slot is still there
+    _collector(s, api, NOW + timedelta(minutes=20)).run(history_seconds=240)
+    assert ("/match/500", {}) in api.calls and ("/match/400", {}) in api.calls
+
+
+def test_a_refusal_pauses_fotmob():
+    s, api = _store(), FlakyFotMob(403)
+    st = _collector(s, api).run(history_seconds=0)
+    assert len(api.calls) == 1 and any("in pausa" in m for m in st.skipped)
+    api.fail = None
+    st = _collector(s, api, NOW + timedelta(hours=6)).run(history_seconds=0)
+    assert len(api.calls) == 1 and st.requests == 0 and not st.errors  # paused: silent
+    _collector(s, api, NOW + timedelta(hours=13)).run(history_seconds=0)
+    assert ("/match/500", {}) in api.calls
+
+
+def test_a_page_without_data_is_a_refusal_too():
+    s, api = _store(), FlakyFotMob(None)
+    api.fail = 200  # a challenge page: 200 without __NEXT_DATA__
+    st = _collector(s, api).run(history_seconds=0)
+    assert len(api.calls) == 1 and any("in pausa" in m for m in st.skipped)
+
+
+def test_an_unexpected_error_is_a_log_line_and_a_dropped_turso_connection_goes_up():
+    import pytest
+    s, api = _store(), FakeFotMob()
+    col = _collector(s, api)
+    col.parse_match = lambda *a: (_ for _ in ()).throw(KeyError("content"))
+    st = col.run(history_seconds=0)
+    assert any("errore imprevisto" in e and "KeyError" in e for e in st.errors)
+    col = _collector(s, api)
+    col.due = lambda: (_ for _ in ()).throw(ValueError("Hrana: `http error: stream closed`"))
+    with pytest.raises(ValueError):
+        col.run(history_seconds=0)
+
+
+def test_a_new_round_links_from_the_stored_page_without_reading_it_again():
+    s, api = _store(), FakeFotMob()
+    _collector(s, api).run(history_seconds=0)
+    later = NOW + timedelta(days=3, hours=3)  # Ajax-PSV, a coming match on the stored page, is now played
+    s.save_results("goal-api", [MatchResult(fixture_id="g2", competition="Eredivisie", home="Ajax", away="PSV", kickoff=NOW + timedelta(days=3),
+                                            home_goals=2, away_goals=2)], later)
+    n = sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls)
+    _collector(s, api, later).run(history_seconds=0)
+    assert sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls) == n
+    assert ("/match/501", {}) in api.calls
+
+
+def test_a_match_missing_from_the_stored_page_reads_the_season_once():
+    s, api = _store(), FakeFotMob()
+    _collector(s, api).run(history_seconds=0)
+    later = NOW + timedelta(days=2)  # a match the stored page does not know (postponed, new date)
+    s.save_results("goal-api", [MatchResult(fixture_id="g3", competition="Eredivisie", home="Twente", away="Utrecht", kickoff=NOW + timedelta(days=1),
+                                            home_goals=0, away_goals=1)], later)
+    seasons = lambda: sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls)
+    n = seasons()
+    _collector(s, api, later).run(history_seconds=0)
+    assert seasons() == n + 1  # read again: the page was older than the match
+    _collector(s, api, later + timedelta(minutes=30)).run(history_seconds=0)
+    assert seasons() == n + 1  # read after the match and still without it: not again
