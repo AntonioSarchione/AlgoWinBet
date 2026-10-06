@@ -540,6 +540,24 @@ def cmd_lineup_timing(a) -> None:
         print(f"  {comp}: {n}, {ok}, {never}")
 
 
+def cmd_trends_show(a) -> None:
+    """Streaks and scorer table of the latest published run (no API request): what the match page shows."""
+    import json as _json
+    store = SnapshotStore(a.db)
+    rows = store.db.execute("SELECT fixture_id, home, away, competition, trends, scorers FROM pub_fixtures WHERE run_id = (SELECT MAX(id) FROM pub_runs) "
+                            "AND trends IS NOT NULL AND competition LIKE ? ORDER BY kickoff LIMIT ?", (f"%{a.comp}%", a.n)).fetchall()
+    for fid, home, away, comp, tr, sc in rows:
+        d = _json.loads(tr)
+        print(f"
+== {home} - {away} ({comp})")
+        for key in ("home", "away", "h2h", "scorers", "discipline"):
+            for s in d.get(key, [])[:5]:
+                print(f"  [{key}] {s['t']} | 1 su {s['r']} | prossima {s['m']} | {s['x'] or ''}")
+        if sc:
+            for team, t in _json.loads(sc).items():
+                print(f"  marcatori {team} ({t['state']}): " + ", ".join(f"{p['n']} {p['a']:.0%}" for p in t["players"][:4]))
+
+
 def cmd_scorer_check(a) -> None:
     """Fase 9 survey (no request): which goalscorer data the stored raw responses already hold. OddsPapi player-prop markets
     per bookmaker, GOAL lineups / events fields, API-Football goal events, players table."""
@@ -1989,6 +2007,11 @@ def build_parser() -> argparse.ArgumentParser:
     lt.add_argument("--days", type=float, default=7)
     lt.add_argument("--db", default="algowinbet.db")
     lt.set_defaults(fn=cmd_lineup_timing)
+    ts = sub.add_parser("trends-show", help="ritardi e marcatori dell'ultima analisi pubblicata (nessuna richiesta API)")
+    ts.add_argument("--comp", default="")
+    ts.add_argument("--n", type=int, default=4)
+    ts.add_argument("--db", default="algowinbet.db")
+    ts.set_defaults(fn=cmd_trends_show)
     sc = sub.add_parser("scorer-check", help="Fase 9: dati sui marcatori già salvati (nessuna richiesta API)")
     sc.add_argument("--days", type=int, default=14)
     sc.add_argument("--max-raw", type=int, default=400)
