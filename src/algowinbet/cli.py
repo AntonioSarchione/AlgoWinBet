@@ -548,8 +548,7 @@ def cmd_trends_show(a) -> None:
                             "AND trends IS NOT NULL AND competition LIKE ? ORDER BY kickoff LIMIT ?", (f"%{a.comp}%", a.n)).fetchall()
     for fid, home, away, comp, tr, sc in rows:
         d = _json.loads(tr)
-        print(f"
-== {home} - {away} ({comp})")
+        print(f"\n== {home} - {away} ({comp})")
         for key in ("home", "away", "h2h", "scorers", "discipline"):
             for s in d.get(key, [])[:5]:
                 print(f"  [{key}] {s['t']} | 1 su {s['r']} | prossima {s['m']} | {s['x'] or ''}")
