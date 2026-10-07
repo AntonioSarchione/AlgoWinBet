@@ -48,6 +48,7 @@ export type FixtureRow = {
   estimated?: number | null; // 1: Sisal does not price the match on the feed, prices estimated from Pinnacle (lib/books.ts)
   scorers?: string | null; // JSON: goalscorer probabilities per team (Fase 9, absent on older runs and teams with little history)
   trends?: string | null; // JSON: statistical streaks of the match (lib: app/_components/Trends.tsx)
+  probable?: string | null; // JSON: our probable XI of the teams without an official one (app/_components/Lineups.tsx)
   markets: string | null;
   book?: string | null; // JSON: Sisal price, market and final probability of the headline selections (absent on old runs)
 };
@@ -291,12 +292,73 @@ export const lastTick = cache(async () => {
   return r[0]?.t ?? null;
 });
 
-// keyed by the analysis and the newest lineup of the match: a new run or a lineup shows on the first visit
+// Absent and doubtful players of coming matches (FotMob pre-match page, API-Football injuries): latest status per player,
+// those back in the squad dropped. `starts` = official XI the player started among the team's last REGULAR_SHEETS
+// (the same rule the FotMob run uses to call a change relevant); null when the id is not one of our lineups' ids.
+export type Absence = {
+  fixture_id: string; team: string; player_id: string; name: string; status: string; reason: string | null;
+  observed_at: string; source: string; starts: number | null;
+};
+export const REGULAR_SHEETS = 3;
+
+export async function absencesFor(ids: string[]): Promise<Record<string, Absence[]>> {
+  const out: Record<string, Absence[]> = {};
+  const fids = [...new Set(ids)].filter(Boolean);
+  if (!fids.length) return out;
+  const rows = await all<Omit<Absence, "name" | "starts"> & { player_name: string | null }>(
+    `SELECT fixture_id, team, player_id, player_name, status, reason, observed_at, source FROM player_status WHERE fixture_id IN (${fids.map(() => "?").join(",")}) ORDER BY observed_at`,
+    fids,
+  ).catch((e) => (/no such table/i.test(String(e)) ? [] : Promise.reject(e)));
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) latest.set(`${r.fixture_id}|${r.player_id}`, r); // newest row wins, whichever source
+  const live = [...latest.values()].filter((r) => r.status !== "AVAILABLE");
+  if (!live.length) return out;
+  const teams = [...new Set(live.map((r) => r.team))];
+  const since = new Date(Date.now() - 120 * 86400_000).toISOString();
+  const sheets = await all<{ team: string; fixture_id: string; starters: string; kickoff: string }>(
+    `SELECT l.team, l.fixture_id, l.starters, r.kickoff FROM lineups l JOIN results r ON r.fixture_id = l.fixture_id WHERE l.status = 'confirmed' ` +
+      `AND l.team IN (${teams.map(() => "?").join(",")}) AND r.kickoff >= ? ORDER BY r.kickoff DESC`,
+    [...teams, since],
+  );
+  const starts = new Map<string, Map<string, number>>(); // team -> player -> starts in the last REGULAR_SHEETS
+  const seen = new Map<string, Set<string>>();
+  for (const s of sheets) {
+    const done = seen.get(s.team) ?? seen.set(s.team, new Set()).get(s.team)!;
+    if (done.has(s.fixture_id) || done.size >= REGULAR_SHEETS) continue; // one lineup per match (several sources)
+    done.add(s.fixture_id);
+    const m = starts.get(s.team) ?? starts.set(s.team, new Map()).get(s.team)!;
+    for (const p of parseJSON<string[]>(s.starters, [])) m.set(p, (m.get(p) ?? 0) + 1);
+  }
+  const unnamed = [...new Set(live.filter((r) => !r.player_name).map((r) => r.player_id))];
+  const names: Record<string, string> = {};
+  if (unnamed.length) {
+    for (const r of await all<{ id: string; name: string }>(`SELECT id, name FROM players WHERE id IN (${unnamed.map(() => "?").join(",")})`, unnamed)) names[r.id] = r.name;
+  }
+  const rank: Record<string, number> = { SUSPENDED: 0, OUT: 1, DOUBTFUL: 2 };
+  for (const r of live) {
+    const known = r.player_id.startsWith("goal:") && seen.has(r.team);
+    const a: Absence = {
+      fixture_id: r.fixture_id, team: r.team, player_id: r.player_id, name: r.player_name || names[r.player_id] || r.player_id,
+      status: r.status, reason: r.reason, observed_at: r.observed_at, source: r.source, starts: known ? (starts.get(r.team)?.get(r.player_id) ?? 0) : null,
+    };
+    (out[r.fixture_id] ??= []).push(a);
+  }
+  for (const list of Object.values(out)) {
+    list.sort((x, y) => (y.starts ?? -1) - (x.starts ?? -1) || (rank[x.status] ?? 3) - (rank[y.status] ?? 3) || x.name.localeCompare(y.name));
+  }
+  return out;
+}
+
+// keyed by the analysis, the newest lineup and the newest player status of the match: a new run, a lineup or an absence
+// shows on the first visit
 export const fixtureDetail = cache(async (id: string) => {
   const run = await latestRun();
   if (!run) return null;
-  const v = await all<{ t: string | null }>("SELECT MAX(observed_at) AS t FROM lineups WHERE fixture_id = ?", [id]);
-  return fixtureDetailAt(id, run, v[0]?.t ?? "");
+  const v = await all<{ t: string | null; s: string | null }>(
+    "SELECT (SELECT MAX(observed_at) FROM lineups WHERE fixture_id = ?) AS t, (SELECT MAX(observed_at) FROM player_status WHERE fixture_id = ?) AS s",
+    [id, id],
+  ).catch(() => all<{ t: string | null; s: string | null }>("SELECT MAX(observed_at) AS t, NULL AS s FROM lineups WHERE fixture_id = ?", [id]));
+  return fixtureDetailAt(id, run, `${v[0]?.t ?? ""}|${v[0]?.s ?? ""}`);
 });
 const fixtureDetailAt = persist(fixtureDetailUncached, "fixtureDetail", 6 * 3600);
 
@@ -338,7 +400,8 @@ async function fixtureDetailUncached(id: string, run: Run, _lineupsAt: string) {
     );
     for (const r of rows) players[r.id] = { name: r.name, position: r.position };
   }
-  return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, formHome, formAway, h2h };
+  const absences = (await absencesFor([id]))[id] ?? [];
+  return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, absences, formHome, formAway, h2h };
 }
 
 // Only Sisal is playable: the odds tab lists and draws Sisal prices (Pinnacle stays an internal reference of the model).

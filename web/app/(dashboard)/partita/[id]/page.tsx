@@ -6,7 +6,7 @@ import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel,
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
-import { Lineups } from "@/app/_components/Lineups";
+import { Lineups, type ProbableData } from "@/app/_components/Lineups";
 import { Scorers, type ScorersData } from "@/app/_components/Scorers";
 import { Trends, type TrendsData } from "@/app/_components/Trends";
 
@@ -91,7 +91,8 @@ export default async function Partita({ params, searchParams }: Props) {
           ) : tab === "quote" ? (
             <Quotes id={id} home={fx.home} away={fx.away} q={sp} />
           ) : tab === "formazioni" ? (
-            <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} />
+            <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} absences={d.absences}
+              probable={parseJSON<ProbableData>(fx.probable, {})} analysedAt={d.run.created_at} />
           ) : tab === "giocatori" ? (
             fx.scorers ? (
               <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={parseJSON<ScorersData>(fx.scorers, {})} />

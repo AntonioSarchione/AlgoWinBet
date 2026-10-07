@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from .probable import XiModel, fit_until, load_xi_data, predict as predict_xi, training_rows
+from .probable import XiModel, _status, fit_until, load_xi_data, predict as predict_xi, training_rows
 from .scorers import HALF_LIFE, Params, Tally, load_scorer_data, predict_team
 
 MIN_SHEETS = 5      # team sheets with goal events needed before its players are priced
@@ -49,8 +49,50 @@ def xi_model(store, xi_data, now: datetime) -> XiModel:
     return fitted
 
 
-def team_scorers(store, prov, fixtures, xg: dict[str, tuple[float, float]], now: datetime) -> dict[str, dict[str, TeamScorers]]:
-    """fixture id -> team -> TeamScorers, for the fixtures with expected goals whose teams have MIN_SHEETS sheets."""
+ALTERNATES = 5     # players listed after the probable XI
+ALT_MIN = 0.15     # start probability an alternative needs to be listed
+ROLE_ORDER = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
+
+
+def load_xi(store, prov, now: datetime):
+    data = load_xi_data(store, prov)
+    return data, xi_model(store, data, now)
+
+
+def probable_lineups(store, prov, fixtures, now: datetime, xi=None) -> tuple[dict[str, str], object]:
+    """fixture id -> JSON of our probable XI per team still without an official one (the lineups tab shows it until the
+    official XI arrives): {team: {"formation": "4-3-3", "xi": [[id, name, role, p, status]], "alt": [...]}}, the XI ordered
+    goalkeeper, defenders, midfielders, forwards; p = probability of starting, status = the player's latest reported status
+    (OUT, SUSPENDED, DOUBTFUL) or null. Returns also the loaded lineup data and model, for the goalscorer table."""
+    out: dict[str, str] = {}
+    for f in fixtures:
+        official = {l.team for l in prov.get_lineups(f.id) if l.status == "confirmed" and len(l.starters) >= 11}
+        teams = {}
+        for team in (f.home, f.away):
+            if team in official:
+                continue
+            if xi is None:
+                xi = load_xi(store, prov, now)
+            data, model = xi
+            got = predict_xi(model, data, team, f.kickoff, f.competition, f.id, live=True)
+            if got is None or len(got.xi) < 10:  # a team with no goalkeeper known still shows its ten
+                continue
+            role = lambda pid: data.roles.get(pid, "MID")  # noqa: E731
+            row = lambda pid: [pid, data.names.get(pid, pid.split(":")[-1]), role(pid), round(got.probs[pid], 2),  # noqa: E731
+                               (lambda st: st if st and st != "AVAILABLE" else None)(_status(data, f.id, pid, now))]
+            ids = sorted(got.xi, key=lambda pid: (ROLE_ORDER.get(role(pid), 2), -got.probs[pid]))
+            counts = [sum(1 for pid in ids if role(pid) == r) for r in ("DEF", "MID", "FWD")]
+            alt = sorted((pid for pid in got.probs if pid not in got.xi and got.probs[pid] >= ALT_MIN), key=lambda pid: -got.probs[pid])
+            teams[team] = {"formation": "-".join(str(c) for c in counts if c), "xi": [row(pid) for pid in ids],
+                           "alt": [row(pid) for pid in alt[:ALTERNATES]]}
+        if teams:
+            out[f.id] = json.dumps(teams, ensure_ascii=False)
+    return out, xi
+
+
+def team_scorers(store, prov, fixtures, xg: dict[str, tuple[float, float]], now: datetime, xi=None) -> dict[str, dict[str, TeamScorers]]:
+    """fixture id -> team -> TeamScorers, for the fixtures with expected goals whose teams have MIN_SHEETS sheets. xi: the
+    probable-lineup data and model when already loaded (probable_lineups)."""
     data = load_scorer_data(store)
     tally = Tally(HALF_LIFE)
     n_sheets: dict[str, int] = {}
@@ -60,7 +102,7 @@ def team_scorers(store, prov, fixtures, xg: dict[str, tuple[float, float]], now:
         sh.starters, sh.bench = prov._to_goal(sh.starters), prov._to_goal(sh.bench)
         tally.add(sh, data.roles)
         n_sheets[sh.team] = n_sheets.get(sh.team, 0) + 1
-    xi_data = model = None
+    xi_data, model = xi if xi is not None else (None, None)
     prm = Params()
     out: dict[str, dict[str, TeamScorers]] = {}
     for f in fixtures:
@@ -77,8 +119,7 @@ def team_scorers(store, prov, fixtures, xg: dict[str, tuple[float, float]], now:
                 state = "ufficiale"
             else:
                 if xi_data is None:
-                    xi_data = load_xi_data(store, prov)
-                    model = xi_model(store, xi_data, now)
+                    xi_data, model = load_xi(store, prov, now)
                 got = predict_xi(model, xi_data, team, f.kickoff, f.competition, f.id, live=True)
                 preds = predict_team(tally, team, lam[team], lam[opp], prm, data.roles, data.names,
                                      squad=got.probs if got else None)

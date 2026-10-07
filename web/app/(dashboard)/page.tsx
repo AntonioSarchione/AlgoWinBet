@@ -4,12 +4,13 @@ import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
   Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
 } from "lucide-react";
-import { DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
+import { absencesFor, DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type Absence, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
 import { explainSlip, legMinOdds, legReason, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
+import { ABSENCE_LABEL, isRegular } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
 import { RefreshButton } from "@/app/_components/RefreshButton";
@@ -132,6 +133,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const nMarkets = Object.values(statusCounts).reduce((a, b) => a + b, 0);
   const reasons = result.reasons;
   const expl = best && settings ? explainSlip(best, settings.z, settings.optimizer.multi_bonus_min_odds ?? 1.25) : null;
+  // regular starters reported absent or doubtful for the slip's matches: shown under each leg (uncached, a few rows)
+  const absent = best ? await absencesFor(best.legs.map((l) => l.fixture_id)).catch(() => ({}) as Record<string, Absence[]>) : {};
   const op = summary.top;
   const nOpp = summary.count;
   const upcoming = fx.slice(0, 6);
@@ -418,6 +421,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                               <td className="wrap">
                                 <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={`/partita/${encodeURIComponent(o.fixture_id)}`} />
                                 <div className={`leg-reason leg-reason-${legReason(l).kind}`}>{legReason(l).text}</div>
+                                <LegAbsences list={absent[o.fixture_id] ?? []} runAt={run.created_at} />
                               </td>
                               <td className="num">{l.odds.toFixed(2)}</td>
                               <td className="num">
@@ -611,4 +615,22 @@ function explorerMatch(f: FixtureRow): ExplorerMatch {
         return [b ? `${l} · Sisal ${b.odds.toFixed(2)}` : l, p as number] as [string, number];
       }),
   };
+}
+
+// Under a slip leg: the regular starters of the two teams reported out, suspended or doubtful. One reported after the
+// analysis is not in the probabilities yet (the next analysis starts by itself when a regular changes status).
+function LegAbsences({ list, runAt }: { list: Absence[]; runAt: string }) {
+  const regs = list.filter(isRegular);
+  if (!regs.length) return null;
+  const late = regs.some((a) => new Date(a.observed_at).getTime() > new Date(runAt).getTime());
+  const sure = regs.some((a) => a.status !== "DOUBTFUL");
+  return (
+    <div className={`leg-absent${sure ? "" : " leg-absent-doubt"}`}>
+      <AlertTriangle size={14} aria-hidden="true" />
+      <span>
+        {sure ? "Titolari assenti" : "Titolari in dubbio"}: {regs.map((a) => `${a.name} (${a.team}, ${(ABSENCE_LABEL[a.status] ?? a.status).toLowerCase()})`).join(", ")}
+        {late ? " · segnalati dopo l'analisi: le probabilità non ne tengono ancora conto" : ""}
+      </span>
+    </div>
+  );
 }
