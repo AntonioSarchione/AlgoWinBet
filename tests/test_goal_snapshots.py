@@ -547,21 +547,14 @@ def test_old_xi_without_names_are_found_only_with_a_longer_lookback():
     assert len(t.calls) == 1 and st.saved == {"players": 24}
 
 
-def test_old_names_are_read_in_the_evening_once_a_day_and_only_with_spare_budget():
-    from algowinbet.autorun import AutoConfig, League, plan_tick
+def test_old_names_take_at_most_40_requests_and_leave_what_the_night_needs():
     store = SnapshotStore(":memory:")
-    cfg = AutoConfig(goal_leagues=["sa"], leagues=[League(name="Serie A", goal="sa")])
-    for lid in ("sa",):
-        store.mark_job(f"backfill:goal:{lid}", NOW)
-    evening = NOW.replace(hour=21)
-    assert "names" not in plan_tick(store, cfg, NOW.replace(hour=10), None) and "names" in plan_tick(store, cfg, evening, None)
     fx = _seed_fixtures(store, [NOW - timedelta(days=30)])
     store.save_lineups("goal-api", [LineupSnapshot(fixture_id=fx[0].id, team=t, status="confirmed", starters=[f"goal:{p}{k}" for k in range(11)],
                                                    published_at=NOW, observed_at=NOW - timedelta(days=30)) for t, p in (("H0", "h"), ("A0", "a"))])
-    low = BudgetGuard(store, "goal-api", daily=100, reserve=50, now=lambda: evening)
+    low = BudgetGuard(store, "goal-api", daily=70, reserve=50, now=lambda: NOW)  # 20 left: all kept for the night
     col, t = _collector({"/fixtures/0/lineups": [ok({"home": _goal_side("h"), "away": _goal_side("a"), "hasLineups": True})]}, store, budget=low)
-    col.now = lambda: evening
-    assert col.name_history().skipped and t.calls == [] and "names" in plan_tick(store, cfg, evening, None)
-    col.client.budget = BudgetGuard(store, "goal-api", daily=1000, reserve=50, now=lambda: evening)
-    st = col.name_history()
-    assert len(t.calls) == 1 and st.saved == {"players": 24} and "names" not in plan_tick(store, cfg, evening, None)
+    assert col.name_history(20).skipped and t.calls == [] and not store.job_done(f"xi-names-day:{NOW:%Y-%m-%d}")
+    col.client.budget = BudgetGuard(store, "goal-api", daily=1000, reserve=50, now=lambda: NOW)
+    st = col.name_history(20)
+    assert len(t.calls) == 1 and st.saved == {"players": 24} and store.job_done(f"xi-names-day:{NOW:%Y-%m-%d}")

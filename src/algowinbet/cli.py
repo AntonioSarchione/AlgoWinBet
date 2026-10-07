@@ -673,7 +673,8 @@ def cmd_xi_names(a) -> None:
 
 def cmd_goal_usage(a) -> None:
     """Where the GOAL requests of the last days went (no request): per UTC day our counter (api_usage, raised to GOAL's own
-    when its headers say more) next to the requests really logged, then the logged ones by hour and kind of endpoint
+    when its headers say more) next to the requests logged one by one (the XI and events history is not: it charges the
+    counter once per batch), then the logged ones by hour and kind of endpoint
     (manual = without a "from" date, probes and one-off commands)."""
     import re
     store = SnapshotStore(a.db)
@@ -683,7 +684,8 @@ def cmd_goal_usage(a) -> None:
         used = store.usage("goal-api", f"D{day:%Y-%m-%d}")
         rows = store.db.execute("SELECT endpoint, params, fetched_at, status FROM raw_requests WHERE source = 'goal-api' AND fetched_at >= ? "
                                 "AND fetched_at < ?", (f"{day}T00:00:00", f"{day + timedelta(days=1)}T00:00:00")).fetchall()
-        print(f"== {day}: contatore {used}, richieste registrate {len(rows)}")
+        print(f"== {day}: contatore {used}, richieste registrate {len(rows)}"
+              + (f", altre {used - len(rows)} dello storico formazioni ed eventi (non registrate una a una)" if used > len(rows) else ""))
         by: dict[tuple[str, str], int] = {}
         for ep, params, at, status in rows:
             kind = re.sub(r"/(fixtures|teams|players|leagues)/[^/]+", r"/\1/*", ep or "")
@@ -1995,6 +1997,13 @@ def _collect_auto(a) -> None:
             # first: 2025/26, then 2024/25, then every new matchday), 8 requests at a time. In the morning 120 requests stay for
             # the day's ticks; in the last evening run (no kickoff left before the reset at 00:00 UTC) only LATE_KEEP do, so the
             # day's unused requests are not lost.
+            if late and not store.job_done(f"xi-names-day:{now:%Y-%m-%d}"):
+                try:  # first the names of old XI players we lack (up to 40 requests), then the history takes the rest
+                    nm = goal.name_history(LATE_KEEP)
+                    print(f"nomi giocatori di formazioni passate: {nm.requests} richieste, {nm.saved}" + (f" {nm.skipped}" if nm.skipped else "")
+                          + (f" errori {nm.errors}" if nm.errors else ""), flush=True)
+                except Exception as e:  # noqa: BLE001 - names only: never a reason to lose the evening run
+                    print(f"nomi giocatori di formazioni passate: non riuscito ({type(e).__name__}: {e})")
             try:
                 lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240 if daily else 120, 120 if daily else LATE_KEEP)
                 if lst is not None:

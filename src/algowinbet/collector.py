@@ -408,20 +408,21 @@ class GoalCollector:
 
     NAMES_HISTORY = timedelta(days=800)
     NAMES_DAILY = 40  # old XI read again for their names each evening, most recent first, until none is left
-    NAMES_SPARE = 150  # GOAL requests that must still be left today (above the reserve) before any is spent on them
 
-    def name_history(self) -> CollectStats:
-        """Once a day, with spare GOAL budget: up to NAMES_DAILY stored XI of the history with players we have no name for
-        are read once more (see _name_unnamed_xi). Low budget leaves the day open for a later tick."""
+    def name_history(self, keep: int) -> CollectStats:
+        """Once a day, in the late run (no XI left to read today): up to NAMES_DAILY stored XI of the history with players we
+        have no name for are read once more (see _name_unnamed_xi), within the day's GOAL budget minus `keep`. Before the
+        history backfill, which takes what is left. No budget leaves the day open for a later run."""
         st = CollectStats("nomi storici")
         left = self.client.budget.remaining()["daily"] if self.client.budget else None
-        if left is not None and left < self.NAMES_SPARE:
-            st.skipped.append(f"budget GOAL basso ({left} rimaste): rimandato")
+        n = self.NAMES_DAILY if left is None else min(self.NAMES_DAILY, left - keep)
+        if n <= 0:
+            st.skipped.append(f"budget GOAL esaurito ({left} rimaste): rimandato")
             return st
         todo: list[str] = []
 
         def work():
-            todo.extend(self._name_unnamed_xi(st, set(), self.NAMES_HISTORY, self.NAMES_DAILY))
+            todo.extend(self._name_unnamed_xi(st, set(), self.NAMES_HISTORY, n))
         self._run(st, work)
         if not st.errors:
             self.store.mark_job(f"xi-names-day:{self.now():%Y-%m-%d}", self.now(), f"{len(todo)} partite rilette")
