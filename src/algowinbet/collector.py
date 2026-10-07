@@ -380,11 +380,11 @@ class GoalCollector:
                          dry_run: bool = False) -> list[str]:
         """Confirmed XI of the last days holding ids the players table does not know (stored before the names were saved, or
         listed by GOAL without a role): their lineups are read once more for the names, at most NAMES_PER_RUN matches a run,
-        each match once (none read in this run). Returns the matches to read (dry_run: none read)."""
+        each match once (none read in this run), most recent first. Returns the matches to read (dry_run: none read)."""
         since = (self.now() - (lookback or self.NAMES_LOOKBACK)).isoformat()
         rows = self.store.db.execute(
             "SELECT l.fixture_id, l.starters, l.bench FROM lineups l WHERE l.source = ? AND l.status = 'confirmed' AND l.observed_at >= ? "
-            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'xi-names:' || l.fixture_id)", (SOURCE, since)).fetchall()
+            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'xi-names:' || l.fixture_id) ORDER BY l.observed_at DESC", (SOURCE, since)).fetchall()
         ids: dict[str, set[str]] = {}
         for fid, s, b in rows:
             ids.setdefault(fid, set()).update(i for i in json.loads(s or "[]") + json.loads(b or "[]") if i.startswith("goal:"))
