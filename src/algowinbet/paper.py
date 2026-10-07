@@ -136,7 +136,7 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
         stat = stat_of(ref.market_code)
         try:
             if stat:
-                counts = _stat_count(store, fid, stat)
+                counts = _stat_count(store, fid, stat, datetime.fromisoformat(ko), t)
                 if counts is None:
                     raise UnsupportedMarket(f"{stat}: counts not known yet")
                 res = "won" if stat_outcome(counts[0], counts[1], ref) else "lost"
@@ -165,8 +165,20 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     return done
 
 
-def _stat_count(store, fixture_id: str, stat: str) -> tuple[float, float] | None:
-    """Full-time corners, or cards (yellow + red: a missing red count is 0 once the yellows are known)."""
+CARDS_WAIT = timedelta(days=3)  # cards are settled from the FotMob player rows (Sisal's count); after this, from the team stats
+
+
+def _stat_count(store, fixture_id: str, stat: str, kickoff: datetime | None = None, now: datetime | None = None) -> tuple[float, float] | None:
+    """Full-time corners, or cards as Sisal counts them (FotMob player rows: second yellow = two, straight red = none). Without
+    them, cards wait CARDS_WAIT from kickoff for the FotMob run, then fall back to the team stats (yellow + red: a missing
+    red count is 0 once the yellows are known)."""
+    if stat != "corners":
+        from .snapshots import fotmob_bookings
+        fm = fotmob_bookings(store.db, fixture_id).get(fixture_id)
+        if fm:
+            return fm
+        if kickoff is not None and now is not None and now - kickoff < CARDS_WAIT:
+            return None
     ft = store.stats_of(fixture_id, "FT")
     first = ft.get("corners" if stat == "corners" else "yellow_cards")
     if not first or first[0] is None or first[1] is None:

@@ -58,6 +58,27 @@ CREATE TABLE IF NOT EXISTS api_usage(source TEXT, period TEXT, used INTEGER, PRI
 """
 
 
+def fotmob_bookings(db, fixture_id: str | None = None) -> dict[str, tuple[float, float]]:
+    """Full-time (home, away) bookings as Sisal counts them ("1X2 ammonizioni"): yellow cards of the players who played, a
+    sending-off for a second yellow counting as two, a straight red as none; cards to the bench, coaches and staff are not in
+    FotMob's player rows (players without minutes), so they are left out as Sisal does. Only matches with both teams' rows.
+    A yellow then a straight red reads as a second yellow (two): rare. Empty when the FotMob table is missing."""
+    sql = ("SELECT s.fixture_id, s.team = r.home, COUNT(*), SUM(CASE WHEN COALESCE(s.red, 0) > 0 AND COALESCE(s.yellow, 0) > 0 THEN 2 "
+           "ELSE COALESCE(s.yellow, 0) END) FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id "
+           "WHERE s.team IN (r.home, r.away)" + (" AND s.fixture_id = ?" if fixture_id else "") + " GROUP BY s.fixture_id, s.team = r.home")
+    try:
+        rows = db.execute(sql, (fixture_id,) if fixture_id else ()).fetchall()
+    except Exception as e:  # noqa: BLE001 - no FotMob table in this database
+        if "no such" in str(e):
+            return {}
+        raise
+    sides: dict[str, dict[bool, float]] = {}
+    for fid, home, n, booked in rows:
+        if n >= 11:  # a whole team sheet, not a stray row
+            sides.setdefault(fid, {})[bool(home)] = float(booked or 0)
+    return {fid: (d[True], d[False]) for fid, d in sides.items() if len(d) == 2}
+
+
 def referee_key(name: str | None) -> str | None:
     """One key for the spellings of a referee across sources: 'M Oliver' (football-data) and 'Michael Oliver, England'
     (API-Football) both give 'm oliver'."""
@@ -569,8 +590,10 @@ class SnapshotProvider:
         return out
 
     def stat_counts(self, stat: str) -> dict[str, tuple[float, float]]:
-        """Full-time (home, away) counts of 'corners' or 'cards' (yellow + red) per match, under the canonical result id.
-        GOAL lists red cards only when there is one: with the yellow cards known, a missing red count is 0."""
+        """Full-time (home, away) counts of 'corners' or 'cards' per match, under the canonical result id. Cards are Sisal's
+        bookings (1X2 ammonizioni: second yellow = two, straight red = none) from the FotMob player rows where read; otherwise
+        yellow + red from the team stats (GOAL lists red cards only when there is one: with the yellow cards known, a missing
+        red count is 0), which counts a straight red as one and, in English football-data files, a second yellow as one."""
         names = ("corners",) if stat == "corners" else ("yellow_cards", "red_cards")
         marks = ",".join("?" * len(names))
         rows = self.store.db.execute(f"SELECT fixture_id, stat, home, away FROM match_stats WHERE period='FT' AND stat IN ({marks})",
@@ -589,6 +612,9 @@ class SnapshotProvider:
                 red = d.get("red_cards") or (0, 0)
                 h, a = h + (red[0] or 0), a + (red[1] or 0)
             out[fid] = (float(h), float(a))
+        if stat == "cards":
+            for fid, v in fotmob_bookings(self.store.db).items():
+                out[canon.get(fid, fid)] = v
         return out
 
     def international_results(self) -> bytes | None:

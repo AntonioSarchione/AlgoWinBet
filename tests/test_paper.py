@@ -151,4 +151,28 @@ def test_corner_and_card_selections_settle_from_the_match_stats():
                                    MatchStat(fixture_id=f.id, period="FT", stat="yellow_cards", home=2, away=1, observed_at=at),
                                    MatchStat(fixture_id=f.id, period="FT", stat="red_cards", home=0, away=1, observed_at=at)])
     settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=2))
-    assert [get(k) for k in keys] == ["won", "won", "won"]  # 11 corners, 4 cards (2 + 1 + a red), away more corners
+    assert [get(k) for k in keys] == ["won", None, "won"]  # 11 corners, away more corners; cards wait for the FotMob rows
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=4))
+    assert get(keys[1]) == "won"  # no FotMob rows after 3 days: the team stats, 4 cards (2 + 1 + a red)
+
+
+def test_cards_settle_as_sisal_counts_them_from_the_fotmob_rows():
+    from algowinbet.fotmobcollector import SCHEMA as FM_SCHEMA
+    s, mock, rid, res = _published()
+    s.db.executescript(FM_SCHEMA)
+    f = res.fixtures[2]
+    for k in ("CARDS_1X2|HOME|", "CARDS_1X2|AWAY|"):
+        s.db.execute("INSERT INTO paper_legs(fixture_id, sel_key, competition, match, kickoff, market, status, odds, bookmaker, p, ev, run_id, "
+                     "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (f.id, k, f.competition, "x", f.kickoff.isoformat(), k, "FAIR", 1.9, "sisal", 0.5, 0.0, rid, "x"))
+    s.save_results("mock", [MatchResult(fixture_id=f.id, competition=f.competition, home=f.home, away=f.away, kickoff=f.kickoff,
+                                        home_goals=1, away_goals=0)], f.kickoff + timedelta(hours=3))
+    # home: one player sent off for a second yellow (two bookings); away: two yellows and a straight red (two bookings, the red none)
+    rows = [(f.id, f.home, f"fotmob:h{i}", 90, 1 if i == 0 else 0, 1 if i == 0 else 0) for i in range(11)]
+    rows += [(f.id, f.away, f"fotmob:a{i}", 90, 1 if i < 2 else 0, 1 if i == 5 else 0) for i in range(11)]
+    s.db.executemany("INSERT INTO fotmob_player_stats(fixture_id, team, player_id, minutes, yellow, red) VALUES(?,?,?,?,?,?)", rows)
+    s.db.commit()
+    get = lambda k: s.db.execute("SELECT result FROM paper_legs WHERE fixture_id=? AND sel_key=?", (f.id, k)).fetchone()[0]
+    settle(s, SnapshotProvider(s), f.kickoff + timedelta(days=1))
+    assert get("CARDS_1X2|HOME|") == "lost" and get("CARDS_1X2|AWAY|") == "lost"  # 2-2: a draw (yellow + red would read 2-3)
+    assert SnapshotProvider(s).stat_counts("cards")[f.id] == (2.0, 2.0)  # what the cards model learns from, the same count
