@@ -699,6 +699,54 @@ def cmd_goal_usage(a) -> None:
             print(f"  {h}h: {sum(int(p.rsplit(' ', 1)[1]) for p in parts)} · " + ", ".join(parts))
 
 
+def cmd_xi_player(a) -> None:
+    """Why our probable lineup gives a player the start probability it gives (no request): the players rows with that name,
+    his team's last sheets (started / bench / not listed, and other ids of the same name on them), his features and the
+    probability for the team's next match."""
+    from .probable import FEATURES, WINDOW, _status, candidates, load_xi_data, predict
+    from .scorerpub import xi_model
+    store = SnapshotStore(a.db)
+    prov = SnapshotProvider(store)
+    now = datetime.now(timezone.utc)
+    key = a.name.lower()
+    rows = store.db.execute("SELECT id, name, team, position, source, updated_at FROM players WHERE lower(name) LIKE ?", (f"%{key}%",)).fetchall()
+    print(f"giocatori con '{a.name}': {len(rows)}")
+    for r in rows:
+        print("  " + " | ".join(str(x) for x in r))
+    data = load_xi_data(store, prov)
+    model = xi_model(store, data, now)
+    for pid in sorted({r[0] for r in rows if r[0].startswith("goal:")}):
+        team = data.team_of.get(pid) or next((r[2] for r in rows if r[0] == pid), None)
+        if a.team:
+            team = a.team
+        if not team or team not in data.sheets:
+            print(f"\n{pid}: squadra {team!r} senza formazioni")
+            continue
+        same = {p for p, n in data.names.items() if n and key in n.lower()}
+        print(f"\n{pid} ({data.names.get(pid)}, {data.roles.get(pid)}) squadra {team}; altri id con lo stesso nome: {sorted(same - {pid}) or 'nessuno'}")
+        for s in data.sheets[team][-WINDOW:]:
+            mark = "titolare" if pid in s.starters else "panchina" if pid in s.bench else "-"
+            others = [p for p in s.starters + s.bench if p in same and p != pid]
+            print(f"  {s.kickoff:%d/%m/%Y} {s.competition:<18} {mark:<9}" + (f" altro id: {others}" if others else "")
+                  + f"  ({len(s.starters)} titolari, {len(s.bench)} panchina)")
+        nxt = next((f for f in prov.list_fixtures(None, now, now + timedelta(days=10)) if team in (f.home, f.away)), None)
+        if nxt is None:
+            print("  nessuna prossima partita")
+            continue
+        cand = next((c for c in candidates(data, team, nxt.kickoff, nxt.competition, nxt.id, live=True) if c.player_id == pid), None)
+        got = predict(model, data, team, nxt.kickoff, nxt.competition, nxt.id, live=True)
+        print(f"  prossima: {nxt.kickoff:%d/%m %H:%M} {nxt.home}-{nxt.away}; stato: {_status(data, nxt.id, pid, now)}")
+        if cand is None:
+            print("  non è tra i candidati (non in nessuna delle ultime 6 formazioni, o in un'altra squadra secondo la tabella giocatori)")
+        else:
+            print("  " + ", ".join(f"{k} {v:.2f}" for k, v in zip(FEATURES, cand.x)) + f"; escluso: {cand.out}")
+        if got:
+            rank = sorted(got.probs, key=lambda p: -got.probs[p])
+            print(f"  probabilità titolare {got.probs.get(pid, 0):.0%} (posto {rank.index(pid) + 1 if pid in rank else '-'} su {len(rank)}); "
+                  "stesso ruolo: " + ", ".join(f"{data.names.get(p, p)} {got.probs[p]:.0%}" for p in rank
+                                               if data.roles.get(p) == data.roles.get(pid))[:400])
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2504,6 +2552,11 @@ def build_parser() -> argparse.ArgumentParser:
     gu.add_argument("--days", type=int, default=3)
     gu.add_argument("--db", default="algowinbet.db")
     gu.set_defaults(fn=cmd_goal_usage)
+    xpl = sub.add_parser("xi-player", help="perché la probabile dà a un giocatore la sua probabilità di partire titolare (nessuna richiesta)")
+    xpl.add_argument("name")
+    xpl.add_argument("--team", default=None)
+    xpl.add_argument("--db", default="algowinbet.db")
+    xpl.set_defaults(fn=cmd_xi_player)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")
