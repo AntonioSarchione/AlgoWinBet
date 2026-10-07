@@ -56,3 +56,21 @@ def test_ids_translate_and_start_rates():
     learned, recent = start_rates(roster, lus, {f"f{i}": datetime(2026, 1, 1 + i, tzinfo=timezone.utc) for i in range(20)})
     assert learned["goal:2"] > 0 and recent["goal:2"] == 0.0 and recent["goal:1"] == 1.0  # left the XI: 0% today (rates scaled to 11, capped at 1)
     assert RECENT_XI == 8
+
+
+def test_backfill_names_players_listed_without_a_role_and_keeps_the_known_ones():
+    from algowinbet.domain import Player, Position
+    st = SnapshotStore(":memory:")
+    st.db.execute("INSERT INTO results(fixture_id, source, competition, home, away, kickoff, home_goals, away_goals) VALUES(?,?,?,?,?,?,1,0)",
+                  ("goal:m", "goal-api", "Liga Portugal", "Moreirense", "Braga", "2026-09-20T18:45:00+00:00"))
+    st.save_players("goal-lineups", [Player(id="goal:hs", name="Known Keeper", team="Old Club", position=Position.GK)],
+                    datetime(2027, 1, 1, tzinfo=timezone.utc))  # newer than the match: the match must not move it
+    home = _side("h")
+    home["startingLineups"][3] = {"playerId": "h3", "lineupPlayer": "No Role"}
+    home["substitutes"][0].pop("playerPosition")
+    c = GoalCollector(FakeClient({"/fixtures/m/lineups": {"home": home, "away": _side("a")}}), st, [])
+    c.backfill_lineups(["Liga Portugal"], datetime(2025, 7, 1, tzinfo=timezone.utc), 10, 60)
+    rows = {r[0]: r[1:] for r in st.db.execute("SELECT id, name, team, position FROM players").fetchall()}
+    assert rows["goal:h3"] == ("No Role", "Moreirense", "MID")
+    assert rows["goal:hs"] == ("Known Keeper", "Old Club", "GK")
+    assert rows["goal:h0"][1] == "Moreirense"

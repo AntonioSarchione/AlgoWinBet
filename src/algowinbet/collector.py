@@ -263,7 +263,7 @@ class GoalCollector:
                 st.requests += sent
                 if guard is not None and sent:
                     guard.add(sent)
-                lus, players, empty, keys = [], [], [], {}
+                lus, players, empty, keys, unplaced = [], [], [], {}, []
                 for fid, comp, home, away, ko, need_xi, _need_ev, _goals in chunk:
                     if not need_xi or (fid, "lineups") not in got:
                         continue
@@ -278,10 +278,14 @@ class GoalCollector:
                     if xi:
                         lus += xi
                         players += [(p, kickoff) for p in self._lineup_players(data, home, away)]
+                        unplaced += [(p, seen) for p in self._lineup_players(data, home, away, default=Position.MID)]
                     else:
                         empty.append(fid)
                 st.add("lineups", self.store.save_lineups(SOURCE, lus) if lus else 0)
                 st.add("players", self._save_newest_players(players))
+                if unplaced:  # players GOAL lists without a role: saved by name all the same (a known player keeps its row)
+                    self.store._bulk("INSERT OR IGNORE INTO players(id,name,team,position,importance,start_rate,source,updated_at)",
+                                     [(p.id, p.name, p.team, p.position.value, 1.0, None, self.LINEUP_PLAYERS, at.isoformat()) for p, at in unplaced])
                 if keys:
                     all_keys.update(keys)
                     self.store._bulk("INSERT OR REPLACE INTO player_keys(source, key, player_id)", [(SOURCE, k, v) for k, v in keys.items()])
@@ -372,10 +376,12 @@ class GoalCollector:
             self.store._bulk("INSERT OR IGNORE INTO players(id,name,team,position,importance,start_rate,source,updated_at)", rows)
         return len(rows)
 
-    def _name_unnamed_xi(self, st: CollectStats, read: set[str]) -> None:
-        """Confirmed XI of the last days holding ids the players table does not know (stored before the names were saved):
-        their lineups are read once more for the names, at most NAMES_PER_RUN matches a run, each match once (none read in this run)."""
-        since = (self.now() - self.NAMES_LOOKBACK).isoformat()
+    def _name_unnamed_xi(self, st: CollectStats, read: set[str], lookback: timedelta | None = None, limit: int | None = None,
+                         dry_run: bool = False) -> list[str]:
+        """Confirmed XI of the last days holding ids the players table does not know (stored before the names were saved, or
+        listed by GOAL without a role): their lineups are read once more for the names, at most NAMES_PER_RUN matches a run,
+        each match once (none read in this run). Returns the matches to read (dry_run: none read)."""
+        since = (self.now() - (lookback or self.NAMES_LOOKBACK)).isoformat()
         rows = self.store.db.execute(
             "SELECT l.fixture_id, l.starters, l.bench FROM lineups l WHERE l.source = ? AND l.status = 'confirmed' AND l.observed_at >= ? "
             "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.name = 'xi-names:' || l.fixture_id)", (SOURCE, since)).fetchall()
@@ -387,7 +393,9 @@ class GoalCollector:
         for i in range(0, len(every), 500):
             part = every[i:i + 500]
             known.update(r[0] for r in self.store.db.execute(f"SELECT id FROM players WHERE id IN ({','.join('?' * len(part))})", part).fetchall())
-        todo = [f for f, p in ids.items() if p - known and f not in read][:self.NAMES_PER_RUN]
+        todo = [f for f, p in ids.items() if p - known and f not in read][:limit or self.NAMES_PER_RUN]
+        if dry_run:
+            return todo
         for fid in todo:
             fx = self.store.db.execute("SELECT home, away, kickoff FROM fixtures WHERE fixture_id = ? ORDER BY observed_at DESC LIMIT 1", (fid,)).fetchone()
             if fx is None:
@@ -396,6 +404,7 @@ class GoalCollector:
             if named := self._save_missing_players(data, fx[0], fx[1], datetime.fromisoformat(fx[2]) - self.XI_BEFORE_KICKOFF):
                 st.add("players", named)
             self.store.mark_job(f"xi-names:{fid}", self.now(), "nomi dei giocatori letti")
+        return todo
 
     def _lineup_players(self, data, home: str, away: str, default: Position | None = None) -> list[Player]:
         out: list[Player] = []

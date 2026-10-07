@@ -531,3 +531,17 @@ def test_live_windows_quotes_24h_and_history_two_previous_seasons():
     s.save_results("x", olds, NOW)
     # current season 2026/27 + two previous (from 2024-07-01): the January 2024 match (2023/24) is excluded
     assert [r.kickoff.year for r in history_at(SnapshotProvider(s), "Serie A", NOW, seasons=2)] == [2025, 2026]
+
+
+def test_old_xi_without_names_are_found_only_with_a_longer_lookback():
+    from algowinbet.collector import CollectStats
+    store = SnapshotStore(":memory:")
+    fx = _seed_fixtures(store, [NOW - timedelta(days=30)])
+    store.save_lineups("goal-api", [LineupSnapshot(fixture_id=fx[0].id, team=t, status="confirmed", starters=[f"goal:{p}{k}" for k in range(11)],
+                                                   published_at=NOW, observed_at=NOW - timedelta(days=30)) for t, p in (("H0", "h"), ("A0", "a"))])
+    col, t = _collector({"/fixtures/0/lineups": [ok({"home": _goal_side("h"), "away": _goal_side("a"), "hasLineups": True})]}, store)
+    assert col._name_unnamed_xi(CollectStats("n"), set()) == []
+    assert col._name_unnamed_xi(CollectStats("n"), set(), timedelta(days=60), 10, dry_run=True) == [fx[0].id] and t.calls == []
+    st = CollectStats("n")
+    col._name_unnamed_xi(st, set(), timedelta(days=60), 10)
+    assert len(t.calls) == 1 and st.saved == {"players": 24}

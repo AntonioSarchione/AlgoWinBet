@@ -650,6 +650,27 @@ def cmd_xi_preview(a) -> None:
     print("controlli: " + ", ".join(f"{k} {v}" for k, v in tot.items()))
 
 
+def cmd_xi_names(a) -> None:
+    """Players of our stored XI with no name (ids the players table does not know: GOAL listed them without a role, and the
+    history skipped them): the lineups of those matches read once more for the names, one GOAL request a match."""
+    from .autorun import AutoConfig
+    from .collector import CollectStats
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    client = GoalApiClient(store=store, budget=BudgetGuard(store, "goal-api", daily=cfg.goal_daily_limit, reserve=cfg.goal_reserve))
+    coll = GoalCollector(client, store, [], TeamNames.load(a.aliases))
+    todo = coll._name_unnamed_xi(CollectStats("nomi"), set(), timedelta(days=a.days), a.max, dry_run=True)
+    print(f"partite con giocatori senza nome (ultimi {a.days} giorni): {len(todo)} da leggere (massimo {a.max})")
+    if a.dry_run or not todo:
+        return
+    st = CollectStats("nomi")
+    try:
+        coll._name_unnamed_xi(st, set(), timedelta(days=a.days), a.max)
+    except (GoalApiError, BudgetExceeded) as e:
+        print(f"  fermato: {e}")
+    print(f"giocatori salvati: {st.saved.get('players', 0)}")
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2436,6 +2457,14 @@ def build_parser() -> argparse.ArgumentParser:
     xp.add_argument("--max", type=int, default=40, help="partite al massimo")
     xp.add_argument("--db", default="algowinbet.db")
     xp.set_defaults(fn=cmd_xi_preview)
+    xn = sub.add_parser("xi-names", help="rilegge le formazioni con giocatori senza nome (1 richiesta GOAL a partita)")
+    xn.add_argument("--days", type=int, default=800)
+    xn.add_argument("--max", type=int, default=40, help="partite al massimo")
+    xn.add_argument("--dry-run", action="store_true", help="solo il conteggio, nessuna richiesta")
+    xn.add_argument("--config", default="configs/collect.json")
+    xn.add_argument("--aliases", default="configs/team_aliases.json")
+    xn.add_argument("--db", default="algowinbet.db")
+    xn.set_defaults(fn=cmd_xi_names)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")
