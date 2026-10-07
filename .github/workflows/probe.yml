@@ -74,7 +74,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultholes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-holes ${ARG:+--show "$ARG"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobplayers" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-players --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "slipreview" ]; then algowinbet slip-review --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-eval --since "${ARG:-2026-07-01}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db fm=(); if [ "$PARAMS" = "fotmob" ]; then fm=(--fotmob-absences); fi; algowinbet xi-eval --since "${ARG:-2026-07-01}" "${fm[@]}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-eval --since "${ARG:-2025-07-01}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorers" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-check --days "${ARG:-14}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuphist" ]; then algowinbet lineup-history-check --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
