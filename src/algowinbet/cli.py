@@ -634,6 +634,45 @@ def cmd_fotmob_check(a) -> None:
                                  for stat, c in ((s_, o[s_]) for s_ in cols)))
 
 
+def cmd_results_holes(a) -> None:
+    """Finished matches on the stored FotMob season pages with no result of ours (no request): grouped by competition and
+    day, each with what GOAL told us about it (a fixture row and its last status, or nothing at all)."""
+    from .autorun import AutoConfig
+    from .fotmobcollector import LINK_WINDOW, FotMobClient, FotMobCollector, FotMobLeague, _utc
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    names = TeamNames.load(a.aliases)
+    col = FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names)
+    linked = {r[0] for r in store.db.execute("SELECT ext_id FROM fixture_links WHERE source = 'fotmob'").fetchall()}
+    fx: dict[str, list[tuple]] = {}
+    for fid, comp, home, away, ko, status in store.db.execute(
+            "SELECT f.fixture_id, f.competition, f.home, f.away, f.kickoff, f.status FROM fixtures f JOIN "
+            "(SELECT fixture_id, MAX(observed_at) AS t FROM fixtures GROUP BY fixture_id) n ON n.fixture_id = f.fixture_id AND n.t = f.observed_at").fetchall():
+        fx.setdefault(comp, []).append((fid, home, away, datetime.fromisoformat(ko), status))
+    now = datetime.now(timezone.utc)
+    for lg in col.leagues:
+        results = col._results(lg)
+        if not results:
+            continue
+        first = min(r.kickoff for r in results)
+        holes: dict[str, list[str]] = {}
+        for season, (_, page) in sorted(col._stored_pages(lg).items()):
+            for m in page.get("matches") or []:
+                ko = _utc(m)
+                if m["id"] in linked or not m["status"]["finished"] or ko is None or ko < first or now - ko < timedelta(hours=6):
+                    continue
+                home, away = names.canon(m["home"]["name"]), names.canon(m["away"]["name"])
+                goal = [f for f in fx.get(lg.competition, []) if abs(f[3] - ko) <= LINK_WINDOW and (f[1] == home or f[2] == away)]
+                seen = f"GOAL {goal[0][4]} {goal[0][3]:%d/%m %H:%M}" if goal else "GOAL: nessuna partita"
+                if goal and store.db.execute("SELECT 1 FROM results WHERE fixture_id = ?", (goal[0][0],)).fetchone():
+                    seen += ", risultato presente (nomi diversi?)"
+                holes.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
+        n = sum(len(v) for v in holes.values())
+        print(f"{lg.competition}: {n} partite senza nostro risultato (dal {first:%d/%m/%Y})")
+        for day, ms in sorted(holes.items()):
+            print(f"  {day}: {len(ms)} · " + " | ".join(ms[:a.show]) + (" ..." if len(ms) > a.show else ""))
+
+
 def cmd_trends_show(a) -> None:
     """Streaks and scorer table of the latest published run (no API request): what the match page shows."""
     import json as _json
@@ -2115,6 +2154,12 @@ def build_parser() -> argparse.ArgumentParser:
     fc = sub.add_parser("fotmob-check", help="quanto sono pieni falli, cartellini e tiri dei giocatori FotMob (nessuna richiesta)")
     fc.add_argument("--db", default="algowinbet.db")
     fc.set_defaults(fn=cmd_fotmob_check)
+    rh = sub.add_parser("results-holes", help="partite finite sulle pagine FotMob senza nostro risultato, e cosa sa GOAL (nessuna richiesta)")
+    rh.add_argument("--show", type=int, default=3, help="partite mostrate per giorno")
+    rh.add_argument("--config", default="configs/collect.json")
+    rh.add_argument("--aliases", default="configs/team_aliases.json")
+    rh.add_argument("--db", default="algowinbet.db")
+    rh.set_defaults(fn=cmd_results_holes)
     ts = sub.add_parser("trends-show", help="ritardi e marcatori dell'ultima analisi pubblicata (nessuna richiesta API)")
     ts.add_argument("--comp", default="")
     ts.add_argument("--n", type=int, default=4)
