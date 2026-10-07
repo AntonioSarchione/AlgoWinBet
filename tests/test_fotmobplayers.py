@@ -49,3 +49,21 @@ def test_link_players_by_match_and_from_absences_and_reports_coverage():
     assert rep.by_absence == 1 and rep.starters_checked == 4 and rep.starters_same == 4
     assert rep.absences == {"Serie A": [3, 2, 0, 0]}  # no GOAL XI stored for g2
     assert link_players(s, KO).linked == 3  # a full pass again: same links, no duplicates
+    hist = s.db.execute("SELECT fixture_id, player_id, status, observed_at FROM absence_history ORDER BY player_id").fetchall()
+    ko2 = (KO + timedelta(days=14) - timedelta(days=1)).isoformat()
+    assert hist == [("g2", "goal:2", "SUSPENDED", ko2), ("g2", "goal:9", "OUT", ko2)]  # the unlinked kid is left out
+
+
+def test_absent_players_found_in_the_official_xi_are_counted_and_the_switch_feeds_the_xi_model():
+    from algowinbet.probable import _status, load_xi_data
+    from algowinbet.snapshots import SnapshotProvider
+    s = _store()
+    s.save_lineups("goal-api", [LineupSnapshot(fixture_id="g2", team="Milan", status="confirmed", starters=["goal:2"], bench=["goal:9"],
+                                               published_at=KO, observed_at=KO)])
+    rep = link_players(s, KO)
+    assert rep.played == {"Serie A": [2, 1, 1]}  # Theo listed suspended but started; Leao on the bench
+    assert rep.played_kind["suspension"] == 1
+    prov = SnapshotProvider(s)
+    before = KO + timedelta(days=14) - timedelta(hours=1)
+    assert _status(load_xi_data(s, prov), "g2", "goal:2", before) is None  # off by default
+    assert _status(load_xi_data(s, prov, fotmob_absences=True), "g2", "goal:2", before) == "SUSPENDED"

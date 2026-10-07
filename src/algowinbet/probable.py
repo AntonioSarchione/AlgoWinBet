@@ -61,8 +61,9 @@ class XiData:
     cards: dict[tuple[str, str], list[str]] = field(default_factory=dict)  # (fixture, player) -> CARD_YELLOW / CARD_RED
 
 
-def load_xi_data(store, provider) -> XiData:
-    """Every confirmed XI with its kickoff (results, else the calendar), the players table and the availability rows."""
+def load_xi_data(store, provider, fotmob_absences: bool = False) -> XiData:
+    """Every confirmed XI with its kickoff (results, else the calendar), the players table and the availability rows.
+    fotmob_absences: also the pre-match absences of FotMob's match pages (absence_history), off until measured."""
     when: dict[str, tuple[str, datetime]] = {}
     for fid, comp, ko in store.db.execute("SELECT fixture_id, competition, kickoff FROM results").fetchall():
         when[fid] = (comp, datetime.fromisoformat(ko))
@@ -87,6 +88,10 @@ def load_xi_data(store, provider) -> XiData:
     for fid, pid, st, at in store.db.execute("SELECT fixture_id, player_id, status, observed_at FROM player_status").fetchall():
         for g in provider._to_goal([pid]):
             status[(fid, g)].append((st, datetime.fromisoformat(at)))
+    if fotmob_absences:
+        for fid, pid, st, at in store.db.execute("SELECT fixture_id, player_id, status, observed_at FROM absence_history "
+                                                 "WHERE source = 'fotmob'").fetchall():
+            status[(fid, pid)].append((st, datetime.fromisoformat(at)))
     cards: dict[tuple[str, str], list[str]] = defaultdict(list)
     for fid, pid, kind in store.db.execute("SELECT fixture_id, player_id, kind FROM match_events WHERE kind IN ('CARD_YELLOW', 'CARD_RED') "
                                            "AND player_id IS NOT NULL").fetchall():

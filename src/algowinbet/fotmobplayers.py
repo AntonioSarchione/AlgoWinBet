@@ -8,8 +8,9 @@ votes. A player FotMob only lists as absent (never played in a match we read) is
 our lineups within ABSENT_WINDOW of the absence. A doubtful name is left out: better a player without a link than an absence
 given to the wrong person.
 
-The links live in their own table (fotmob_player_links): nothing reads them yet (the absences are measured before any model
-uses them).
+The links live in their own table (fotmob_player_links). The absences with a linked player go to absence_history (GOAL ids,
+the statuses of player_status: OUT / SUSPENDED), a table of their own that a model reads only when asked
+(probable.load_xi_data(fotmob_absences=True)): they enter a model only after being measured.
 """
 from __future__ import annotations
 
@@ -25,10 +26,20 @@ LINK_SHARE = 0.8
 ABSENT_WINDOW = timedelta(days=60)
 GOAL_SOURCE = "goal-api"
 
+KNOWN_BEFORE = timedelta(days=1)  # the absence list of a match page is the pre-match one: dated a day before kickoff
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS fotmob_player_links(fotmob_id TEXT PRIMARY KEY, goal_id TEXT, name TEXT, votes INTEGER, agree INTEGER,
   how TEXT, linked_at TEXT);
+CREATE TABLE IF NOT EXISTS absence_history(fixture_id TEXT, team TEXT, player_id TEXT, status TEXT, kind TEXT, source TEXT,
+  observed_at TEXT, PRIMARY KEY(fixture_id, player_id, source));
 """
+
+
+def status_of(kind: str | None) -> str:
+    """FotMob's unavailability type -> our player_status status."""
+    k = (kind or "").lower()
+    return "SUSPENDED" if "suspen" in k or "card" in k or "ban" in k else "OUT"
 
 
 def parts(name: str | None) -> list[str]:
@@ -72,6 +83,9 @@ class LinkReport:
     starters_checked: int = 0
     starters_same: int = 0
     absences: dict[str, list[int]] = field(default_factory=dict)  # competition -> [rows, linked, rows of a team with a GOAL XI, linked]
+    played: dict[str, list[int]] = field(default_factory=dict)  # competition -> [linked absences with a GOAL XI, in the XI, on the bench]
+    kinds: Counter = field(default_factory=Counter)  # FotMob type -> linked absences
+    played_kind: Counter = field(default_factory=Counter)  # FotMob type -> linked absences of players who started anyway
 
     def lines(self) -> list[str]:
         out = [f"giocatori FotMob: {self.fotmob_players} · collegati a GOAL {self.linked} ({self.by_absence} solo dalle assenze) · "
@@ -82,6 +96,11 @@ class LinkReport:
         out.append("assenze FotMob con il giocatore collegato, per competizione (tutte · solo partite con la formazione GOAL della squadra):")
         for comp, (n, ok, nx, okx) in sorted(self.absences.items()):
             out.append(f"  {comp}: {ok}/{n} ({100 * ok / max(n, 1):.0f}%) · {okx}/{nx} ({100 * okx / max(nx, 1):.0f}%)")
+        out.append("controllo: assenti FotMob collegati che compaiono comunque nella formazione ufficiale GOAL (titolari · panchina):")
+        for comp, (n, xi, bench) in sorted(self.played.items()):
+            out.append(f"  {comp}: {n} assenze · titolari {xi} ({100 * xi / max(n, 1):.1f}%) · panchina {bench} ({100 * bench / max(n, 1):.1f}%)")
+        kinds = " · ".join(f"{k or '?'} {n} ({self.played_kind[k]})" for k, n in self.kinds.most_common())
+        out.append(f"tipi di assenza FotMob (assenze collegate, tra parentesi i titolari comunque): {kinds}")
         return out
 
 
@@ -132,10 +151,10 @@ def link_players(store: SnapshotStore, now: datetime | None = None) -> LinkRepor
     for (fid, team), ids in xi.items():
         if fid in kickoff:
             by_team.setdefault(team, []).append((kickoff[fid], ids))
-    absences = store.db.execute("SELECT a.fixture_id, a.team, a.player_id, a.name, r.competition FROM fotmob_absences a "
+    absences = store.db.execute("SELECT a.fixture_id, a.team, a.player_id, a.name, r.competition, a.kind FROM fotmob_absences a "
                                 "JOIN results r ON r.fixture_id = a.fixture_id").fetchall()
     av: dict[str, Counter] = {}
-    for fid, team, p, n, _ in absences:
+    for fid, team, p, n, _, _ in absences:
         fm_name.setdefault(p, n)
         if p in links or fid not in kickoff:
             continue
@@ -168,11 +187,26 @@ def link_players(store: SnapshotStore, now: datetime | None = None) -> LinkRepor
             if f in links:
                 rep.starters_checked += 1
                 rep.starters_same += int(links[f][0] in gs)
-    for fid, team, p, _, comp in absences:
+    hist = []
+    for fid, team, p, _, comp, kind in absences:
         row = rep.absences.setdefault(comp, [0, 0, 0, 0])
         row[0] += 1
         row[1] += int(p in links)
         if (fid, team) in xi:
             row[2] += 1
             row[3] += int(p in links)
+        if p not in links:
+            continue
+        g = links[p][0]
+        hist.append((fid, team, g, status_of(kind), kind, "fotmob", (kickoff[fid] - KNOWN_BEFORE).isoformat()))
+        rep.kinds[kind] += 1
+        if (fid, team) in xi:  # check: an absent player should not be in the official XI of that match
+            pl = rep.played.setdefault(comp, [0, 0, 0])
+            pl[0] += 1
+            started = g in starters.get((fid, team), ())
+            pl[1] += int(started)
+            pl[2] += int(g in xi[(fid, team)] and not started)
+            rep.played_kind[kind] += int(started)
+    store.db.execute("DELETE FROM absence_history WHERE source = 'fotmob'")
+    store._bulk("INSERT OR REPLACE INTO absence_history(fixture_id, team, player_id, status, kind, source, observed_at)", hist)
     return rep

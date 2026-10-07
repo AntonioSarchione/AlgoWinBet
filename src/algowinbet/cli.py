@@ -1061,7 +1061,7 @@ def cmd_xi_eval(a) -> None:
     from .probable import evaluate_xi, load_xi_data, print_xi_eval
     store = SnapshotStore(a.db)
     try:
-        data = load_xi_data(store, SnapshotProvider(store))
+        data = load_xi_data(store, SnapshotProvider(store), fotmob_absences=a.fotmob_absences)
         start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
         end = datetime.now(timezone.utc)
         print(f"formazioni salvate: {sum(len(v) for v in data.sheets.values())} di {len(data.sheets)} squadre; righe infortuni {len(data.status)}")
@@ -2225,6 +2225,7 @@ def build_parser() -> argparse.ArgumentParser:
     er.set_defaults(fn=cmd_events_remap)
     xe = sub.add_parser("xi-eval", help="probabili formazioni calcolate da noi contro le ufficiali (replay, nessuna richiesta API)")
     xe.add_argument("--since", default="2026-07-01", help="prima partita giudicata; le formazioni prima servono da base")
+    xe.add_argument("--fotmob-absences", action="store_true", help="usa anche le assenze FotMob dello storico (da misurare)")
     xe.add_argument("--db", default="turso")
     xe.set_defaults(fn=cmd_xi_eval)
     se = sub.add_parser("scorer-eval", help="Fase 9: marcatori rigiocati settimana per settimana (nessuna richiesta API)")
