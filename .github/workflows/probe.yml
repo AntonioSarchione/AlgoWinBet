@@ -100,7 +100,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "bench" ]; then algowinbet db-bench; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "raw" ]; then algowinbet raw-last "$ARG" --source "${PARAMS:-goal}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "trends" ]; then algowinbet trends-show --comp "$ARG" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rawgrep" ]; then algowinbet raw-last "$ARG" --grep "$PARAMS" --n 5 --max-lines 200 --dump 6000 --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rawgrep" ]; then algowinbet raw-last "$ARG" --source "" --grep "$PARAMS" --n 5 --max-lines 200 --dump 6000 --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "inspect" ]; then algowinbet inspect "$ARG" --db "$DB"; exit 0; fi
           if [ "$SOURCE" = "db" ]; then algowinbet teams --db "$DB"; exit 0; fi
           if [ "$SOURCE" = "apif" ]; then
