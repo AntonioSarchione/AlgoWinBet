@@ -108,9 +108,9 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
                   <span className="shirt" aria-hidden="true">{p.number ?? role(p.id)}</span>
                   <span className="pname">
                     {shortName(name(p.id))}
-                    {x.probs[p.id] != null && <span className="pprob"> {pct(x.probs[p.id], 0)}</span>}
                     {x.statuses[p.id] && <span className="sr-only">{flag(x, p.id)}</span>}
                   </span>
+                  {x.probs[p.id] != null && <span className="pprob">{pct(x.probs[p.id], 0)}{x.statuses[p.id] ? ` · ${(ABSENCE_LABEL[x.statuses[p.id]] ?? x.statuses[p.id]).toLowerCase()}` : ""}</span>}
                 </li>
               ))}
             </ul>

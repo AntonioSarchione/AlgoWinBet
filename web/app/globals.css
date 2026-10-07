@@ -498,13 +498,15 @@ th.num .th-sort { justify-content: flex-end; }
 .pname { max-width: 100%; padding: 1px 6px; border-radius: 6px; background: var(--card); color: var(--text); font-size: 12px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bench { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
 .bench-team { display: flex; align-items: center; gap: 8px; }
+.bench .note { margin: 0; }
 .bench-xi { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .absences { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .absences li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; }
 .absences li .status { min-width: 86px; justify-content: center; text-align: center; }
 .absences li:not(.absence-regular) b { font-weight: 500; color: var(--text-2); }
 .section svg { vertical-align: -3px; }
-.pprob { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pprob { margin-top: -2px; padding: 0 5px; border-radius: 5px; background: color-mix(in srgb, var(--card) 80%, transparent); color: var(--text-2); font-size: 10.5px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.pitch-flag .pprob { color: var(--warn); }
 .pitch-probable .shirt { opacity: 0.85; outline: 1.5px dashed color-mix(in srgb, var(--text) 45%, transparent); outline-offset: 2px; }
 .pitch-flag .shirt { box-shadow: 0 0 0 2px var(--warn); }
 .leg-absent { display: flex; gap: 6px; align-items: flex-start; margin-top: 4px; font-size: 12.5px; color: var(--bad); }
