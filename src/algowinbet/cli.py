@@ -593,8 +593,13 @@ def cmd_apif_link(a) -> None:
     client = ApiFootballClient(store=store, budget=BudgetGuard(store, "api-football", daily=cfg.apif_daily_limit, reserve=cfg.apif_reserve))
     col = ApiFootballCollector(client, store, [ApifLeague(l.apif, l.name, bool(l.fd)) for l in cfg.leagues if l.apif], TeamNames.load(a.aliases))
     st = CollectStats("api-football")
+    from .providers.apifootball import ApiFootballError
     for d in a.dates:
-        out = col.link_day(st, datetime.fromisoformat(d).date())
+        try:
+            out = col.link_day(st, datetime.fromisoformat(d).date())
+        except (ApiFootballError, BudgetExceeded) as e:  # the free plan reads only yesterday, today and tomorrow
+            print(f"== {d}: {e}")
+            continue
         print(f"== {d}")
         for comp, ms in sorted(out.items()):
             miss = [m for m in ms if m.startswith("- ")]
