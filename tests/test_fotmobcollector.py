@@ -130,11 +130,9 @@ def test_a_short_tick_does_not_spend_the_day_history_slot():
     assert ("/match/400", {}) in api.calls
 
 
-def test_plan_tick_adds_fotmob_after_the_price_steps():
+def test_fotmob_is_no_longer_a_step_of_the_collect_tick():
     s = SnapshotStore(":memory:")
-    cfg = AutoConfig(leagues=[League(name="Eredivisie", fotmob=57)])
-    assert plan_tick(s, cfg, NOW, None) == ["fotmob"]
-    assert "fotmob" not in plan_tick(s, AutoConfig(leagues=[League(name="Eredivisie")]), NOW, None)
+    assert "fotmob" not in plan_tick(s, AutoConfig(leagues=[League(name="Eredivisie", fotmob=57)]), NOW, None)
 
 
 def test_a_name_spelled_differently_links_through_the_other_team():

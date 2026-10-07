@@ -8,7 +8,8 @@ Liga Portugal and no Eredivisie; FBref lost the Opta data in January 2026. A Fot
 Not an official API: the site may change without notice, so the collector is optional. Nothing reads its tables yet
 (fotmob_player_stats, fotmob_absences): a feature that wants them is measured first, like every new source.
 
-Per tick:
+Per run (its own workflow, fotmob.yml, started by the collect ticks when pages are due; the coming matches are read first
+by fotmobprematch.py):
   seasons ... /leagues/{id}/fixtures/x?season=S (one page per league and season, every match of that season, the coming ones
               with their id too): links FotMob matches to our results. A new result is first linked from the stored page, with no
               request; the current season is read again only when the stored page is older than an unlinked match's kickoff

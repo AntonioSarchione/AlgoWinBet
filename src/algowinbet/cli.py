@@ -581,6 +581,58 @@ def cmd_fotmob_backfill(a) -> None:
             f.write(f"left={left}\nsaved={saved}\npaused={paused}\n")
 
 
+def cmd_fotmob_tick(a) -> None:
+    """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
+    stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
+    GITHUB_OUTPUT reanalyse=N: the changes worth a new analysis (a regular's status, an official XI), for the workflow."""
+    from .autorun import AutoConfig
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
+    from .fotmobplayers import link_players
+    from .collector import CollectStats
+    from .fotmobprematch import FotMobPrematch
+    relevant: list[str] = []
+    store = None
+    try:
+        cfg = AutoConfig.load(a.config)
+        store = SnapshotStore(a.db)
+        col = FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob],
+                              TeamNames.load(a.aliases), history_seasons=cfg.history_seasons)
+        now = datetime.now(timezone.utc)
+        if col.paused_until():
+            print(f"FotMob in pausa fino alle {col.paused_until():%H:%M} UTC (richieste rifiutate)")
+        else:
+            col._load_fails()
+            st = CollectStats("FotMob prima delle partite")
+            relevant = FotMobPrematch(col).run(st).relevant
+            _print_stats(st)
+            for e in st.errors[:10]:
+                print(f"  ! {e}")
+            for r in relevant:
+                print(f"  da rianalizzare: {r}")
+            st = col.run(history_seconds=a.history_seconds)
+            _print_stats(st)
+            for e in st.errors[:10]:
+                print(f"  ! {e}")
+        day = f"fotmob-links:{now.date().isoformat()}"
+        if not store.job_done(day):
+            lines = link_players(store, now).lines()
+            print(lines[0])
+            store.mark_job(day, now, lines[0])
+        store.mark_job("fotmob-tick", now, f"{len(relevant)} cambi da rianalizzare")
+    except Exception as e:  # noqa: BLE001 - never a failed run (no e-mail): the next run goes on
+        print(f"::warning::giro FotMob interrotto ({type(e).__name__}: {e})")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:  # noqa: BLE001
+                pass
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(f"reanalyse={len(relevant)}\n")
+
+
 def cmd_fotmob_check(a) -> None:
     """How full the FotMob player stats are (no request): per competition and season, the matches read, and each team's
     sum of fouls, yellow and red cards and shots set against the team totals of the same match from match_stats
@@ -1614,6 +1666,27 @@ def cmd_collect_auto(a) -> None:
         print(f"::warning::connessione a Turso caduta ({type(e).__name__}: {e}): giro interrotto, il prossimo riprende da qui", flush=True)
 
 
+def _start_fotmob(store: SnapshotStore, cfg) -> None:
+    """FotMob runs in its own workflow (fotmob.yml): the tick starts it when its pages are due. Never stops the tick."""
+    from . import actionsminutes as am
+    from .autorun import fotmob_dispatch_due, transient_db_error
+    try:
+        now = datetime.now(timezone.utc)
+        why = fotmob_dispatch_due(store, cfg, now)
+        if not why:
+            return
+        status = am.dispatch("fotmob.yml")
+        if status is None:
+            print(f"FotMob: da avviare ({why}), ma manca GITHUB_TOKEN")
+            return
+        store.mark_job("fotmob-dispatch", now, why)
+        print(f"FotMob: giro avviato ({why})" if status == 204 else f"FotMob: avvio non riuscito, GitHub {status}")
+    except Exception as e:  # noqa: BLE001 - the FotMob run is tried again by the next tick
+        if transient_db_error(e):
+            store.recover()
+        print(f"FotMob: avvio non riuscito ({type(e).__name__}: {e})")
+
+
 def _collect_auto(a) -> None:
     cfg = AutoConfig.load(a.config)
     try:
@@ -1656,11 +1729,6 @@ def _collect_auto(a) -> None:
         ac = ApiFootballClient(store=store, budget=BudgetGuard(store, "api-football", daily=cfg.apif_daily_limit, reserve=cfg.apif_reserve))
         apif = ApiFootballCollector(ac, store, [ApifLeague(l.apif, l.name, bool(l.fd)) for l in cfg.leagues if l.apif], names,
                                     squads_per_day=cfg.apif_squads_per_day)
-    fotmob = None
-    if any(l.fotmob for l in cfg.leagues):  # public pages, no key
-        from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
-        fotmob = FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names,
-                                 history_seasons=cfg.history_seasons)
     from .fdcollector import FootballDataCollector
     datasets = FootballDataCollector(store, cfg.divisions, names) if cfg.divisions else None  # public files, no key
     t0 = time.monotonic()
@@ -1671,9 +1739,10 @@ def _collect_auto(a) -> None:
     try:
         # season files and international results run after the publication: they are never worth a late analysis
         results = run_tick(store, cfg, goal, odds, on_step=show, max_seconds=a.max_seconds, manual=a.manual, history=a.history,
-                           datasets=datasets, skip=("datasets",), apif=apif, fotmob=fotmob)
+                           datasets=datasets, skip=("datasets",), apif=apif)
         if not results:
             print("tick: niente da fare")
+        _start_fotmob(store, cfg)
         from .autorun import should_publish, transient_db_error
         from .publish import analyze_and_publish, last_publication
         if a.publish and (a.force_publish or should_publish(results, last_publication(store), datetime.now(timezone.utc))):
@@ -2205,6 +2274,12 @@ def build_parser() -> argparse.ArgumentParser:
     fb.add_argument("--aliases", default="configs/team_aliases.json")
     fb.add_argument("--db", default="algowinbet.db")
     fb.set_defaults(fn=cmd_fotmob_backfill)
+    ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
+    ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
+    ft.add_argument("--config", default="configs/collect.json")
+    ft.add_argument("--aliases", default="configs/team_aliases.json")
+    ft.add_argument("--db", default="algowinbet.db")
+    ft.set_defaults(fn=cmd_fotmob_tick)
     fc = sub.add_parser("fotmob-check", help="quanto sono pieni falli, cartellini e tiri dei giocatori FotMob (nessuna richiesta)")
     fc.add_argument("--db", default="algowinbet.db")
     fc.set_defaults(fn=cmd_fotmob_check)

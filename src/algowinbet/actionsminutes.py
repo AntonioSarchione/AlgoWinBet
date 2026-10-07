@@ -138,3 +138,19 @@ def _quality_since(store, t: datetime) -> bool:
         return bool(store.db.execute("SELECT 1 FROM quality_runs WHERE created_at >= ? LIMIT 1", (t.isoformat(),)).fetchone())
     except Exception:  # noqa: BLE001 - no replay saved yet
         return False
+
+
+def dispatch(workflow: str, inputs: dict | None = None, post=None) -> int | None:
+    """Starts a workflow of this repository (workflow_dispatch on main): GitHub's status (204 = started), or None without
+    GITHUB_TOKEN / GITHUB_REPOSITORY (a local run)."""
+    token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
+    body = {"ref": "main", **({"inputs": inputs} if inputs else {})}
+    if post is None:
+        if not token or not repo:
+            return None
+
+        def post(url: str) -> int:
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+            return urllib.request.urlopen(req, timeout=30).status
+    return post(f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/dispatches")

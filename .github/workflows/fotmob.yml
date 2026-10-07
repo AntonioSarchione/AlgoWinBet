@@ -1,0 +1,60 @@
+# FotMob in its own run (public pages, no key), so its pages never slow down the collect ticks: absences and official XI of
+# the coming matches (morning, 3 hours before, then every few minutes from 75 minutes before kickoff until the XI is out),
+# then player stats of the finished matches and the day's history slice. See src/algowinbet/fotmobprematch.py.
+# The collect ticks start it when pages are due (GitHub's cron starts runs late or never); the cron here is only a fallback.
+# A run never fails (no e-mail). When it brings something worth a new analysis (a regular out or doubtful, an official XI),
+# it starts a collect run that publishes at once instead of waiting for the next tick.
+name: fotmob
+
+on:
+  schedule:
+    - cron: "17 7-22/3 * * *"  # fallback
+  workflow_dispatch:
+
+concurrency:
+  group: fotmob
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write  # to start the collect run that publishes the new analysis
+
+jobs:
+  fotmob:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.12"
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - run: uv pip install -e ".[turso]"
+      - name: restore database replica
+        uses: actions/cache/restore@v6
+        with:
+          path: data/turso-replica.db*
+          key: turso-replica-${{ github.run_id }}
+          restore-keys: turso-replica-
+      - name: fotmob-tick
+        id: tick
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+          TURSO_MODE: replica
+          TURSO_REPLICA_PATH: data/turso-replica.db
+        run: algowinbet fotmob-tick --config configs/collect.json --db turso
+      - name: new analysis
+        if: steps.tick.outputs.reanalyse != '' && steps.tick.outputs.reanalyse != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run collect.yml --repo "$GITHUB_REPOSITORY" --ref main -f publish=true
+      - name: save database replica
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: data/turso-replica.db*
+          key: turso-replica-${{ github.run_id }}

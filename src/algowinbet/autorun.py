@@ -78,7 +78,6 @@ class AutoConfig:
     apif_daily_limit: int = 100   # API-Football free plan
     apif_reserve: int = 3
     apif_squads_per_day: int = 20
-    fotmob_history_seconds: float = 240  # once a day: past seasons' match pages (2 s each), until the history is complete
 
     @classmethod
     def load(cls, path: str | Path) -> "AutoConfig":
@@ -268,9 +267,6 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         if manual or history or history_due(store, cfg, now):
             steps.append("history")
         steps.append("closing")
-    if any(l.fotmob for l in cfg.leagues):
-        # after prices and lineups (nothing time-critical): pages only for finished matches without player stats
-        steps.append("fotmob")
     if datasets_due(store, cfg, now):
         steps.append("datasets")  # last: nothing time-critical; the files link to the backfilled results, so they wait for it
     return steps
@@ -315,7 +311,7 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
              now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), on_step: Callable[[CollectStats], None] | None = None,
              max_seconds: float | None = None, clock: Callable[[], float] = time.monotonic,
              manual: bool = False, history: bool = False, datasets: FootballDataCollector | None = None,
-             skip: tuple[str, ...] = (), apif=None, fotmob=None) -> list[CollectStats]:
+             skip: tuple[str, ...] = (), apif=None) -> list[CollectStats]:
     """Runs the planned steps in order. With max_seconds, no NEW step starts after that time (the CI job has a hard timeout;
     whatever is skipped is simply picked up by the next tick, every step being idempotent)."""
     t = now()
@@ -348,8 +344,6 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if s == "datasets" and datasets is None and not cfg.international:
             continue
         if s == "apif" and apif is None:
-            continue
-        if s == "fotmob" and fotmob is None:
             continue
         try:
             if s == "fixtures":
@@ -389,12 +383,6 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 out.append(odds.sync_closing())
             elif s == "apif":
                 out.append(apif.run())
-            elif s == "fotmob":
-                # recent matches always; the day's history slice only with time left in the tick (see FotMobCollector.run)
-                left = cfg.fotmob_history_seconds if max_seconds is None else min(cfg.fotmob_history_seconds, max_seconds - (clock() - t0) - 60)
-                st = fotmob.run(history_seconds=max(0.0, left))
-                if st.requests or st.errors or st.skipped:
-                    out.append(st)
             elif s == "datasets":
                 # capped; the first load spreads over a few ticks. The CLI skips it here and runs it after the publication.
                 left = DATASETS_SECONDS if max_seconds is None else max(30.0, min(DATASETS_SECONDS, max_seconds - (clock() - t0)))
@@ -414,6 +402,30 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
         if on_step and len(out) > before:
             on_step(out[-1])
     return out
+
+
+FOTMOB_DISPATCH_GAP = timedelta(minutes=6)  # a FotMob run started this recently is still queued or running
+FOTMOB_IDLE = timedelta(hours=2)  # without coming matches due, a FotMob run at most this often (finished matches, history)
+
+
+def fotmob_dispatch_due(store: SnapshotStore, cfg: AutoConfig, now: datetime) -> str | None:
+    """Why the tick should start a FotMob run now (fotmob workflow), or None. FotMob has its own workflow so its pages never
+    slow down the ticks; GitHub's cron starts runs late or never, so the ticks (started by the pinger) start it when due."""
+    from .fotmobprematch import due_reads
+    comps = {l.name for l in cfg.leagues if l.fotmob}
+    if not comps:
+        return None
+    jobs = dict(store.db.execute("SELECT name, done_at FROM jobs WHERE name IN ('fotmob-dispatch', 'fotmob-tick')").fetchall())
+    at = {k: datetime.fromisoformat(v) for k, v in jobs.items() if v}
+    if "fotmob-dispatch" in at and now - at["fotmob-dispatch"] < FOTMOB_DISPATCH_GAP:
+        return None
+    due = due_reads(store, comps, now)
+    if due:
+        return f"{len(due)} partite da leggere prima del calcio d'inizio ({due[0][1]}: {due[0][0].home}-{due[0][0].away})"
+    last = max((at[k] for k in ("fotmob-dispatch", "fotmob-tick") if k in at), default=None)
+    if last is None or now - last >= FOTMOB_IDLE:
+        return "partite finite e storico"
+    return None
 
 
 def should_publish(results: list[CollectStats], last_pub: datetime | None, now: datetime, max_age: timedelta = timedelta(hours=6)) -> bool:
