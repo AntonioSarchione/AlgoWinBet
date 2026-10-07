@@ -673,6 +673,14 @@ def cmd_results_holes(a) -> None:
             print(f"  {day}: {len(ms)} · " + " | ".join(ms[:a.show]) + (" ..." if len(ms) > a.show else ""))
 
 
+def cmd_fotmob_players(a) -> None:
+    """Links FotMob player ids to GOAL ids (fotmob_player_links, no request) and prints how many absences it covers."""
+    from .fotmobplayers import link_players
+    store = SnapshotStore(a.db)
+    for line in link_players(store).lines():
+        print(line)
+
+
 def cmd_trends_show(a) -> None:
     """Streaks and scorer table of the latest published run (no API request): what the match page shows."""
     import json as _json
@@ -2160,6 +2168,9 @@ def build_parser() -> argparse.ArgumentParser:
     rh.add_argument("--aliases", default="configs/team_aliases.json")
     rh.add_argument("--db", default="algowinbet.db")
     rh.set_defaults(fn=cmd_results_holes)
+    fp = sub.add_parser("fotmob-players", help="collega i giocatori FotMob agli id GOAL e misura quante assenze copre (nessuna richiesta)")
+    fp.add_argument("--db", default="algowinbet.db")
+    fp.set_defaults(fn=cmd_fotmob_players)
     ts = sub.add_parser("trends-show", help="ritardi e marcatori dell'ultima analisi pubblicata (nessuna richiesta API)")
     ts.add_argument("--comp", default="")
     ts.add_argument("--n", type=int, default=4)
