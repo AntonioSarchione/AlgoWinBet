@@ -113,7 +113,8 @@ flowchart LR
 - **Solo Sisal è giocabile.** Pinnacle è il riferimento per misurare il valore, mai una quota da prendere.
 - **Quota minima 1,20 per evento**: sotto, più rumore che valore.
 - **Mai nazionali e club nella stessa schedina**, anche se quota ed EV sono buoni.
-- **Cartellini con la regola Sisal**: gialli 1, rossi 1, il secondo giallo prima del rosso non conta, solo tempi regolamentari.
+- **Cartellini con la regola Sisal** (1X2 ammonizioni): contano i gialli, la doppia ammonizione vale 2, il rosso diretto 0; mai panchina,
+  allenatori e staff; solo tempi regolamentari. Conteggio dalle righe giocatore FotMob (stat-eval 2026-10-07).
 - **Un cambio al modello entra solo con un guadagno chiaro** fuori campione (circa 0,005 di log loss); ogni versione ha risultati separati.
 
 ## Criterio di passaggio

@@ -35,7 +35,10 @@ class ModelCfg(BaseModel):
     # Fase 7: corners and cards from count models (models/counts.py); a statistic with fewer matches than this is not priced
     # stat-eval 2026-10-03 (26 weeks, 852 league matches): corners beat the league average (1X2 corners log loss 0.888 vs 0.929,
     # Over 9.5 0.687 vs 0.695).
-    # Cards (Sisal: yellow 1, red 1, second yellow before a red not counted; what we store): stat-eval 2026-10-03 over 52 weeks
+    # Cards = Sisal's bookings (1X2 ammonizioni: yellows, a second yellow two, a straight red none, never the bench or staff),
+    # from the FotMob player rows since 2026-10-07: stat-eval 52 weeks (2,549 matches), production variant 1X2 1.0610 vs 1.0674
+    # for the league average (still clear), O3.5 0.6725 vs 0.6787, O4.5 0.6263 vs 0.6306, O5.5 0.4956 vs 0.4948 (totals still
+    # off: not better on every line). Before (yellow + red from the team stats): stat-eval 2026-10-03 over 52 weeks
     # (2,322 matches) with a shared match factor, a 60-day level and 5x shrinkage: 1X2 cards 1.0605 vs 1.0698 for the league
     # average (clear), totals no better than the league average (O3.5 0.6694 vs 0.6728, O4.5 0.6422 vs 0.6436, O5.5 0.5220
     # vs 0.5224): only the 1X2 is priced; totals wait for the referee.
