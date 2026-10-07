@@ -210,6 +210,8 @@ def _last_ok(store: SnapshotStore, source: str, endpoint_like: str) -> datetime 
     return datetime.fromisoformat(row[0]) if row and row[0] else None
 
 
+NAMES_FROM_HOUR = 20  # UTC: the day's syncs are done, what is left of the GOAL budget is spare
+
 RESULT_DUE = timedelta(hours=2, minutes=30)  # kickoff + 90' + half time + stoppages, with a margin
 RESULT_RETRY = timedelta(minutes=45)  # a match still missing its result is asked again at most this often (GOAL requests are plenty)
 
@@ -254,6 +256,8 @@ def plan_tick(store: SnapshotStore, cfg: AutoConfig, now: datetime, last_odds: d
         steps.append("lineups")  # costs nothing when no fixture is inside the window
         if any(not store.job_done(f"backfill:goal:{lid}") for lid in cfg.goal_leagues):
             steps.append("backfill")  # one league per tick until every league has its multi-season history
+        if now.hour >= NAMES_FROM_HOUR and not store.job_done(f"xi-names-day:{now:%Y-%m-%d}"):
+            steps.append("names")  # evening: the GOAL requests the day did not need name old XI players
     if any(l.apif for l in cfg.leagues):
         steps.append("apif")  # decides by itself: requests only for what is due (see apifcollector)
     if cfg.oddspapi_tournaments:
@@ -337,7 +341,7 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 on_step(skipped)
             continue
         before = len(out)
-        if s in ("fixtures", "results", "stats", "lineups", "backfill") and goal is None:
+        if s in ("fixtures", "results", "stats", "lineups", "backfill", "names") and goal is None:
             continue
         if s in ("odds", "history", "closing") and odds is None:
             continue
@@ -356,6 +360,10 @@ def run_tick(store: SnapshotStore, cfg: AutoConfig, goal: GoalCollector | None, 
                 out.append(goal.sync_stats(3))
             elif s == "lineups":
                 out.append(goal.sync_lineups(cfg.lineup_window_min))
+            elif s == "names":
+                st = goal.name_history()
+                if st.requests or st.errors or st.saved:
+                    out.append(st)
             elif s == "backfill":
                 st = goal.backfill_next(cfg.history_seasons)
                 if st:

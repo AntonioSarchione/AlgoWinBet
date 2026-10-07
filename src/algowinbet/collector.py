@@ -406,6 +406,27 @@ class GoalCollector:
             self.store.mark_job(f"xi-names:{fid}", self.now(), "nomi dei giocatori letti")
         return todo
 
+    NAMES_HISTORY = timedelta(days=800)
+    NAMES_DAILY = 40  # old XI read again for their names each evening, most recent first, until none is left
+    NAMES_SPARE = 150  # GOAL requests that must still be left today (above the reserve) before any is spent on them
+
+    def name_history(self) -> CollectStats:
+        """Once a day, with spare GOAL budget: up to NAMES_DAILY stored XI of the history with players we have no name for
+        are read once more (see _name_unnamed_xi). Low budget leaves the day open for a later tick."""
+        st = CollectStats("nomi storici")
+        left = self.client.budget.remaining()["daily"] if self.client.budget else None
+        if left is not None and left < self.NAMES_SPARE:
+            st.skipped.append(f"budget GOAL basso ({left} rimaste): rimandato")
+            return st
+        todo: list[str] = []
+
+        def work():
+            todo.extend(self._name_unnamed_xi(st, set(), self.NAMES_HISTORY, self.NAMES_DAILY))
+        self._run(st, work)
+        if not st.errors:
+            self.store.mark_job(f"xi-names-day:{self.now():%Y-%m-%d}", self.now(), f"{len(todo)} partite rilette")
+        return st
+
     def _lineup_players(self, data, home: str, away: str, default: Position | None = None) -> list[Player]:
         out: list[Player] = []
         for key, team in (("home", home), ("away", away)):

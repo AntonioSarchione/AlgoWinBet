@@ -545,3 +545,23 @@ def test_old_xi_without_names_are_found_only_with_a_longer_lookback():
     st = CollectStats("n")
     col._name_unnamed_xi(st, set(), timedelta(days=60), 10)
     assert len(t.calls) == 1 and st.saved == {"players": 24}
+
+
+def test_old_names_are_read_in_the_evening_once_a_day_and_only_with_spare_budget():
+    from algowinbet.autorun import AutoConfig, League, plan_tick
+    store = SnapshotStore(":memory:")
+    cfg = AutoConfig(goal_leagues=["sa"], leagues=[League(name="Serie A", goal="sa")])
+    for lid in ("sa",):
+        store.mark_job(f"backfill:goal:{lid}", NOW)
+    evening = NOW.replace(hour=21)
+    assert "names" not in plan_tick(store, cfg, NOW.replace(hour=10), None) and "names" in plan_tick(store, cfg, evening, None)
+    fx = _seed_fixtures(store, [NOW - timedelta(days=30)])
+    store.save_lineups("goal-api", [LineupSnapshot(fixture_id=fx[0].id, team=t, status="confirmed", starters=[f"goal:{p}{k}" for k in range(11)],
+                                                   published_at=NOW, observed_at=NOW - timedelta(days=30)) for t, p in (("H0", "h"), ("A0", "a"))])
+    low = BudgetGuard(store, "goal-api", daily=100, reserve=50, now=lambda: evening)
+    col, t = _collector({"/fixtures/0/lineups": [ok({"home": _goal_side("h"), "away": _goal_side("a"), "hasLineups": True})]}, store, budget=low)
+    col.now = lambda: evening
+    assert col.name_history().skipped and t.calls == [] and "names" in plan_tick(store, cfg, evening, None)
+    col.client.budget = BudgetGuard(store, "goal-api", daily=1000, reserve=50, now=lambda: evening)
+    st = col.name_history()
+    assert len(t.calls) == 1 and st.saved == {"players": 24} and "names" not in plan_tick(store, cfg, evening, None)
