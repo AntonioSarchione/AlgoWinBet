@@ -613,6 +613,43 @@ def cmd_apif_link(a) -> None:
         print(f"{d}: partite nostre {len(cal)}, senza collegamento API-Football {len(left)}" + (f" ({'; '.join(left)})" if left else ""))
 
 
+def cmd_xi_preview(a) -> None:
+    """Our probable lineups of the coming domestic matches, as the publication computes them (no request): per team the
+    expected XI with each starter probability, plus checks on the ids (GOAL ids with a name and a role, the team of the
+    players table) and the statuses the model sees."""
+
+    from .probable import _status, XI_TIME, load_xi_data, predict
+    from .scorerpub import xi_model
+    store = SnapshotStore(a.db)
+    prov = SnapshotProvider(store)
+    now = datetime.now(timezone.utc)
+    data = load_xi_data(store, prov)
+    model = xi_model(store, data, now)
+    fixtures = [f for f in prov.list_fixtures(None, now, now + timedelta(days=a.days)) if f.competition in DOMESTIC]
+    tot = {"squadre": 0, "senza previsione": 0, "non GOAL": 0, "senza nome": 0, "senza ruolo": 0, "altra squadra": 0, "con stato": 0}
+    for f in sorted(fixtures, key=lambda f: f.kickoff)[:a.max]:
+        print(f"{f.kickoff:%d/%m %H:%M} {f.competition}: {f.home}-{f.away}")
+        for team in (f.home, f.away):
+            tot["squadre"] += 1
+            got = predict(model, data, team, f.kickoff, f.competition, f.id, live=True)
+            if got is None:
+                tot["senza previsione"] += 1
+                print(f"  {team}: nessuna previsione (nessuna formazione passata)")
+                continue
+            top = sorted(got.probs.items(), key=lambda x: -x[1])
+            flags = []
+            for pid, p in top[:14]:
+                st = _status(data, f.id, pid, f.kickoff - XI_TIME)
+                bad = [k for k, ok in (("non GOAL", pid.startswith("goal:")), ("senza nome", pid in data.names),
+                                       ("senza ruolo", pid in data.roles), ("altra squadra", data.team_of.get(pid, team) == team)) if not ok]
+                for k in bad:
+                    tot[k] += 1
+                tot["con stato"] += int(st is not None)
+                flags.append(f"{data.names.get(pid, pid)} {data.roles.get(pid, '?')} {p:.0%}" + (f" [{st}]" if st else "") + (f" <{','.join(bad)}>" if bad else ""))
+            print(f"  {team} (somma {sum(got.probs.values()):.1f}): " + " · ".join(flags))
+    print("controlli: " + ", ".join(f"{k} {v}" for k, v in tot.items()))
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2394,6 +2431,11 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument("--aliases", default="configs/team_aliases.json")
     al.add_argument("--db", default="algowinbet.db")
     al.set_defaults(fn=cmd_apif_link)
+    xp = sub.add_parser("xi-preview", help="le nostre probabili formazioni delle prossime partite, con i controlli sugli id (nessuna richiesta)")
+    xp.add_argument("--days", type=int, default=4)
+    xp.add_argument("--max", type=int, default=40, help="partite al massimo")
+    xp.add_argument("--db", default="algowinbet.db")
+    xp.set_defaults(fn=cmd_xi_preview)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")
