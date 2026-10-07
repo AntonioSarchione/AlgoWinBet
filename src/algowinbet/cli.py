@@ -681,6 +681,52 @@ def cmd_fotmob_players(a) -> None:
         print(line)
 
 
+def cmd_fotmob_next(a) -> None:
+    """What a FotMob match page shows BEFORE kickoff (read only, nothing stored): for the next matches of each league, the
+    lineup block (type, players), and the unavailable players with their type and expected return. A few public pages."""
+    from .fotmobcollector import FotMobClient, FotMobError, _utc
+    client = FotMobClient(min_interval=2.0)
+    now = datetime.now(timezone.utc)
+    for lid in a.leagues:
+        try:
+            pp = client.page(f"/leagues/{lid}/fixtures/x")
+        except FotMobError as e:
+            print(f"lega {lid}: {e}")
+            continue
+        name = (pp.get("details") or {}).get("name")
+        coming = []
+        for m in (pp.get("fixtures") or {}).get("allMatches") or []:
+            st = m.get("status") or {}
+            ko = _utc({"status": {"utcTime": st.get("utcTime")}})
+            if ko and ko > now and not st.get("finished") and not st.get("cancelled"):
+                coming.append((ko, m))
+        coming.sort(key=lambda x: x[0])
+        print(f"== lega {lid} {name}: {len(coming)} partite da giocare")
+        for ko, m in coming[:a.n]:
+            try:
+                mp = client.page(f"/match/{m.get('id')}")
+            except FotMobError as e:
+                print(f"  partita {m.get('id')}: {e}")
+                continue
+            lineup = (mp.get("content") or {}).get("lineup") or {}
+            print(f"  {ko:%d/%m %H:%M} UTC (tra {(ko - now).total_seconds() / 3600:.0f} ore) "
+                  f"{(m.get('home') or {}).get('name')}-{(m.get('away') or {}).get('name')} · chiavi lineup {sorted(lineup)}")
+            print(f"    lineupType={lineup.get('lineupType')!r} source={lineup.get('source')!r}")
+            for key in ("homeTeam", "awayTeam"):
+                t = lineup.get(key) or {}
+                un = t.get("unavailable") or []
+                kinds = {}
+                for u in un:
+                    k = (u.get("unavailability") or {}).get("type")
+                    kinds[k] = kinds.get(k, 0) + 1
+                print(f"    {t.get('name')}: titolari {len(t.get('starters') or [])}, panchina {len(t.get('subs') or [])}, "
+                      f"assenti {len(un)} {kinds}" + (f" · chiavi assente {sorted(un[0])} · {sorted((un[0].get('unavailability') or {}))}"
+                                                      if un else ""))
+                for u in un[:a.show]:
+                    v = u.get("unavailability") or {}
+                    print(f"      {u.get('name')}: {v.get('type')} · {v.get('expectedReturn')}")
+
+
 def cmd_trends_show(a) -> None:
     """Streaks and scorer table of the latest published run (no API request): what the match page shows."""
     import json as _json
@@ -2171,6 +2217,11 @@ def build_parser() -> argparse.ArgumentParser:
     fp = sub.add_parser("fotmob-players", help="collega i giocatori FotMob agli id GOAL e misura quante assenze copre (nessuna richiesta)")
     fp.add_argument("--db", default="algowinbet.db")
     fp.set_defaults(fn=cmd_fotmob_players)
+    fn_ = sub.add_parser("fotmob-next", help="cosa mostra FotMob prima della partita: formazione e assenti (poche pagine, nulla salvato)")
+    fn_.add_argument("leagues", nargs="*", type=int, default=[55])
+    fn_.add_argument("--n", type=int, default=2, help="partite per lega")
+    fn_.add_argument("--show", type=int, default=3, help="assenti mostrati per squadra")
+    fn_.set_defaults(fn=cmd_fotmob_next)
     ts = sub.add_parser("trends-show", help="ritardi e marcatori dell'ultima analisi pubblicata (nessuna richiesta API)")
     ts.add_argument("--comp", default="")
     ts.add_argument("--n", type=int, default=4)
