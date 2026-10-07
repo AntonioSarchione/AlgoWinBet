@@ -729,6 +729,13 @@ def cmd_xi_player(a) -> None:
             others = [p for p in s.starters + s.bench if p in same and p != pid]
             print(f"  {s.kickoff:%d/%m/%Y} {s.competition:<18} {mark:<9}" + (f" altro id: {others}" if others else "")
                   + f"  ({len(s.starters)} titolari, {len(s.bench)} panchina)")
+        last = data.sheets[team][-1].kickoff
+        for fid, comp, home, away, ko in store.db.execute(
+                "SELECT fixture_id, competition, home, away, kickoff FROM results WHERE (home = ? OR away = ?) AND kickoff > ? ORDER BY kickoff",
+                (team, team, last.isoformat())).fetchall():
+            xi = store.db.execute("SELECT source, status, COUNT(*) FROM lineups WHERE fixture_id = ? AND team = ? GROUP BY source, status",
+                                  (fid, team)).fetchall()
+            print(f"  dopo l'ultima formazione: {ko[:10]} {comp} {home}-{away} ({fid}) formazioni: {xi or 'nessuna'}")
         nxt = next((f for f in prov.list_fixtures(None, now, now + timedelta(days=10)) if team in (f.home, f.away)), None)
         if nxt is None:
             print("  nessuna prossima partita")
