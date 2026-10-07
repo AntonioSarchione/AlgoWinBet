@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 from algowinbet.autorun import AutoConfig, League, plan_tick
+from algowinbet.collector import CollectStats
 from algowinbet.domain import MatchResult
 from algowinbet.fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
 from algowinbet.snapshots import SnapshotStore
@@ -257,14 +258,23 @@ class BrokenPage(FakeFotMob):
 
 def test_a_broken_match_page_never_stalls_the_others():
     s, api = _store(), BrokenPage({"/match/500"})
-    for k in range(3):  # three ticks in a row: the page fails first each time, and ends the tick
-        st = _collector(s, api, NOW + timedelta(minutes=30 * k)).run(history_seconds=240)
-        assert ("/match/400", {}) not in api.calls and any("non risponde" in m for m in st.skipped)
-    _collector(s, api, NOW + timedelta(hours=2)).run(history_seconds=240)
-    assert ("/match/400", {}) in api.calls  # the broken page waits a day: the history goes on
+    st = _collector(s, api).run(history_seconds=240)
+    assert ("/match/400", {}) in api.calls  # the broken page is skipped: the pages after it are read in the same tick
+    assert not any("non risponde" in m for m in st.skipped) and len(st.errors) == 1
+    for k in range(1, 4):  # tried again by the next ticks; after PAGE_FAILS failures it waits a day
+        _collector(s, api, NOW + timedelta(minutes=30 * k)).run(history_seconds=0)
     assert sum(c[0] == "/match/500" for c in api.calls) == 3
     st = _collector(s, api, NOW + timedelta(days=4)).run(history_seconds=0)  # tried again after the day; failing for 3 days: given up
     assert any("abbandonata" in m for m in st.skipped) and s.job_done("fotmob-none:g1")
+
+
+def test_pages_failing_in_a_row_end_the_tick():
+    s, api = _store(), BrokenPage({"/match/500", "/match/400"})
+    col = _collector(s, api)
+    st = CollectStats("fotmob")
+    col.sync_matches(st, [("g1", "500"), ("g0", "400"), ("x1", "500"), ("x2", "300")], None, None)
+    assert [c[0] for c in api.calls] == ["/match/500", "/match/400", "/match/500"]  # the third error in a row: the site, not a page
+    assert any("non risponde" in m for m in st.skipped)
 
 
 def test_a_page_that_comes_back_clears_its_count():
@@ -285,11 +295,11 @@ def test_a_broken_season_page_waits_a_day_and_lets_the_other_leagues_go_on():
     def col(t):
         client.now = lambda: t
         return FotMobCollector(client, s, [FotMobLeague(57, "Eredivisie"), FotMobLeague(55, "Serie A")], now=lambda: t)
-    for k in range(3):
+    col(NOW).run(history_seconds=0)
+    assert ("/leagues/55/fixtures/x", {}) in api.calls  # the broken Eredivisie page does not stall Serie A
+    for k in range(1, 4):
         col(NOW + timedelta(minutes=30 * k)).run(history_seconds=0)
-    assert ("/leagues/55/fixtures/x", {}) not in api.calls  # stalled behind the broken Eredivisie page
-    col(NOW + timedelta(hours=2)).run(history_seconds=0)
-    assert ("/leagues/55/fixtures/x", {}) in api.calls and sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls) == 3
+    assert sum(c[0] == "/leagues/57/fixtures/x" for c in api.calls) == 3  # then it waits a day
 
 
 def test_backfill_reads_the_history_at_its_own_pace_and_takes_the_day_slot():

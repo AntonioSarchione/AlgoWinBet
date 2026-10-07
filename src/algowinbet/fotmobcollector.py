@@ -17,8 +17,9 @@ Per tick:
               RECENT_PER_TICK a tick), then the history newest first within the morning's history_seconds.
 Every page is stored in the snapshot store as the compact JSON the collector reads (not the 1 MB HTML).
 
-FotMob is optional, so it never fails a tick: a network error or an unexpected page ends FotMob's part of the tick (no further
-request to a site that is not answering), a refusal (401, 403, 429, a page without the data) pauses it for PAUSE_AFTER_BLOCK,
+FotMob is optional, so it never fails a tick: a network error, or PAGE_STREAK pages in a row answering an error (5xx), ends
+FotMob's part of the tick (no further request to a site that is not answering); a single broken page is skipped and tried again
+later (PAGE_FAILS, PAGE_SKIP, PAGE_GIVE_UP); a refusal (401, 403, 429, a page without the data) pauses it for PAUSE_AFTER_BLOCK,
 and any other error becomes a line of the tick's log. Only a dropped connection to Turso goes up, to the tick's own recovery.
 """
 from __future__ import annotations
@@ -50,6 +51,7 @@ TIMEOUT_S = 20.0
 PAGE_FAILS = 3  # a page failing this many ticks in a row (a broken page, not the site) ...
 PAGE_SKIP = timedelta(hours=24)  # ... waits this long before the next try, so it never stalls the pages after it
 PAGE_GIVE_UP = timedelta(days=3)  # a match page still failing this long after its first failure is given up, like a 404
+PAGE_STREAK = 3  # pages failing in a row (5xx...): then the site is the problem, not a page, and the tick stops
 LINK_WINDOW = timedelta(hours=36)  # dates differ by time zone between sources
 FINISHED_AFTER = timedelta(hours=2, minutes=30)  # from kickoff
 HISTORY_MIN_S = 60  # less than this is not worth the day's history slot
@@ -102,7 +104,8 @@ class FotMobError(RuntimeError):
 
     @property
     def halts(self) -> bool:
-        """Every error but a missing page (404) ends FotMob's part of the tick."""
+        """Every error but a missing page (404) can end FotMob's part of the tick: a page's own error (5xx) only the
+        PAGE_STREAK-th in a row (see FotMobCollector._fail)."""
         return self.status != 404
 
 
@@ -167,18 +170,23 @@ class FotMobCollector:
         self.provider = SnapshotProvider(store)
         self._history = None
         self._halted = False
+        self._streak = 0  # page errors in a row
         self._fails: dict[str, tuple[int, datetime]] = {}
         self._fail_at: dict[str, datetime] = {}
         store.db.executescript(SCHEMA)
 
     def _fail(self, st: CollectStats, what: str, e: FotMobError, page: str | None = None) -> None:
         st.errors.append(f"{what}: {e}")
-        if page and e.status not in (0, 404) and not e.blocked:  # an error of this page (5xx...), not of the network or a refusal
+        page_error = bool(page) and e.status not in (0, 404) and not e.blocked  # an error of this page (5xx...), not of the network or a refusal
+        if page_error:
             n, first = self._fails.get(page, (0, self.now()))
             self._fails[page] = (n + 1, first)
             self.store.mark_job(f"fotmob-fail:{page}", self.now(), f"{n + 1} {first.isoformat()}")
+            self._streak += 1
         if not e.halts or self._halted:
             return
+        if page_error and self._streak < PAGE_STREAK:
+            return  # one broken page: the pages after it are read (it is tried again on a later tick)
         self._halted = True
         if e.blocked:
             until = self.now() + PAUSE_AFTER_BLOCK
@@ -203,6 +211,7 @@ class FotMobCollector:
         return n >= PAGE_FAILS and self.now() - self._fail_at.get(page, self.now()) < PAGE_SKIP
 
     def _ok(self, page: str) -> None:
+        self._streak = 0
         if page in self._fails:
             del self._fails[page]
             self.store.db.execute("DELETE FROM jobs WHERE name=?", (f"fotmob-fail:{page}",))
@@ -481,7 +490,7 @@ class FotMobCollector:
         ends the run like a network error, and the workflow launches the next one."""
         from .autorun import transient_db_error
         st = CollectStats("fotmob-backfill")
-        self._history, self._halted = None, False
+        self._history, self._halted, self._streak = None, False, 0
         left = -1
         try:
             if self.paused_until():
@@ -510,7 +519,7 @@ class FotMobCollector:
         """One tick of FotMob. Never raises, but for a dropped connection to Turso (see the module docstring)."""
         from .autorun import transient_db_error
         st = CollectStats("fotmob")
-        self._history, self._halted = None, False
+        self._history, self._halted, self._streak = None, False, 0
         try:
             if self.paused_until():
                 return st  # the tick that paused it wrote the reason in its log

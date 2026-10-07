@@ -581,6 +581,59 @@ def cmd_fotmob_backfill(a) -> None:
             f.write(f"left={left}\nsaved={saved}\npaused={paused}\n")
 
 
+def cmd_fotmob_check(a) -> None:
+    """How full the FotMob player stats are (no request): per competition and season, the matches read, and each team's
+    sum of fouls, yellow and red cards and shots set against the team totals of the same match from match_stats
+    (football-data and GOAL). Prints counts and shares only (the log of a public repository)."""
+    store = SnapshotStore(a.db)
+    teams = store.db.execute(
+        "SELECT r.fixture_id, r.competition, r.kickoff, f.team = r.home, COUNT(*), SUM(f.fouls_committed), SUM(f.fouls_drawn), "
+        "SUM(f.yellow), SUM(f.red), SUM(f.shots), SUM(f.shots_on) FROM fotmob_player_stats f JOIN results r ON r.fixture_id = f.fixture_id "
+        "GROUP BY f.fixture_id, f.team").fetchall()
+    ref: dict[tuple[str, str], tuple[float, float]] = {}
+    for fid, stat, h, aw in store.db.execute(
+            "SELECT fixture_id, stat, home, away FROM match_stats WHERE period = 'FT' AND stat IN "
+            "('fouls', 'yellow_cards', 'red_cards', 'shots', 'shots_total', 'shots_on_target') AND home IS NOT NULL AND away IS NOT NULL").fetchall():
+        ref.setdefault((fid, "shots" if stat == "shots_total" else stat), (h, aw))
+    cols = {"fouls": 5, "yellow_cards": 7, "red_cards": 8, "shots": 9, "shots_on_target": 10}
+    out: dict[tuple[str, str], dict] = {}
+    by_match: dict[str, dict[bool, tuple]] = {}
+    for row in teams:
+        by_match.setdefault(row[0], {})[bool(row[3])] = row
+    for fid, sides in by_match.items():
+        any_row = next(iter(sides.values()))
+        ko = datetime.fromisoformat(any_row[2])
+        y = ko.year if ko.month >= 7 else ko.year - 1
+        o = out.setdefault((any_row[1], f"{y}/{(y + 1) % 100:02d}"), {"matches": 0, "both": 0, "players": 0, "empty_fouls": 0,
+                                                                         "drawn_ok": 0, **{c: [0, 0, 0.0] for c in cols}})
+        o["matches"] += 1
+        o["players"] += sum(r[4] for r in sides.values())
+        if len(sides) < 2:
+            continue
+        o["both"] += 1
+        home, away = sides[True], sides[False]
+        if (home[5] or 0) + (away[5] or 0) == 0:
+            o["empty_fouls"] += 1
+        if home[6] == away[5] and away[6] == home[5]:
+            o["drawn_ok"] += 1  # fouls drawn by one side = fouls committed by the other
+        for stat, k in cols.items():
+            r = ref.get((fid, stat))
+            if r is None:
+                continue
+            c = o[stat]
+            c[0] += 1
+            c[1] += int(home[k] == r[0] and away[k] == r[1])
+            c[2] += abs(home[k] - r[0]) + abs(away[k] - r[1])
+    print("competizione | stagione | partite (2 squadre) | giocatori/partita | falli tutti 0 | subiti=commessi avversari")
+    print("   per ogni dato: partite confrontate, uguali al totale di squadra, scarto medio per partita")
+    for (comp, season), o in sorted(out.items()):
+        b = max(o["both"], 1)
+        print(f"{comp} | {season} | {o['matches']} ({o['both']}) | {o['players'] / max(o['matches'], 1):.1f} | "
+              f"{o['empty_fouls']} | {100 * o['drawn_ok'] / b:.0f}%")
+        print("   " + " · ".join(f"{stat} {c[0]}: {100 * c[1] / c[0]:.0f}% uguali, scarto {c[2] / c[0]:.2f}" if c[0] else f"{stat} -"
+                                 for stat, c in ((s_, o[s_]) for s_ in cols)))
+
+
 def cmd_trends_show(a) -> None:
     """Streaks and scorer table of the latest published run (no API request): what the match page shows."""
     import json as _json
@@ -2059,6 +2112,9 @@ def build_parser() -> argparse.ArgumentParser:
     fb.add_argument("--aliases", default="configs/team_aliases.json")
     fb.add_argument("--db", default="algowinbet.db")
     fb.set_defaults(fn=cmd_fotmob_backfill)
+    fc = sub.add_parser("fotmob-check", help="quanto sono pieni falli, cartellini e tiri dei giocatori FotMob (nessuna richiesta)")
+    fc.add_argument("--db", default="algowinbet.db")
+    fc.set_defaults(fn=cmd_fotmob_check)
     ts = sub.add_parser("trends-show", help="ritardi e marcatori dell'ultima analisi pubblicata (nessuna richiesta API)")
     ts.add_argument("--comp", default="")
     ts.add_argument("--n", type=int, default=4)
