@@ -686,15 +686,10 @@ def cmd_fotmob_check(a) -> None:
                                  for stat, c in ((s_, o[s_]) for s_ in cols)))
 
 
-def cmd_results_holes(a) -> None:
-    """Finished matches on the stored FotMob season pages with no result of ours (no request): grouped by competition and
-    day, each with what GOAL told us about it (a fixture row and its last status, or nothing at all)."""
-    from .autorun import AutoConfig
-    from .fotmobcollector import LINK_WINDOW, FotMobClient, FotMobCollector, FotMobLeague, _utc
-    cfg = AutoConfig.load(a.config)
-    store = SnapshotStore(a.db)
-    names = TeamNames.load(a.aliases)
-    col = FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names)
+def _result_holes(store: SnapshotStore, col, names: TeamNames) -> dict[str, list[tuple]]:
+    """competition -> finished matches on the stored FotMob season pages with no result of ours, since our first result of
+    that competition: (kickoff, home, away, what GOAL told us about it). No request."""
+    from .fotmobcollector import LINK_WINDOW, _utc
     linked = {r[0] for r in store.db.execute("SELECT ext_id FROM fixture_links WHERE source = 'fotmob'").fetchall()}
     fx: dict[str, list[tuple]] = {}
     for fid, comp, home, away, ko, status in store.db.execute(
@@ -702,13 +697,14 @@ def cmd_results_holes(a) -> None:
             "(SELECT fixture_id, MAX(observed_at) AS t FROM fixtures GROUP BY fixture_id) n ON n.fixture_id = f.fixture_id AND n.t = f.observed_at").fetchall():
         fx.setdefault(comp, []).append((fid, home, away, datetime.fromisoformat(ko), status))
     now = datetime.now(timezone.utc)
+    out: dict[str, list[tuple]] = {}
     for lg in col.leagues:
         results = col._results(lg)
         if not results:
             continue
         first = min(r.kickoff for r in results)
-        holes: dict[str, list[str]] = {}
-        for season, (_, page) in sorted(col._stored_pages(lg).items()):
+        holes = out.setdefault(lg.competition, [])
+        for _, (_, page) in sorted(col._stored_pages(lg).items()):
             for m in page.get("matches") or []:
                 ko = _utc(m)
                 if m["id"] in linked or not m["status"]["finished"] or ko is None or ko < first or now - ko < timedelta(hours=6):
@@ -718,11 +714,97 @@ def cmd_results_holes(a) -> None:
                 seen = f"GOAL {goal[0][4]} {goal[0][3]:%d/%m %H:%M}" if goal else "GOAL: nessuna partita"
                 if goal and store.db.execute("SELECT 1 FROM results WHERE fixture_id = ?", (goal[0][0],)).fetchone():
                     seen += ", risultato presente (nomi diversi?)"
-                holes.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
-        n = sum(len(v) for v in holes.values())
-        print(f"{lg.competition}: {n} partite senza nostro risultato (dal {first:%d/%m/%Y})")
-        for day, ms in sorted(holes.items()):
+                holes.append((ko, home, away, seen))
+    return out
+
+
+def _fotmob_for(cfg, store: SnapshotStore, names: TeamNames):
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
+    return FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names)
+
+
+def cmd_results_holes(a) -> None:
+    """Finished matches on the stored FotMob season pages with no result of ours (no request): grouped by competition and
+    day, each with what GOAL told us about it (a fixture row and its last status, or nothing at all)."""
+    from .autorun import AutoConfig
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    names = TeamNames.load(a.aliases)
+    col = _fotmob_for(cfg, store, names)
+    holes = _result_holes(store, col, names)
+    for lg in col.leagues:
+        if lg.competition not in holes:
+            continue
+        by_day: dict[str, list[str]] = {}
+        for ko, home, away, seen in holes[lg.competition]:
+            by_day.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
+        first = min(r.kickoff for r in col._results(lg))
+        print(f"{lg.competition}: {len(holes[lg.competition])} partite senza nostro risultato (dal {first:%d/%m/%Y})")
+        for day, ms in sorted(by_day.items()):
             print(f"  {day}: {len(ms)} · " + " | ".join(ms[:a.show]) + (" ..." if len(ms) > a.show else ""))
+
+
+def refill_windows(days: list, gap: int = 3) -> list[tuple]:
+    """Days with missing results -> (first, last) day spans: days at most `gap` apart share one span."""
+    out: list[list] = []
+    for d in sorted(set(days)):
+        if out and (d - out[-1][1]).days <= gap:
+            out[-1][1] = d
+        else:
+            out.append([d, d])
+    return [tuple(x) for x in out]
+
+
+def cmd_results_refill(a) -> None:
+    """The results our history lacks (finished FotMob matches without a result of ours, see results-holes), asked again to
+    GOAL for a few days around each hole (one request per span, a page per 100 matches), then linked to the stored FotMob
+    pages (no request). The FotMob player pages of those matches follow in the next FotMob run."""
+    from .autorun import AutoConfig
+    from .collector import CollectStats
+    from .providers.goalapi import SOURCE as GOAL_SOURCE
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    names = TeamNames.load(a.aliases)
+    col = _fotmob_for(cfg, store, names)
+    holes = _result_holes(store, col, names)
+    goal_of = {l.name: l.goal for l in cfg.leagues if l.goal}
+    spans = [(comp, goal_of[comp], d0, d1) for comp, hs in sorted(holes.items()) if hs and comp in goal_of
+             for d0, d1 in refill_windows([h[0].date() for h in hs])]
+    print(f"partite senza risultato: {sum(len(h) for h in holes.values())} · finestre da chiedere a GOAL: {len(spans)}")
+    for comp, _, d0, d1 in spans:
+        print(f"  {comp}: {d0:%d/%m/%Y} - {d1:%d/%m/%Y}")
+    if a.dry_run or not spans:
+        return
+    client = GoalApiClient(store=store, budget=BudgetGuard(store, "goal-api", daily=cfg.goal_daily_limit, reserve=cfg.goal_reserve))
+    coll = GoalCollector(client, store, [], names)
+    now = datetime.now(timezone.utc)
+    for comp, lid, d0, d1 in spans:
+        try:
+            rows = list(client.pages(f"/leagues/{lid}/results", {"from": f"{d0 - timedelta(days=1):%Y-%m-%d}",
+                                                                   "to": f"{d1 + timedelta(days=2):%Y-%m-%d}"}, max_pages=5))
+        except (GoalApiError, BudgetExceeded) as e:
+            print(f"  {comp} {d0:%d/%m/%Y}: {e}")
+            if isinstance(e, BudgetExceeded):
+                break
+            continue
+        res = [r for r in (coll.mapper.result(x) for x in rows) if r]
+        n = store.save_results(GOAL_SOURCE, res, now)
+        store.save_fixtures(GOAL_SOURCE, [f for f in (coll.mapper.fixture(x) for x in rows) if f], now)
+        print(f"  {comp} {d0:%d/%m/%Y}-{d1:%d/%m/%Y}: {len(rows)} partite da GOAL, {len(res)} risultati, {n} nuovi")
+    if coll.mapper.report.gaps:
+        print(f"  scartate da GOAL: {coll.mapper.report.gaps}")
+    col._history = None  # the results just saved
+    st = CollectStats("collegamenti FotMob")
+    for lg in col.leagues:
+        results = col._results(lg)
+        for _, payload in col._stored_pages(lg).values():
+            col._link(st, lg, payload.get("matches") or [], results, report=False)
+    print(f"partite collegate a FotMob: {st.saved.get('partite collegate', 0)}")
+    left = _result_holes(store, col, names)
+    print(f"partite ancora senza risultato: {sum(len(h) for h in left.values())}")
+    for comp, hs in sorted(left.items()):
+        for ko, home, away, seen in hs[:a.show]:
+            print(f"  {comp} {ko:%d/%m/%Y} {home}-{away} ({seen})")
 
 
 def cmd_fotmob_players(a) -> None:
@@ -2283,6 +2365,13 @@ def build_parser() -> argparse.ArgumentParser:
     fc = sub.add_parser("fotmob-check", help="quanto sono pieni falli, cartellini e tiri dei giocatori FotMob (nessuna richiesta)")
     fc.add_argument("--db", default="algowinbet.db")
     fc.set_defaults(fn=cmd_fotmob_check)
+    rr = sub.add_parser("results-refill", help="richiede a GOAL i risultati che mancano (partite finite su FotMob senza nostro risultato)")
+    rr.add_argument("--dry-run", action="store_true", help="solo le finestre da chiedere, nessuna richiesta")
+    rr.add_argument("--show", type=int, default=20, help="partite ancora mancanti mostrate per competizione")
+    rr.add_argument("--config", default="configs/collect.json")
+    rr.add_argument("--aliases", default="configs/team_aliases.json")
+    rr.add_argument("--db", default="algowinbet.db")
+    rr.set_defaults(fn=cmd_results_refill)
     rh = sub.add_parser("results-holes", help="partite finite sulle pagine FotMob senza nostro risultato, e cosa sa GOAL (nessuna richiesta)")
     rh.add_argument("--show", type=int, default=3, help="partite mostrate per giorno")
     rh.add_argument("--config", default="configs/collect.json")
