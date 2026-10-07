@@ -671,6 +671,32 @@ def cmd_xi_names(a) -> None:
     print(f"giocatori salvati: {st.saved.get('players', 0)}")
 
 
+def cmd_goal_usage(a) -> None:
+    """Where the GOAL requests of the last days went (no request): per UTC day our counter (api_usage, raised to GOAL's own
+    when its headers say more) next to the requests really logged, then the logged ones by hour and kind of endpoint
+    (manual = without a "from" date, probes and one-off commands)."""
+    import re
+    store = SnapshotStore(a.db)
+    now = datetime.now(timezone.utc)
+    for k in range(a.days - 1, -1, -1):
+        day = (now - timedelta(days=k)).date()
+        used = store.usage("goal-api", f"D{day:%Y-%m-%d}")
+        rows = store.db.execute("SELECT endpoint, params, fetched_at, status FROM raw_requests WHERE source = 'goal-api' AND fetched_at >= ? "
+                                "AND fetched_at < ?", (f"{day}T00:00:00", f"{day + timedelta(days=1)}T00:00:00")).fetchall()
+        print(f"== {day}: contatore {used}, richieste registrate {len(rows)}")
+        by: dict[tuple[str, str], int] = {}
+        for ep, params, at, status in rows:
+            kind = re.sub(r"/(fixtures|teams|players|leagues)/[^/]+", r"/\1/*", ep or "")
+            kind += "" if '"from"' in (params or "") or "/fixtures/*" in kind else " (manuale)"
+            kind += "" if status == 200 else f" [{status}]"
+            by[(at[11:13], kind)] = by.get((at[11:13], kind), 0) + 1
+        hours: dict[str, list[str]] = {}
+        for (h, kind), n in sorted(by.items()):
+            hours.setdefault(h, []).append(f"{kind} {n}")
+        for h, parts in hours.items():
+            print(f"  {h}h: {sum(int(p.rsplit(' ', 1)[1]) for p in parts)} · " + ", ".join(parts))
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2465,6 +2491,10 @@ def build_parser() -> argparse.ArgumentParser:
     xn.add_argument("--aliases", default="configs/team_aliases.json")
     xn.add_argument("--db", default="algowinbet.db")
     xn.set_defaults(fn=cmd_xi_names)
+    gu = sub.add_parser("goal-usage", help="dove sono andate le richieste GOAL degli ultimi giorni (nessuna richiesta)")
+    gu.add_argument("--days", type=int, default=3)
+    gu.add_argument("--db", default="algowinbet.db")
+    gu.set_defaults(fn=cmd_goal_usage)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")
