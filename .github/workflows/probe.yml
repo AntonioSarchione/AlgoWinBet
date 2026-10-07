@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming, rawgrep, trends, fotmobcheck, resultholes, fotmobplayers, fotmobnext, resultsrefill, apiflink, xipreview, xinames, goalusage, xiplayer]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming, rawgrep, trends, fotmobcheck, resultholes, fotmobplayers, fotmobnext, resultsrefill, apiflink, xipreview, xinames, goalusage, xiplayer, fotmobkeys]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -80,6 +80,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xinames" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-names --max "${ARG:-40}" "${dr[@]}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "goalusage" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet goal-usage --days "${ARG:-3}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xiplayer" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-player "$ARG" ${PARAMS:+--team "$PARAMS"} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobkeys" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-keys --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "slipreview" ]; then algowinbet slip-review --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then fm=(); if [ "$PARAMS" = "fotmob" ]; then fm=(--fotmob-absences); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-eval --since "${ARG:-2026-07-01}" "${fm[@]}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-eval --since "${ARG:-2025-07-01}" --db "$DB"; exit $?; fi

@@ -491,11 +491,36 @@ th.num .th-sort { justify-content: flex-end; }
 .pitch-lines * { vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
 .pitch-h { display: none; }
 .pitch-team { list-style: none; margin: 0; padding: 0; }
-.pitch-team li { position: absolute; left: calc(var(--x) * 1%); top: calc(var(--y) * 1%); transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 84px; }
+.pitch-team li { position: absolute; left: calc(var(--x) * 1%); top: calc(var(--y) * 1%); transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 96px; }
+.pitch-team li > button { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; padding: 2px; border-radius: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.pitch-team li > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pitch-team li > button .shirt { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.pitch-team li.is-sel { z-index: 3; }
+.pitch-team li.is-sel .shirt { transform: scale(1.18); box-shadow: 0 0 0 3px var(--card), 0 0 0 5px var(--accent), 0 0 18px 4px color-mix(in srgb, var(--accent) 55%, transparent); }
+.pitch-team li.is-sel .pname { background: var(--card); color: var(--text); font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.pitch-has-sel .pitch-team li:not(.is-sel) { opacity: 0.55; transition: opacity 0.15s ease; }
+@media (hover: hover) { .pitch-team li > button:hover .shirt { transform: scale(1.1); } }
+@media (prefers-reduced-motion: reduce) { .pitch-team li > button .shirt { transition: none; } }
+.pitch-board { position: relative; }
+.player-card { position: absolute; z-index: 20; width: min(260px, calc(100% - 8px)); padding: 10px 12px 10px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
+.player-card::before { content: ""; position: absolute; top: -6px; left: calc(var(--arrow) - 6px); width: 12px; height: 12px; background: var(--card); border-left: 1px solid var(--line); border-top: 1px solid var(--line); transform: rotate(45deg); }
+.player-card.is-above::before { top: auto; bottom: -6px; transform: rotate(225deg); }
+.player-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.player-card-head .pitch-dot { margin-top: 6px; }
+.player-card-head b { display: block; line-height: 1.25; }
+.player-card-x { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 32px; height: 32px; margin: -6px -6px 0 0; border-radius: 8px; color: var(--muted); cursor: pointer; }
+.player-card-x:hover, .player-card-x:focus-visible { background: var(--card-2); color: var(--text); }
+.player-card-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 10px 0 8px; }
+.player-card-stats > div { padding: 6px 8px; border-radius: 8px; background: var(--card-2); }
+.player-card-stats dt { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.player-card-stats dd { margin: 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.player-card .note { margin: 0; font-size: 11.5px; line-height: 1.4; }
+.player-card > p.muted { margin: 8px 0 0; font-size: 12.5px; line-height: 1.4; }
+@media (max-width: 480px) { .player-card { padding: 8px 10px; } .player-card-stats { margin: 8px 0 6px; } .player-card-stats dd { font-size: 15px; } }
 .shirt { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
 .pitch-home .shirt { background: var(--s1); }
 .pitch-away .shirt { background: var(--s2); }
-.pname { max-width: 100%; padding: 1px 6px; border-radius: 6px; background: var(--card); color: var(--text); font-size: 12px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pname { max-width: 100%; padding: 1px 6px; border-radius: 6px; background: var(--card); color: var(--text); font-size: 12px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bench { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
 .bench-team { display: flex; align-items: center; gap: 8px; }
 .bench .note { margin: 0; }
@@ -521,9 +546,16 @@ th.num .th-sort { justify-content: flex-end; }
   .pitch-heads > :nth-child(2) { display: flex; flex-direction: row-reverse; } /* away team on the right, like its half */
   .pitch-foot { display: none; }
 }
+.shirt-p { display: none; }
 @media (max-width: 480px) {
-  .pitch-team li { width: 64px; }
-  .pname { font-size: 11px; padding: 1px 4px; }
+  /* phones: a taller pitch and a compact player (our probable lineup: the start probability inside the shirt, no line under the name) */
+  .pitch { aspect-ratio: 68 / 136; }
+  .pitch-team li { width: 82px; }
+  .pitch-team li > button { gap: 2px; padding: 1px; }
+  .pname { font-size: 10px; padding: 1px 2px; line-height: 1.2; }
+  .pprob { display: none; }
+  .pitch-probable .shirt-role { display: none; }
+  .pitch-probable .shirt-p { display: inline; font-size: 10px; letter-spacing: -0.02em; }
   .shirt { width: 24px; height: 24px; font-size: 11px; }
 }
 /* manual slip: ticks in the schedule, sticky bar at the bottom of the page */

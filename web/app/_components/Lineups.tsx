@@ -1,10 +1,11 @@
 import { Shirt } from "lucide-react";
 import { parseJSON } from "@/lib/db";
 import type { Absence } from "@/lib/db";
-import { layout, shortName, type Detail } from "@/lib/pitch";
+import { layout, type Detail } from "@/lib/pitch";
 import { dayTime, pct } from "./format";
 import { Empty, TeamBadge } from "./ui";
 import { ABSENCE_LABEL, Absences } from "./Absences";
+import { PitchBoard, type PitchSide, type PlayerCard } from "./PitchBoard";
 
 const ROLE: Record<string, string> = { GK: "P", DEF: "D", MID: "C", FWD: "A" };
 
@@ -27,9 +28,9 @@ type Side = {
   alt: ProbRow[];
 };
 
-export function Lineups({ lineups, players, home, away, absences = [], probable = {}, analysedAt }: {
+export function Lineups({ lineups, players, home, away, absences = [], probable = {}, analysedAt, cards = {} }: {
   lineups: LineupData[]; players: Record<string, { name: string; position: string }>; home: string; away: string;
-  absences?: Absence[]; probable?: ProbableData; analysedAt?: string;
+  absences?: Absence[]; probable?: ProbableData; analysedAt?: string; cards?: Record<string, PlayerCard>;
 }) {
   const names: Record<string, string> = Object.fromEntries(Object.entries(players).map(([k, v]) => [k, v.name]));
   const roles: Record<string, string> = Object.fromEntries(Object.entries(players).map(([k, v]) => [k, v.position]));
@@ -90,7 +91,18 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
         {head(sides[1])}
       </div>
       {onPitch.length > 0 && (
-        <div className="pitch" role="group" aria-label={`Formazioni in campo: ${home} in alto, ${away} in basso`}>
+        <PitchBoard
+          label={`Formazioni in campo: ${home} in alto, ${away} in basso. Tocca un giocatore per le sue statistiche`}
+          cards={cards}
+          sides={onPitch.map(({ x, s }): PitchSide => ({
+            side: x.side, team: x.team, label: `${label(x)}, ${x.formation ?? "modulo n/d"}`, probable: x.kind === "ours",
+            players: s!.map((p) => ({
+              id: p.id, x: p.x, y: p.y, shirt: String(p.number ?? role(p.id)), name: name(p.id), role: role(p.id),
+              prob: x.probs[p.id] != null ? pct(x.probs[p.id], 0) : null,
+              flag: x.statuses[p.id] ? (ABSENCE_LABEL[x.statuses[p.id]] ?? x.statuses[p.id]).toLowerCase() : null,
+            })),
+          }))}
+        >
           <svg className="pitch-lines pitch-v" viewBox="0 0 68 105" preserveAspectRatio="none" aria-hidden="true">
             <rect x="1" y="1" width="66" height="103" /><line x1="1" y1="52.5" x2="67" y2="52.5" /><circle cx="34" cy="52.5" r="9.15" />
             <rect x="13.85" y="1" width="40.3" height="16.5" /><rect x="24.84" y="1" width="18.32" height="5.5" />
@@ -101,21 +113,7 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
             <rect x="1" y="13.85" width="16.5" height="40.3" /><rect x="1" y="24.84" width="5.5" height="18.32" />
             <rect x="87.5" y="13.85" width="16.5" height="40.3" /><rect x="98.5" y="24.84" width="5.5" height="18.32" />
           </svg>
-          {onPitch.map(({ x, s }) => (
-            <ul key={x.side} className={`pitch-team pitch-${x.side}${x.kind === "ours" ? " pitch-probable" : ""}`} aria-label={`${x.team}, ${label(x)}, ${x.formation ?? "modulo n/d"}`}>
-              {s!.map((p) => (
-                <li key={p.id} className={x.statuses[p.id] ? "pitch-flag" : undefined} style={{ "--x": p.x, "--y": p.y } as React.CSSProperties}>
-                  <span className="shirt" aria-hidden="true">{p.number ?? role(p.id)}</span>
-                  <span className="pname">
-                    {shortName(name(p.id))}
-                    {x.statuses[p.id] && <span className="sr-only">{flag(x, p.id)}</span>}
-                  </span>
-                  {x.probs[p.id] != null && <span className="pprob">{pct(x.probs[p.id], 0)}{x.statuses[p.id] ? ` · ${(ABSENCE_LABEL[x.statuses[p.id]] ?? x.statuses[p.id]).toLowerCase()}` : ""}</span>}
-                </li>
-              ))}
-            </ul>
-          ))}
-        </div>
+        </PitchBoard>
       )}
       <div className="pitch-foot">{head(sides[1])}</div>
       <div className="split" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
@@ -136,15 +134,15 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
               )}
               {x.kind === "ours" && x.starters.some((p) => x.statuses[p]) && (
                 <p className="note">
-                  Nella probabile ma segnalati: {x.starters.filter((p) => x.statuses[p]).map((p) => `${shortName(name(p))}${flag(x, p)}`).join(", ")}
+                  Nella probabile ma segnalati: {x.starters.filter((p) => x.statuses[p]).map((p) => `${name(p)}${flag(x, p)}`).join(", ")}
                 </p>
               )}
               {x.alt.length > 0 && (
-                <p className="note">Alternative: {x.alt.map((r) => `${shortName(r[1])} ${pct(r[3], 0)}${flag(x, r[0])}`).join(", ")}</p>
+                <p className="note">Alternative: {x.alt.map((r) => `${r[1]} ${pct(r[3], 0)}${flag(x, r[0])}`).join(", ")}</p>
               )}
               {x.bench.length > 0 && (
                 <p className="note">
-                  Panchina: {x.bench.map((p) => (x.detail[p]?.n ? `${x.detail[p]!.n} ${shortName(name(p))}` : shortName(name(p)))).join(", ")}
+                  Panchina: {x.bench.map((p) => (x.detail[p]?.n ? `${x.detail[p]!.n} ${name(p)}` : name(p))).join(", ")}
                 </p>
               )}
               {x.at && <p className="note">{x.kind === "ours" ? "Calcolata con l'analisi del" : "Rilevata"} {dayTime(x.at)}</p>}
@@ -154,8 +152,8 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
       </div>
       {anyOurs && (
         <p className="note">
-          Probabile del nostro modello: per ogni giocatore la probabilità di partire titolare, da presenze recenti, turnover, squalifiche,
-          infortuni e dubbi segnalati. Lascia il posto alla formazione ufficiale appena esce (circa un&apos;ora prima del calcio d&apos;inizio).
+          Probabile del nostro modello: per ogni giocatore la probabilità di partire titolare (sul telefono è il numero nel pallino), da
+          presenze recenti, turnover, squalifiche, infortuni e dubbi segnalati. Tocca un giocatore per le sue statistiche. Lascia il posto alla formazione ufficiale appena esce (circa un&apos;ora prima del calcio d&apos;inizio).
         </p>
       )}
       <Absences absences={absences} home={home} away={away} />

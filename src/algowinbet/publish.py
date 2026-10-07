@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS pub_slips(run_id INTEGER, rank INTEGER, total_odds RE
 -- manual slips: every playable selection of a match (any status, probability >= min_probability), one row per match; kept
 -- for the last two runs only
 CREATE TABLE IF NOT EXISTS pub_book(run_id INTEGER, fixture_id TEXT, sels TEXT, PRIMARY KEY(run_id, fixture_id));
+-- player cards of the lineups tab (playercard.py): what each player does in a match he starts; kept for the last two runs only
+CREATE TABLE IF NOT EXISTS pub_players(run_id INTEGER, fixture_id TEXT, cards TEXT, PRIMARY KEY(run_id, fixture_id));
 CREATE INDEX IF NOT EXISTS ix_pubfx ON pub_fixtures(run_id);
 CREATE INDEX IF NOT EXISTS ix_pubop ON pub_opportunities(run_id);
 """
@@ -178,6 +180,16 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
     except Exception as e:  # noqa: BLE001
         print(f"formazioni probabili: non calcolate ({type(e).__name__}: {e})", flush=True)
         pr = {}
+    # player cards of the lineups tab: same rule
+    try:
+        import time as _time
+        from .playercard import match_pools, player_cards
+        t0 = _time.monotonic()
+        pc = player_cards(store, match_pools(prov, res.fixtures, xi), t, prov.match_stat_values(("shots_on_target", "shots_on_goal")))
+        print(f"schede giocatori: {len(pc)} partite in {_time.monotonic() - t0:.0f}s", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"schede giocatori: non calcolate ({type(e).__name__}: {e})", flush=True)
+        pc = {}
     # goalscorer table (Fase 9): same rule
     try:
         import time as _time
@@ -223,6 +235,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                  for o in res.opportunities if o.status in SHOWN])
     book = [(run_id, fid, js) for fid, ops in {**est_fx, **by_fx}.items() if (js := book_rows(ops, cfg.thresholds.min_probability))]
     store._bulk("INSERT OR REPLACE INTO pub_book(run_id,fixture_id,sels)", book)
+    if pc:
+        store._bulk("INSERT OR REPLACE INTO pub_players(run_id,fixture_id,cards)", [(run_id, fid, js) for fid, js in pc.items()])
     store._bulk("INSERT INTO pub_slips(run_id,rank,total_odds,joint_probability,ev,ev_lower,stake,legs,explanation,horizon_h,max_legs)",
                 [(run_id, k + 1, round(s.total_odds, 3), round(s.joint_probability, 4), round(s.ev, 4), round(s.ev_lower, 4), round(s.stake, 2),
                   json.dumps([{"match": f"{o.home} - {o.away}", "competition": o.competition, "kickoff": o.kickoff.isoformat(),
@@ -249,8 +263,10 @@ def data_version(store: SnapshotStore) -> dict:
 
 
 def prune(store: SnapshotStore, keep_days: int = 14) -> None:
-    """Keep the last `keep_days` of published runs (and always the latest one); the manual-slip book only for the last two."""
+    """Keep the last `keep_days` of published runs (and always the latest one); the manual-slip book and the player cards
+    only for the last two."""
     store.db.execute("DELETE FROM pub_book WHERE run_id NOT IN (SELECT id FROM pub_runs ORDER BY id DESC LIMIT 2)")
+    store.db.execute("DELETE FROM pub_players WHERE run_id NOT IN (SELECT id FROM pub_runs ORDER BY id DESC LIMIT 2)")
     store.db.commit()
     limit = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
     old = [r[0] for r in store.db.execute("SELECT id FROM pub_runs WHERE created_at < ? AND id < (SELECT MAX(id) FROM pub_runs)",

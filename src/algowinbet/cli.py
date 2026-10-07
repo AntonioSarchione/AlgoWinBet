@@ -754,6 +754,32 @@ def cmd_xi_player(a) -> None:
                                                if data.roles.get(p) == data.roles.get(pid))[:400])
 
 
+def cmd_fotmob_keys(a) -> None:
+    """The stat keys FotMob gives goalkeepers on one finished match page (1 FotMob page): checks the keys the collector maps
+    (fotmobcollector.STAT_KEYS). Prints key names, titles and counts only."""
+    from .fotmobcollector import STAT_KEYS, FotMobClient
+    store = SnapshotStore(a.db)
+    row = store.db.execute("SELECT l.ext_id FROM fixture_links l JOIN results r ON r.fixture_id = l.fixture_id WHERE l.source = 'fotmob' "
+                           "AND r.competition = ? ORDER BY r.kickoff DESC LIMIT 1", (a.comp,)).fetchone()
+    if not row:
+        print("nessuna partita FotMob collegata")
+        return
+    pp = FotMobClient(store=store).page(f"/match/{row[0]}")
+    keys: dict[str, tuple[str, int]] = {}
+    for p in ((pp.get("content") or {}).get("playerStats") or {}).values():
+        gk = any(str(s.get("key")) == "saves" for g in p.get("stats") or [] for s in (g.get("stats") or {}).values())
+        if not (gk or p.get("positionId") == 11 or p.get("isGoalkeeper")):
+            continue
+        for g in p.get("stats") or []:
+            for title, s in (g.get("stats") or {}).items():
+                k = str(s.get("key"))
+                keys[k] = (title, keys.get(k, ("", 0))[1] + 1)
+    print(f"chiavi dei portieri ({len(keys)}):")
+    for k, (title, n) in sorted(keys.items()):
+        print(f"  {k} ({title}) x{n}" + (f" -> {STAT_KEYS[k]}" if k in STAT_KEYS else ""))
+    print("mappate e presenti: " + ", ".join(k for k in ("saves", "goals_conceded", "expected_goals_on_target_faced") if k in keys))
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2564,6 +2590,10 @@ def build_parser() -> argparse.ArgumentParser:
     xpl.add_argument("--team", default=None)
     xpl.add_argument("--db", default="algowinbet.db")
     xpl.set_defaults(fn=cmd_xi_player)
+    fk = sub.add_parser("fotmob-keys", help="le chiavi delle statistiche FotMob dei portieri su una partita (1 pagina FotMob)")
+    fk.add_argument("--comp", default="Serie A")
+    fk.add_argument("--db", default="algowinbet.db")
+    fk.set_defaults(fn=cmd_fotmob_keys)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")

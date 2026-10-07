@@ -92,7 +92,7 @@ export default async function Partita({ params, searchParams }: Props) {
             <Quotes id={id} home={fx.home} away={fx.away} q={sp} />
           ) : tab === "formazioni" ? (
             <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} absences={d.absences}
-              probable={parseJSON<ProbableData>(fx.probable, {})} analysedAt={d.run.created_at} />
+              probable={parseJSON<ProbableData>(fx.probable, {})} analysedAt={d.run.created_at} cards={d.cards} />
           ) : tab === "giocatori" ? (
             fx.scorers ? (
               <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={parseJSON<ScorersData>(fx.scorers, {})} />

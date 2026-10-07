@@ -73,9 +73,12 @@ STAT_KEYS = {"minutes_played": "minutes", "rating_title": "rating", "goals": "go
              "expected_goals_non_penalty": "npxg", "expected_goals_on_target_variant": "xgot", "expected_assists": "xa",
              "total_shots": "shots", "ShotsOnTarget": "shots_on", "chances_created": "key_passes", "touches_opp_box": "touches_box",
              "fouls": "fouls_committed", "was_fouled": "fouls_drawn", "matchstats.headers.tackles": "tackles",
-             "interceptions": "interceptions"}
+             "interceptions": "interceptions",
+             # goalkeepers (read from 2026-10-07: the history before has none, the player cards estimate them from team stats)
+             "saves": "saves", "goals_conceded": "goals_conceded", "expected_goals_on_target_faced": "xgot_faced"}
 INT_COLS = {"minutes", "goals", "assists", "shots", "shots_on", "key_passes", "touches_box", "fouls_committed", "fouls_drawn",
-            "tackles", "interceptions"}
+            "tackles", "interceptions", "saves", "goals_conceded"}
+GK_COLUMNS = {"saves": "INTEGER", "goals_conceded": "INTEGER", "xgot_faced": "REAL", "shots_on_faced": "INTEGER"}
 _NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 
 
@@ -90,6 +93,14 @@ def _season_year(season: str) -> int:
     """'2025/2026' -> 2025 (and '2026' -> 2026); 0 when unreadable."""
     m = re.match(r"\d{4}", season)
     return int(m.group(0)) if m else 0
+
+
+def add_gk_columns(store) -> None:
+    have = {r[1] for r in store.db.execute("PRAGMA table_info(fotmob_player_stats)").fetchall()}
+    for name, kind in GK_COLUMNS.items():
+        if name not in have:
+            store.db.execute(f"ALTER TABLE fotmob_player_stats ADD COLUMN {name} {kind}")
+    store.db.commit()
 
 
 def pid(fotmob_id) -> str:
@@ -175,6 +186,7 @@ class FotMobCollector:
         self._fails: dict[str, tuple[int, datetime]] = {}
         self._fail_at: dict[str, datetime] = {}
         store.db.executescript(SCHEMA)
+        add_gk_columns(store)
 
     def _fail(self, st: CollectStats, what: str, e: FotMobError, page: str | None = None) -> None:
         st.errors.append(f"{what}: {e}")
@@ -404,7 +416,7 @@ class FotMobCollector:
                 st.add("statistiche giocatori FotMob", self.store._bulk(
                     "INSERT OR REPLACE INTO fotmob_player_stats(fixture_id,team,player_id,name,position,starter,minutes,rating,goals,assists,"
                     "xg,npxg,xgot,xa,shots,shots_on,key_passes,touches_box,fouls_committed,fouls_drawn,yellow,red,tackles,interceptions,"
-                    "observed_at)", stats))
+                    "observed_at,saves,goals_conceded,xgot_faced,shots_on_faced)", stats))
                 if absences:
                     st.add("assenti FotMob", self.store._bulk(
                         "INSERT OR REPLACE INTO fotmob_absences(fixture_id,team,player_id,name,kind,expected_return,market_value,observed_at)",
@@ -456,7 +468,9 @@ class FotMobCollector:
             stats.append((fid, team, pid(fm_id), p.get("name"), p.get("positionId"), int(fm_id in starters), row["minutes"], row["rating"],
                           row["goals"] or 0, row["assists"] or 0, row["xg"], row["npxg"], row["xgot"], row["xa"], row["shots"] or 0,
                           row["shots_on"] or 0, row["key_passes"] or 0, row["touches_box"] or 0, row["fouls_committed"] or 0,
-                          row["fouls_drawn"] or 0, y, red, row["tackles"] or 0, row["interceptions"] or 0, at))
+                          row["fouls_drawn"] or 0, y, red, row["tackles"] or 0, row["interceptions"] or 0, at, row["saves"],
+                          row["goals_conceded"], row["xgot_faced"],
+                          None if row["saves"] is None or row["goals_conceded"] is None else row["saves"] + row["goals_conceded"]))
             kept_players[str(fm_id)] = {"name": p.get("name"), "teamId": p.get("teamId"), "positionId": p.get("positionId"), **row,
                                         "shots": [{k: s.get(k) for k in ("min", "expectedGoals", "expectedGoalsOnTarget", "eventType",
                                                                           "situation", "isOnTarget", "isOwnGoal", "x", "y")}

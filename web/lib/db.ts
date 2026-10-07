@@ -300,6 +300,11 @@ export type Absence = {
   observed_at: string; source: string; starts: number | null;
 };
 export const REGULAR_SHEETS = 3;
+// what a player does in a match he starts (src/algowinbet/playercard.py); goalkeepers carry gk = 1
+export type PlayerCardData = {
+  xg?: number | null; sot?: number; sh?: number; fc?: number; fd?: number; cg: number; n: number; min?: number;
+  gk?: 1; ts?: number | null; gc?: number | null; sv?: number | null; cs?: number | null;
+};
 
 export async function absencesFor(ids: string[]): Promise<Record<string, Absence[]>> {
   const out: Record<string, Absence[]> = {};
@@ -401,7 +406,10 @@ async function fixtureDetailUncached(id: string, run: Run, _lineupsAt: string) {
     for (const r of rows) players[r.id] = { name: r.name, position: r.position };
   }
   const absences = (await absencesFor([id]))[id] ?? [];
-  return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, absences, formHome, formAway, h2h };
+  // player cards of the lineups tab (kept for the last two runs only; absent on runs before them)
+  const cardRows = await all<{ cards: string }>("SELECT cards FROM pub_players WHERE run_id = ? AND fixture_id = ?", [run.id, id]).catch(() => []);
+  const cards = parseJSON<Record<string, PlayerCardData>>(cardRows[0]?.cards, {});
+  return { run, fx, opps, nQuotes: Number(nq[0]?.n ?? 0), lineups: [...latest.values()], players, absences, cards, formHome, formAway, h2h };
 }
 
 // Only Sisal is playable: the odds tab lists and draws Sisal prices (Pinnacle stays an internal reference of the model).
