@@ -581,6 +581,33 @@ def cmd_fotmob_backfill(a) -> None:
             f.write(f"left={left}\nsaved={saved}\npaused={paused}\n")
 
 
+def cmd_apif_link(a) -> None:
+    """Links API-Football's matches of one day to our calendar now (1 request, what the tick does the day before): per league,
+    the matches linked and the ones without a match of ours. The tick then skips that day's request (done less than 30h ago)."""
+    from .apifcollector import ApifLeague, ApiFootballCollector
+    from .autorun import AutoConfig
+    from .collector import CollectStats
+    from .providers.apifootball import ApiFootballClient
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    client = ApiFootballClient(store=store, budget=BudgetGuard(store, "api-football", daily=cfg.apif_daily_limit, reserve=cfg.apif_reserve))
+    col = ApiFootballCollector(client, store, [ApifLeague(l.apif, l.name, bool(l.fd)) for l in cfg.leagues if l.apif], TeamNames.load(a.aliases))
+    st = CollectStats("api-football")
+    for d in a.dates:
+        out = col.link_day(st, datetime.fromisoformat(d).date())
+        print(f"== {d}")
+        for comp, ms in sorted(out.items()):
+            miss = [m for m in ms if m.startswith("- ")]
+            print(f"  {comp}: {len(ms) - len(miss)} collegate, {len(miss)} senza partita nostra" + (f" ({', '.join(m[2:] for m in miss)})" if miss else ""))
+    ours = {l.name for l in cfg.leagues if l.apif}
+    for d in a.dates:
+        day = datetime.fromisoformat(d).replace(tzinfo=timezone.utc)
+        links = {fid for (fid,) in store.db.execute("SELECT fixture_id FROM fixture_links WHERE source = 'api-football'").fetchall()}
+        cal = [f for f in SnapshotProvider(store).list_fixtures(None, day, day + timedelta(days=1)) if f.competition in ours]
+        left = [f"{f.competition}: {f.home}-{f.away}" for f in cal if f.id not in links]
+        print(f"{d}: partite nostre {len(cal)}, senza collegamento API-Football {len(left)}" + (f" ({'; '.join(left)})" if left else ""))
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2356,6 +2383,12 @@ def build_parser() -> argparse.ArgumentParser:
     fb.add_argument("--aliases", default="configs/team_aliases.json")
     fb.add_argument("--db", default="algowinbet.db")
     fb.set_defaults(fn=cmd_fotmob_backfill)
+    al = sub.add_parser("apif-link", help="collega ora le partite API-Football di un giorno (1 richiesta per giorno)")
+    al.add_argument("dates", nargs="+", help="AAAA-MM-GG")
+    al.add_argument("--config", default="configs/collect.json")
+    al.add_argument("--aliases", default="configs/team_aliases.json")
+    al.add_argument("--db", default="algowinbet.db")
+    al.set_defaults(fn=cmd_apif_link)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")

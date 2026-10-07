@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming, rawgrep, trends, fotmobcheck, resultholes, fotmobplayers, fotmobnext, resultsrefill]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming, rawgrep, trends, fotmobcheck, resultholes, fotmobplayers, fotmobnext, resultsrefill, apiflink]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -75,6 +75,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobplayers" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-players --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobnext" ]; then read -ra lg <<< "${ARG:-55}"; algowinbet fotmob-next "${lg[@]}" ${PARAMS:+--n "$PARAMS"}; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultsrefill" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-refill "${dr[@]}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "apiflink" ]; then read -ra dd <<< "$ARG"; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet apif-link "${dd[@]}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "slipreview" ]; then algowinbet slip-review --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then fm=(); if [ "$PARAMS" = "fotmob" ]; then fm=(--fotmob-absences); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-eval --since "${ARG:-2026-07-01}" "${fm[@]}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-eval --since "${ARG:-2025-07-01}" --db "$DB"; exit $?; fi

@@ -132,39 +132,49 @@ class ApiFootballCollector:
     def sync_days(self, st: CollectStats) -> None:
         """Today and tomorrow once each: link fixtures, learn team ids."""
         t = self.now()
-        calendar = self.provider.list_fixtures(None, t - timedelta(days=1), t + timedelta(days=3))
         for d in (t.date(), (t + timedelta(days=1)).date()):
-            params = {"date": d.isoformat()}
-            last = self._last_fetch("/fixtures", params)
+            last = self._last_fetch("/fixtures", {"date": d.isoformat()})
             if last is not None and t - last < timedelta(hours=30):
                 continue
-            rows = self.client.get("/fixtures", params).get("response") or []
-            linked = 0
-            teams: dict[int, tuple[str, str]] = {}
-            refs: list[tuple[str, str]] = []
-            for r in rows:
-                lg = self.leagues.get(int(r["league"]["id"]))
-                if not lg:
-                    continue
-                fx = self._match(r, [f for f in calendar if " ".join(f.competition.lower().split()) == " ".join(lg.competition.lower().split())]
-                                 or calendar)
-                if fx is None:
-                    st.report.gap(f"api-football senza corrispondenza: {r['teams']['home']['name']}-{r['teams']['away']['name']}")
-                    continue
-                self.store.db.execute("INSERT OR REPLACE INTO fixture_links(source, ext_id, fixture_id, linked_at) VALUES(?,?,?,?)",
-                                      (SOURCE, str(r["fixture"]["id"]), fx.id, t.isoformat()))
-                teams[int(r["teams"]["home"]["id"])] = (fx.home, r["teams"]["home"]["name"])
-                teams[int(r["teams"]["away"]["id"])] = (fx.away, r["teams"]["away"]["name"])
-                if (r.get("fixture") or {}).get("referee"):
-                    refs.append((fx.id, r["fixture"]["referee"]))
-                linked += 1
-            if refs:
-                st.add("arbitri", self.store.save_referees(SOURCE, refs, t))
-            for tid, (name, api_name) in teams.items():
-                self.store.db.execute("INSERT INTO apif_teams(team_id, name, apif_name) VALUES(?,?,?) "
-                                      "ON CONFLICT(team_id) DO UPDATE SET name=excluded.name, apif_name=excluded.apif_name", (tid, name, api_name))
-            self.store.db.commit()
-            st.add("fixture links", linked)
+            self.link_day(st, d)
+
+    def link_day(self, st: CollectStats, d) -> dict[str, list[str]]:
+        """One request: API-Football's matches of day d linked to our calendar, team ids learnt. Returns, per competition of
+        ours, the matches linked and the ones left without a match of ours ("-" prefix)."""
+        t = self.now()
+        day = datetime.combine(d, datetime.min.time(), tzinfo=t.tzinfo)
+        calendar = self.provider.list_fixtures(None, day - timedelta(days=1), day + timedelta(days=2))
+        out: dict[str, list[str]] = {}
+        rows = self.client.get("/fixtures", {"date": d.isoformat()}).get("response") or []
+        linked = 0
+        teams: dict[int, tuple[str, str]] = {}
+        refs: list[tuple[str, str]] = []
+        for r in rows:
+            lg = self.leagues.get(int(r["league"]["id"]))
+            if not lg:
+                continue
+            fx = self._match(r, [f for f in calendar if " ".join(f.competition.lower().split()) == " ".join(lg.competition.lower().split())]
+                             or calendar)
+            if fx is None:
+                st.report.gap(f"api-football senza corrispondenza: {r['teams']['home']['name']}-{r['teams']['away']['name']}")
+                out.setdefault(lg.competition, []).append(f"- {r['teams']['home']['name']}-{r['teams']['away']['name']}")
+                continue
+            out.setdefault(lg.competition, []).append(f"{fx.home}-{fx.away}")
+            self.store.db.execute("INSERT OR REPLACE INTO fixture_links(source, ext_id, fixture_id, linked_at) VALUES(?,?,?,?)",
+                                  (SOURCE, str(r["fixture"]["id"]), fx.id, t.isoformat()))
+            teams[int(r["teams"]["home"]["id"])] = (fx.home, r["teams"]["home"]["name"])
+            teams[int(r["teams"]["away"]["id"])] = (fx.away, r["teams"]["away"]["name"])
+            if (r.get("fixture") or {}).get("referee"):
+                refs.append((fx.id, r["fixture"]["referee"]))
+            linked += 1
+        if refs:
+            st.add("arbitri", self.store.save_referees(SOURCE, refs, t))
+        for tid, (name, api_name) in teams.items():
+            self.store.db.execute("INSERT INTO apif_teams(team_id, name, apif_name) VALUES(?,?,?) "
+                                  "ON CONFLICT(team_id) DO UPDATE SET name=excluded.name, apif_name=excluded.apif_name", (tid, name, api_name))
+        self.store.db.commit()
+        st.add("fixture links", linked)
+        return out
 
     def _match(self, r: dict, calendar):
         ko = datetime.fromisoformat(r["fixture"]["date"])
