@@ -71,7 +71,7 @@ class LinkReport:
     doubtful: int = 0
     starters_checked: int = 0
     starters_same: int = 0
-    absences: dict[str, list[int]] = field(default_factory=dict)  # competition -> [rows, rows with a linked player]
+    absences: dict[str, list[int]] = field(default_factory=dict)  # competition -> [rows, linked, rows of a team with a GOAL XI, linked]
 
     def lines(self) -> list[str]:
         out = [f"giocatori FotMob: {self.fotmob_players} · collegati a GOAL {self.linked} ({self.by_absence} solo dalle assenze) · "
@@ -79,9 +79,9 @@ class LinkReport:
         if self.starters_checked:
             out.append(f"controllo: titolari FotMob collegati che sono titolari anche nella formazione GOAL "
                        f"{100 * self.starters_same / self.starters_checked:.1f}% ({self.starters_checked})")
-        out.append("assenze FotMob con il giocatore collegato, per competizione:")
-        for comp, (n, ok) in sorted(self.absences.items()):
-            out.append(f"  {comp}: {ok}/{n} ({100 * ok / max(n, 1):.0f}%)")
+        out.append("assenze FotMob con il giocatore collegato, per competizione (tutte · solo partite con la formazione GOAL della squadra):")
+        for comp, (n, ok, nx, okx) in sorted(self.absences.items()):
+            out.append(f"  {comp}: {ok}/{n} ({100 * ok / max(n, 1):.0f}%) · {okx}/{nx} ({100 * okx / max(nx, 1):.0f}%)")
         return out
 
 
@@ -168,8 +168,11 @@ def link_players(store: SnapshotStore, now: datetime | None = None) -> LinkRepor
             if f in links:
                 rep.starters_checked += 1
                 rep.starters_same += int(links[f][0] in gs)
-    for _, _, p, _, comp in absences:
-        row = rep.absences.setdefault(comp, [0, 0])
+    for fid, team, p, _, comp in absences:
+        row = rep.absences.setdefault(comp, [0, 0, 0, 0])
         row[0] += 1
         row[1] += int(p in links)
+        if (fid, team) in xi:
+            row[2] += 1
+            row[3] += int(p in links)
     return rep

@@ -47,5 +47,5 @@ def test_link_players_by_match_and_from_absences_and_reports_coverage():
     links = dict(s.db.execute("SELECT fotmob_id, goal_id FROM fotmob_player_links").fetchall())
     assert links == {"fotmob:11": "goal:1", "fotmob:22": "goal:2", "fotmob:99": "goal:9"}
     assert rep.by_absence == 1 and rep.starters_checked == 4 and rep.starters_same == 4
-    assert rep.absences == {"Serie A": [3, 2]}
+    assert rep.absences == {"Serie A": [3, 2, 0, 0]}  # no GOAL XI stored for g2
     assert link_players(s, KO).linked == 3  # a full pass again: same links, no duplicates
