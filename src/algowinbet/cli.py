@@ -810,7 +810,7 @@ def cmd_pub_check(a) -> None:
         return
     print(f"run {run[0]} del {run[1][:16]}")
     top = []
-    for home, away, sc in store.db.execute("SELECT home, away, scorers FROM pub_fixtures WHERE run_id = ? AND scorers IS NOT NULL", (run[0],)):
+    for home, away, sc in store.db.execute("SELECT home, away, scorers FROM pub_fixtures WHERE run_id = ? AND scorers IS NOT NULL", (run[0],)).fetchall():
         for team, s in json.loads(sc).items():
             top += [(p.get("a", 0), p.get("name") or p.get("n") or p.get("id"), team, f"{home}-{away}") for p in s.get("players") or []]
     print("marcatori più probabili:")
