@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import { ArrowLeft, CircleSlash, Gauge, ListChecks, Percent, Sigma, Target } from "lucide-react";
-import { DEPLOY, fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type BookSel, type OppRow } from "@/lib/db";
+import { absencesFor, DEPLOY, fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type Absence, type BookSel, type OppRow } from "@/lib/db";
 import { legMinOdds, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
@@ -9,6 +9,7 @@ import { Empty, MatchCell } from "@/app/_components/ui";
 import { MAX_PICK } from "@/lib/pick";
 import { MyCombo } from "@/app/_components/MyCombo";
 import { isEstimated } from "@/lib/books";
+import { LegAbsences } from "@/app/_components/Absences";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Schedina manuale" };
@@ -114,6 +115,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
   const best = result?.slips[0];
   const inSlip = new Set(best?.legs.map((l) => l.fixture_id) ?? []);
   const left = ids.filter((id) => !inSlip.has(id));
+  const absent = best ? await absencesFor(best.legs.map((l) => l.fixture_id)).catch(() => ({}) as Record<string, Absence[]>) : {};
   const href = (p: string) => {
     const q = new URLSearchParams(ids.map((id) => ["fx", id]));
     for (const key of ["ev", "pmin", "min", "max", "lmin", "lmax"] as const) if (sp[key]) q.set(key, sp[key]!);
@@ -236,6 +238,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
                           {isEstimated(l.bookmaker) && (
                             <span className="sub crit-warn">Quota Sisal stimata da Pinnacle: gioca solo se su Sisal è almeno {(1 / l.p_final).toFixed(2)}</span>
                           )}
+                          <LegAbsences list={absent[l.fixture_id] ?? []} runAt={run.created_at} />
                         </td>
                         <td className="num">{l.odds.toFixed(2)}</td>
                         <td className="num">{pct(l.p_final, 1)}</td>

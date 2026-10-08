@@ -1,4 +1,4 @@
-import { UserX } from "lucide-react";
+import { AlertTriangle, UserX } from "lucide-react";
 import { REGULAR_SHEETS, type Absence } from "@/lib/db";
 import { dayTime } from "./format";
 
@@ -65,6 +65,24 @@ export function Absences({ absences, home, away }: { absences: Absence[]; home: 
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Under a slip leg: the regular starters of the two teams reported out, suspended or doubtful. One reported after the
+// analysis is not in the probabilities yet (the next analysis starts by itself when a regular changes status).
+export function LegAbsences({ list, runAt }: { list: Absence[]; runAt: string }) {
+  const regs = list.filter(isRegular);
+  if (!regs.length) return null;
+  const late = regs.some((a) => new Date(a.observed_at).getTime() > new Date(runAt).getTime());
+  const sure = regs.some((a) => a.status !== "DOUBTFUL");
+  return (
+    <div className={`leg-absent${sure ? "" : " leg-absent-doubt"}`}>
+      <AlertTriangle size={14} aria-hidden="true" />
+      <span>
+        {sure ? "Titolari assenti" : "Titolari in dubbio"}: {regs.map((a) => `${a.name} (${a.team}, ${(ABSENCE_LABEL[a.status] ?? a.status).toLowerCase()})`).join(", ")}
+        {late ? " · segnalati dopo l'analisi: le probabilità non ne tengono ancora conto" : ""}
+      </span>
     </div>
   );
 }

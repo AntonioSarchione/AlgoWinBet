@@ -10,7 +10,7 @@ import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } 
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
-import { ABSENCE_LABEL, isRegular } from "@/app/_components/Absences";
+import { LegAbsences } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
 import { RefreshButton } from "@/app/_components/RefreshButton";
@@ -615,22 +615,4 @@ function explorerMatch(f: FixtureRow): ExplorerMatch {
         return [b ? `${l} · Sisal ${b.odds.toFixed(2)}` : l, p as number] as [string, number];
       }),
   };
-}
-
-// Under a slip leg: the regular starters of the two teams reported out, suspended or doubtful. One reported after the
-// analysis is not in the probabilities yet (the next analysis starts by itself when a regular changes status).
-function LegAbsences({ list, runAt }: { list: Absence[]; runAt: string }) {
-  const regs = list.filter(isRegular);
-  if (!regs.length) return null;
-  const late = regs.some((a) => new Date(a.observed_at).getTime() > new Date(runAt).getTime());
-  const sure = regs.some((a) => a.status !== "DOUBTFUL");
-  return (
-    <div className={`leg-absent${sure ? "" : " leg-absent-doubt"}`}>
-      <AlertTriangle size={14} aria-hidden="true" />
-      <span>
-        {sure ? "Titolari assenti" : "Titolari in dubbio"}: {regs.map((a) => `${a.name} (${a.team}, ${(ABSENCE_LABEL[a.status] ?? a.status).toLowerCase()})`).join(", ")}
-        {late ? " · segnalati dopo l'analisi: le probabilità non ne tengono ancora conto" : ""}
-      </span>
-    </div>
-  );
 }
