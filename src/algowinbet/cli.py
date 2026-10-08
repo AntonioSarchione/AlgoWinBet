@@ -834,6 +834,43 @@ def cmd_pub_check(a) -> None:
             print(f"  portiere {names.get(k, k)}: TS {v.get('ts')} GS {v.get('gc')} PP {v.get('sv')} CG {v.get('cg', 0):.0%}")
 
 
+def cmd_slip_rules(a) -> None:
+    """Registered slips against the user's slip rules, each from the day it was set (no request): no leg under odds 1.20 and
+    no national/club mix (2026-10-03), no leg under 45% and no national value leg under 55% (2026-10-05)."""
+    from .config import OptimizerCfg
+    o = OptimizerCfg()
+    store = SnapshotStore(a.db)
+    comp = {(f, k): c for f, k, c in store.db.execute("SELECT fixture_id, sel_key, competition FROM paper_legs").fetchall()}
+    national = lambda c: any(x in (c or "") for x in o.national_competitions)  # noqa: E731
+    rules = (("quota < 1.20", "2026-10-03", lambda legs: [l for l in legs if l["odds"] < o.min_leg_odds]),
+             ("nazionali e club insieme", "2026-10-03",
+              lambda legs: legs if len({national(comp.get((l["fixture_id"], l["sel_key"]))) for l in legs}) > 1 else []),
+             ("probabilità < 45%", "2026-10-05", lambda legs: [l for l in legs if l["p"] < o.min_leg_probability]),
+             ("nazionale di valore < 55%", "2026-10-05",
+              lambda legs: [l for l in legs if l["status"] in ("STRONG", "CANDIDATE") and l["p"] < o.national_value_min_probability
+                            and national(comp.get((l["fixture_id"], l["sel_key"])))]))
+    rows = store.db.execute("SELECT id, created_at, run_id, profile, legs FROM paper_slips ORDER BY created_at").fetchall()
+    print(f"schedine registrate: {len(rows)}")
+    for name, since, check in rules:
+        before = after = 0
+        examples = []
+        for sid, at, run, profile, legs_json in rows:
+            bad = check(json.loads(legs_json))
+            if not bad:
+                continue
+            if at[:10] < since:
+                before += 1
+            else:
+                after += 1
+                if len(examples) < a.show:
+                    l = bad[0]
+                    examples.append(f"    schedina {sid} ({at[:16]}, run {run}, {profile or '-'}): {l['match']} {l['market']} quota {l['odds']} "
+                                    f"prob. {l['p']:.0%} {l['status']}")
+        print(f"  {name} (regola dal {since}): {before} prima della regola, {after} dopo" + (" <- DA CORREGGERE" if after else ""))
+        for e in examples:
+            print(e)
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2773,6 +2810,10 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--config", default="configs/collect.json")
     pg.add_argument("--apply", action="store_true", help="senza: solo elenco, nessuna cancellazione")
     pg.set_defaults(fn=cmd_registry_purge_stats)
+    sr = sub.add_parser("slip-rules", help="schedine registrate contro le regole delle schedine (nessuna richiesta)")
+    sr.add_argument("--show", type=int, default=5)
+    sr.add_argument("--db", default="turso")
+    sr.set_defaults(fn=cmd_slip_rules)
     pk = sub.add_parser("pub-check", help="ultima analisi pubblicata: marcatori più probabili e schede di una partita")
     pk.add_argument("--team", default="PSV")
     pk.add_argument("--db", default="turso")
