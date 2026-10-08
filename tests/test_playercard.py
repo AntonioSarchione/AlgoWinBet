@@ -35,14 +35,15 @@ def _store():
     return st
 
 
-def test_cards_per_match_started_with_the_last_ten_appearances():
+def test_cards_per_match_started_from_the_last_appearances():
     st = _store()
     stats = {f"goal:m{k}": {"shots_on_target": (6.0, 4.0)} for k in range(12)}
     out = json.loads(player_cards(st, {"goal:next": {"goal:st", "goal:gk", "goal:new", "goal:nobody"}}, NOW, stats)["goal:next"])
     s = out["goal:st"]
-    assert s["n"] == 10 and s["min"] == 85  # last 10 appearances only
+    assert s["n"] == 12 and s["min"] == 85  # every appearance (up to LAST)
     assert abs(s["xg"] - 0.5) < 0.01 and abs(s["sh"] - 4) < 0.01 and abs(s["sot"] - 2) < 0.01  # only one role read: the prior is his own rate
-    assert 0.3 < s["cg"] < 0.6  # booked in 6 of the last 10: about 45%
+    assert 0.3 < s["cg"] < 0.6  # booked in 6 of 12
+    assert s["as"] == 0.0  # no assist, and his role (only him) none either
     g = out["goal:gk"]
     assert g["gk"] == 1 and g["gc"] == 0.5 and g["cs"] == 0.5 and g["sv"] == 3.5 and g["cg"] == 0.0
     assert "goal:new" not in out and "goal:nobody" not in out  # too few minutes, no FotMob appearance

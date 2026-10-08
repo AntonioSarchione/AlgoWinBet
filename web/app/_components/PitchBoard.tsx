@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 
 // What a player does in a match he starts (pub_players, src/algowinbet/playercard.py). Goalkeepers: gk = 1.
 export type PlayerCard = {
-  xg?: number | null; sot?: number; sh?: number; fc?: number; fd?: number; cg: number; n: number; min?: number;
+  xg?: number | null; sot?: number; sh?: number; fc?: number; fd?: number; cg: number; as?: number; n: number; min?: number;
   gk?: 1; ts?: number | null; gc?: number | null; sv?: number | null; cs?: number | null;
 };
 export type PitchPlayer = { id: string; x: number; y: number; shirt: string; name: string; prob: string | null; flag: string | null; role: string };
@@ -158,9 +158,12 @@ export function PitchBoard({ sides, cards, label, children }: {
                 <div><dt>TP/TT</dt><dd>{num(c.sot)}/{num(c.sh, 1)}</dd></div>
                 <div><dt>FF/FS</dt><dd>{num(c.fc, 1)}/{num(c.fd, 1)}</dd></div>
                 <div><dt>CG</dt><dd>{pc(c.cg)}</dd></div>
+                <div><dt>AS</dt><dd>{pc(c.as)}</dd></div>
+                <div><dt>MIN</dt><dd>{c.min != null ? `${c.min}'` : "–"}</dd></div>
               </dl>
               <p className="note">
-                A partita da titolare ({c.min}&apos;), ultime {c.n} presenze. TP tiri in porta · TT tiri totali · FF falli fatti · FS falli subiti · CG probabilità di cartellino.
+                A partita da titolare, ultime {c.n} presenze. TP tiri in porta · TT tiri totali · FF falli fatti · FS falli subiti · CG probabilità di cartellino ·
+                AS probabilità di assist · MIN minuti giocati da titolare.
               </p>
             </>
           )}

@@ -1,11 +1,12 @@
 """Replay of the player numbers (lineups tab cards): are they right, and how should they be estimated?
 
-Every start of a FotMob player in [start, end) is predicted from his own earlier FotMob appearances only, the way
-playercard.py does it: his last `last` appearances, counts per 90 minutes pulled toward the average of his role with
-`prior_90` spells of 90 minutes, scaled to the minutes he plays when he starts. Each count is then a probability for the
+Every start of a FotMob player in [start, end) is predicted from his own earlier FotMob appearances only, with
+playercard.py's own function: his last `last` appearances, counts per 90 minutes pulled toward the average of his role with
+`prior_90` spells of 90 minutes (per stat), scaled to the minutes he plays when he starts. Each count is then a probability for the
 lines the bookmakers offer (Poisson, or negative binomial with shape `disp`): shots 1+/2+/3+, shots on target 1+/2+, fouls
 committed 1+/2+, fouls won 1+/2+, booked, assist. Scored with the binary log loss, next to the role average alone
-("ruolo"); each variant against the current settings ("attuale") per line with a 95% interval. No request.
+("ruolo") and the settings before the replay ("prima"); each variant against the published one ("modello") per line
+with a 95% interval. No request.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .playercard import LAST, MIN_MINUTES, PRIOR_90, START_MINUTES
+from .playercard import DISP, LAST, PRIOR_90, expected_counts as card_counts
 
 # (label, stat, at least)
 LINES = (("tiri 1+", "shots", 1), ("tiri 2+", "shots", 2), ("tiri 3+", "shots", 3), ("tiri in porta 1+", "shots_on", 1),
@@ -28,15 +29,22 @@ BIN_EDGES = (0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 1.01)
 @dataclass(frozen=True)
 class PlayerParams:
     last: int = LAST
-    prior_90: float = PRIOR_90
-    disp: float = 0.0  # > 0: negative binomial with this shape
+    prior_90: float | tuple = tuple(sorted(PRIOR_90.items()))  # one weight for every stat, or (stat, weight) pairs
+    disp: float = DISP  # > 0: negative binomial with this shape, 0: Poisson
+
+    def weights(self) -> dict[str, float]:
+        return dict(self.prior_90) if isinstance(self.prior_90, tuple) else {k: float(self.prior_90) for k in STATS}
 
 
-VARIANTS = {"attuale": PlayerParams(), "ruolo": PlayerParams(prior_90=1e9)}
-TUNE = {"attuale": PlayerParams(),
-        **{f"u{n}p{k:g}d{d:g}" if d else f"u{n}p{k:g}": PlayerParams(last=n, prior_90=k, disp=d)
-           for n, k, d in ((40, 3, 4), (60, 3, 4), (100, 3, 4), (60, 5, 4), (60, 3, 2), (40, 8, 0), (60, 8, 0), (100, 8, 0),
-                           (60, 12, 0), (40, 20, 4), (60, 20, 4), (60, 40, 4), (100, 40, 4), (100, 80, 4))}}
+def _with(**kw) -> tuple:
+    return tuple(sorted({**PRIOR_90, **kw}.items()))
+
+
+# "modello": what the lineups tab publishes (playercard.py); "prima": the settings before the replay (10 appearances, weight 3, Poisson)
+VARIANTS = {"modello": PlayerParams(), "prima": PlayerParams(last=10, prior_90=3.0, disp=0.0), "ruolo": PlayerParams(prior_90=1e9)}
+TUNE = {**VARIANTS, "ultime40": PlayerParams(last=40), "ultime100": PlayerParams(last=100), "disp3": PlayerParams(disp=3.0),
+        "disp6": PlayerParams(disp=6.0), "cartellino30": PlayerParams(prior_90=_with(cards=30.0)),
+        "assist25": PlayerParams(prior_90=_with(assists=25.0))}
 
 
 def at_least(rate: float, k: int, disp: float = 0.0) -> float:
@@ -59,21 +67,10 @@ def at_least(rate: float, k: int, disp: float = 0.0) -> float:
 
 def expected_counts(apps: list[tuple], prior: dict[str, float], prm: PlayerParams) -> dict[str, float] | None:
     """Expected counts in a start from the player's appearances (minutes, starter, then STATS; most recent first) and his
-    role's averages per 90 minutes; None below MIN_MINUTES."""
-    a = apps[:prm.last]
-    total = sum(r[0] for r in a)
-    if total < MIN_MINUTES:
-        return None
-    starts = [r[0] for r in a if r[1]]
-    mins = min(90.0, sum(starts) / len(starts)) if starts else START_MINUTES
-    out = {}
-    for i, k in enumerate(STATS):
-        if prm.prior_90 >= 1e8:
-            out[k] = prior[k] * mins / 90
-            continue
-        rate = (sum(r[2 + i] for r in a) + prior[k] * prm.prior_90) / (total / 90 + prm.prior_90)
-        out[k] = rate * mins / 90
-    return out
+    role's averages per 90 minutes, computed as playercard.py does; None below its minimum minutes."""
+    w = prm.weights()  # 1e9 everywhere: the role alone
+    got = card_counts([(r[0], r[1], dict(zip(STATS, r[2:]))) for r in apps], prior, prm.last, w)
+    return None if got is None else {k: v for k, v in got[0].items() if k in STATS}
 
 
 @dataclass
@@ -175,7 +172,7 @@ def _diff(a: LineScore, b: LineScore) -> tuple[float, float]:
 
 def print_player_eval(rep: PlayerReport, calibration: tuple[str, ...] = ("ammonito", "tiri in porta 1+", "assist")) -> None:
     print(f"giocatori, replay {rep.start:%Y-%m-%d} - {rep.end:%Y-%m-%d}: {rep.starts} partite da titolare (portieri esclusi)")
-    base = rep.scores.get("attuale")
+    base = rep.scores.get("modello")
     for label, _, _ in LINES:
         print(f"  {label}")
         for v, by in rep.scores.items():
@@ -183,11 +180,11 @@ def print_player_eval(rep: PlayerReport, calibration: tuple[str, ...] = ("ammoni
             if not s.terms:
                 continue
             line = f"    {v:16} log loss {sum(s.terms) / len(s.terms):.4f}  succede {s.hits} (attesi {s.exp:.0f})"
-            if base is not None and v != "attuale":
+            if base is not None and v != "modello":
                 m, hw = _diff(s, base[label])
-                line += f"  vs attuale {m:+.4f} ± {hw:.4f}" + ("  (meglio)" if m + hw < 0 else "  (peggio)" if m - hw > 0 else "")
+                line += f"  vs modello {m:+.4f} ± {hw:.4f}" + ("  (meglio)" if m + hw < 0 else "  (peggio)" if m - hw > 0 else "")
             print(line)
-    for v in rep.scores:
+    for v in [x for x in ("modello", "prima") if x in rep.scores]:
         for label in calibration:
             s = rep.scores[v][label]
             if not s.terms:

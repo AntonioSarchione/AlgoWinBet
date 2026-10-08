@@ -2,8 +2,11 @@
 
 For every player who can take part in the match (our probable lineup's candidates, the stored official XI and bench), what he
 does in a match he starts, from his last FotMob appearances: expected goals, shots on target / shots, fouls committed / fouls
-won, and the probability of a booking. Rates per 90 minutes are pulled toward the average of his role (PRIOR_90 spells of 90
-minutes of it), so three appearances do not make a striker of a full back; then scaled to the minutes he plays when he starts.
+won, and the probability of a booking and of an assist. Rates per 90 minutes are pulled toward the average of his role
+(PRIOR_90[stat] spells of 90 minutes of it), so three appearances do not make a striker of a full back; then scaled to the
+minutes he plays when he starts. Probabilities: negative binomial with shape DISP. The settings come from the replay
+(player-eval --tune, 35,000 starts of 2026): the rare events (booking, assist) need a heavy role weight, the frequent ones
+little; every line (shots 1+/2+/3+, on target 1+/2+, fouls 1+/2+, booked, assist) beat the earlier 10 appearances / weight 3.
 Goalkeepers get their own card: shots on target faced, goals conceded and saves in their full matches, FotMob's own numbers
 where read (from 2026-10-07 on) and before that the opponent's shots on target (team match stats) and our result, saves being
 the difference; and the booking probability. FotMob players are matched to ours through fotmob_player_links. No request.
@@ -14,12 +17,46 @@ import json
 import math
 from datetime import datetime, timedelta
 
-LAST = 10            # appearances read per player (most recent first)
+LAST = 60            # appearances read per player (most recent first)
 SINCE = timedelta(days=400)
-PRIOR_90 = 3.0       # 90-minute spells of the role average added to each player's own minutes
+# 90-minute spells of the role average added to each player's own minutes, per stat (xG not replayed: as shots on target)
+PRIOR_90 = {"xg": 5.0, "shots_on": 5.0, "shots": 3.0, "fouls_committed": 5.0, "fouls_drawn": 3.0, "cards": 20.0, "assists": 40.0}
+DISP = 4.0           # negative binomial shape of the counts
 MIN_MINUTES = 90     # below this (all appearances together) no card: too little to say anything
 START_MINUTES = 80.0  # minutes of a start when the player has no start of his own in the window
-STATS = ("xg", "shots_on", "shots", "fouls_committed", "fouls_drawn", "cards")
+STATS = ("xg", "shots_on", "shots", "fouls_committed", "fouls_drawn", "cards", "assists")
+# where each stat sits in a row of player_cards' query
+AT = {"xg": 2, "shots_on": 3, "shots": 4, "fouls_committed": 5, "fouls_drawn": 6, "cards": 7, "assists": 16}
+
+
+def p_any(rate: float, disp: float = DISP) -> float:
+    """P(at least one) for a count with mean `rate`, negative binomial with shape `disp` (Poisson when 0)."""
+    if rate <= 0:
+        return 0.0
+    return 1.0 - ((disp / (disp + rate)) ** disp if disp > 0 else math.exp(-rate))
+
+
+def expected_counts(apps: list[tuple[float, int, dict]], prior: dict[str, float], last: int = LAST,
+                    prior_90: dict[str, float] | None = None) -> tuple[dict[str, float | None], float] | None:
+    """Expected counts in a start from the player's appearances (minutes, starter, {stat: value or None}; most recent first)
+    and his role's averages per 90 minutes, and the minutes of a start; None below MIN_MINUTES."""
+    prior_90 = prior_90 or PRIOR_90
+    a = apps[:last]
+    if sum(r[0] for r in a) < MIN_MINUTES:
+        return None
+    starts = [r[0] for r in a if r[1]]
+    mins = min(90.0, sum(starts) / len(starts)) if starts else START_MINUTES
+    out: dict[str, float | None] = {}
+    for k in STATS:
+        seen = [(r[2][k], r[0]) for r in a if r[2].get(k) is not None]
+        if not seen:
+            out[k] = None
+            continue
+        m = sum(x[1] for x in seen)
+        w = prior_90.get(k, 3.0)
+        rate = (sum(x[0] for x in seen) + prior.get(k, 0.0) * w) / (m / 90 + w)  # per 90 minutes
+        out[k] = rate * mins / 90
+    return out, mins
 
 
 def _chunks(xs: list, n: int = 400):
@@ -48,8 +85,8 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
     for part in _chunks(fm_ids):
         for r in store.db.execute(
                 "SELECT s.player_id, s.minutes, s.starter, s.xg, s.shots_on, s.shots, s.fouls_committed, s.fouls_drawn, "
-                "COALESCE(s.yellow, 0) + COALESCE(s.red, 0), r.kickoff, s.fixture_id, s.team = r.home, r.home_goals, r.away_goals, "
-                "s.saves, s.goals_conceded, s.shots_on_faced "
+                "CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END, r.kickoff, s.fixture_id, s.team = r.home, "
+                "r.home_goals, r.away_goals, s.saves, s.goals_conceded, s.shots_on_faced, s.assists "
                 "FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id "
                 f"WHERE s.player_id IN ({','.join('?' * len(part))}) AND s.minutes > 0 AND r.kickoff >= ? AND r.kickoff < ?",
                 (*part, since, now.isoformat())).fetchall():
@@ -72,12 +109,12 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
         for g, a in apps.items():
             if roles.get(g, "MID") != role:
                 continue
-            for mins, _, xg, son, sh, fc, fd, cards, *_ in a:
-                for k, v in zip(STATS, (xg, son, sh, fc, fd, cards)):
-                    if v is not None:
-                        acc[k][0] += v
-                        acc[k][1] += mins
-        prior[role] = {k: (s / m * 90 if m else 0.0) for k, (s, m) in acc.items()}
+            for r in a:
+                for k in STATS:
+                    if r[AT[k]] is not None:
+                        acc[k][0] += r[AT[k]]
+                        acc[k][1] += r[0]
+        prior[role] = {k: (s_ / m * 90 if m else 0.0) for k, (s_, m) in acc.items()}
 
     card: dict[str, dict] = {}
     for g, a in apps.items():
@@ -87,21 +124,13 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
         if roles.get(g) == "GK":
             card[g] = _keeper(a, prior["GK"]["cards"], team_stats or {})
             continue
-        starts = [r[0] for r in a if r[1]]
-        mins = min(90.0, sum(starts) / len(starts)) if starts else START_MINUTES
-        pr = prior[roles.get(g, "MID")]
-        exp = {}
-        for i, k in enumerate(STATS):
-            seen = [(r[2 + i], r[0]) for r in a if r[2 + i] is not None]
-            if not seen:
-                exp[k] = None
-                continue
-            m = sum(x[1] for x in seen)
-            rate = (sum(x[0] for x in seen) + pr[k] * PRIOR_90) / (m / 90 + PRIOR_90)  # per 90 minutes
-            exp[k] = rate * mins / 90
+        got = expected_counts([(r[0], r[1], {k: r[AT[k]] for k in STATS}) for r in a], prior[roles.get(g, "MID")])
+        if got is None:
+            continue
+        exp, mins = got
         card[g] = {"xg": None if exp["xg"] is None else round(exp["xg"], 2), "sot": round(exp["shots_on"] or 0, 2),
                    "sh": round(exp["shots"] or 0, 2), "fc": round(exp["fouls_committed"] or 0, 2), "fd": round(exp["fouls_drawn"] or 0, 2),
-                   "cg": round(1 - math.exp(-(exp["cards"] or 0)), 3), "n": len(a), "min": round(mins)}
+                   "cg": round(p_any(exp["cards"] or 0), 3), "as": round(p_any(exp["assists"] or 0), 3), "n": len(a), "min": round(mins)}
     out = {}
     for fid, ids in pools.items():
         mine = {g: card[g] for g in ids if g in card}
@@ -131,10 +160,11 @@ def _keeper(a: list[tuple], card_prior: float, team_stats: dict) -> dict:
         if saves is not None:
             sv.append(saves)
     mins = sum(r[0] for r in a)
-    rate = (sum(r[7] for r in a) + card_prior * PRIOR_90) / (mins / 90 + PRIOR_90)
+    w = PRIOR_90["cards"]
+    rate = (sum(r[7] for r in a) + card_prior * w) / (mins / 90 + w)
     avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else None  # noqa: E731
     return {"gk": 1, "ts": avg(ts), "gc": avg(gc), "sv": avg(sv),
-            "cs": round(sum(1 for c in gc if c == 0) / len(gc), 3) if gc else None, "cg": round(1 - math.exp(-rate), 3), "n": len(a)}
+            "cs": round(sum(1 for c in gc if c == 0) / len(gc), 3) if gc else None, "cg": round(p_any(rate), 3), "n": len(a)}
 
 
 def match_pools(prov, fixtures, xi) -> dict[str, set[str]]:

@@ -23,9 +23,9 @@ def test_replay_uses_only_earlier_days_and_scores_every_line():
             shots = 4 if p == 0 else 0
             apps.append((ko, pid, 90, 1, shots, shots // 2, 1, 1, int(d % 4 == 0), 0))
     rep = evaluate_players(None, T0 + timedelta(days=60), T0 + timedelta(days=80),
-                           variants={"attuale": PlayerParams(), "ruolo": PlayerParams(prior_90=1e9)}, data=(apps, roles))
+                           variants={"modello": PlayerParams(), "ruolo": PlayerParams(prior_90=1e9)}, data=(apps, roles))
     assert rep.starts == 80  # 4 players x 20 days
-    s = rep.scores["attuale"]["tiri 1+"]
+    s = rep.scores["modello"]["tiri 1+"]
     assert s.hits == 20 and len(s.terms) == 80
     # the striker who always shoots gets a high probability, the defenders who never do a low one
     assert sum(s.terms) / len(s.terms) < sum(rep.scores["ruolo"]["tiri 1+"].terms) / 80
