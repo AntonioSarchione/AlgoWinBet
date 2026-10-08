@@ -1470,6 +1470,17 @@ def cmd_xi_eval(a) -> None:
         store.close()
 
 
+def cmd_player_eval(a) -> None:
+    """Player numbers of the lineups tab replayed day by day against what the players really did (no API request)."""
+    from .playereval import TUNE, evaluate_players, print_player_eval
+    store = SnapshotStore(a.db)
+    try:
+        start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
+        print_player_eval(evaluate_players(store, start, datetime.now(timezone.utc), variants=TUNE if a.tune else None))
+    finally:
+        store.close()
+
+
 def cmd_scorer_eval(a) -> None:
     """Fase 9 acceptance test: goalscorer probabilities replayed week by week against who really scored (no API request)."""
     from .scorers import TUNE, evaluate_scorers, print_scorer_eval
@@ -2707,6 +2718,11 @@ def build_parser() -> argparse.ArgumentParser:
     xe.add_argument("--fotmob-absences", action="store_true", help="usa anche le assenze FotMob dello storico (da misurare)")
     xe.add_argument("--db", default="turso")
     xe.set_defaults(fn=cmd_xi_eval)
+    pe = sub.add_parser("player-eval", help="numeri dei giocatori (tiri, falli, cartellino, assist) rigiocati giorno per giorno (nessuna richiesta API)")
+    pe.add_argument("--since", default="2026-01-01")
+    pe.add_argument("--tune", action="store_true", help="varianti (ultime presenze, peso del ruolo, binomiale negativa)")
+    pe.add_argument("--db", default="turso")
+    pe.set_defaults(fn=cmd_player_eval)
     se = sub.add_parser("scorer-eval", help="Fase 9: marcatori rigiocati settimana per settimana (nessuna richiesta API)")
     se.add_argument("--since", default="2025-07-01", help="prima partita giudicata; lo storico prima serve da base")
     se.add_argument("--db", default="turso")
