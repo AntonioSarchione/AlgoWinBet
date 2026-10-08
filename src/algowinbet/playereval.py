@@ -31,6 +31,9 @@ class PlayerParams:
     last: int = LAST
     prior_90: float | tuple = tuple(sorted(PRIOR_90.items()))  # one weight for every stat, or (stat, weight) pairs
     disp: float = DISP  # > 0: negative binomial with this shape, 0: Poisson
+    opp: float = 0.0  # weights of the match context factors (playercontext.py): opponent, venue, referee; 0 = left out
+    venue: float = 0.0
+    ref: float = 0.0
 
     def weights(self) -> dict[str, float]:
         return dict(self.prior_90) if isinstance(self.prior_90, tuple) else {k: float(self.prior_90) for k in STATS}
@@ -42,9 +45,9 @@ def _with(**kw) -> tuple:
 
 # "modello": what the lineups tab publishes (playercard.py); "prima": the settings before the replay (10 appearances, weight 3, Poisson)
 VARIANTS = {"modello": PlayerParams(), "prima": PlayerParams(last=10, prior_90=3.0, disp=0.0), "ruolo": PlayerParams(prior_90=1e9)}
-TUNE = {**VARIANTS, "ultime40": PlayerParams(last=40), "ultime100": PlayerParams(last=100), "disp3": PlayerParams(disp=3.0),
-        "disp6": PlayerParams(disp=6.0), "cartellino30": PlayerParams(prior_90=_with(cards=30.0)),
-        "assist25": PlayerParams(prior_90=_with(assists=25.0))}
+TUNE = {**VARIANTS, "avversario": PlayerParams(opp=1.0), "avversario½": PlayerParams(opp=0.5), "campo": PlayerParams(venue=1.0),
+        "arbitro": PlayerParams(ref=1.0), "arbitro½": PlayerParams(ref=0.5), "avv+campo": PlayerParams(opp=1.0, venue=1.0),
+        "tutto": PlayerParams(opp=1.0, venue=1.0, ref=1.0), "tutto½": PlayerParams(opp=0.5, venue=1.0, ref=0.5)}
 
 
 def at_least(rate: float, k: int, disp: float = 0.0) -> float:
@@ -99,29 +102,37 @@ class PlayerReport:
     scores: dict[str, dict[str, LineScore]]  # variant -> line -> score
 
 
-def load_appearances(store) -> tuple[list[tuple], dict[str, str]]:
-    """(kickoff, player, minutes, starter, *STATS) of every FotMob appearance with minutes, oldest first, and each FotMob
-    player's role (ours through fotmob_player_links, else keepers by FotMob position, else MID)."""
+def load_appearances(store) -> tuple[list[tuple], dict[str, str], dict[str, tuple[str, str, str]], dict[str, str]]:
+    """(kickoff, player, minutes, starter, *STATS, fixture, team) of every FotMob appearance with minutes, oldest first; each
+    FotMob player's role (ours through fotmob_player_links, else keepers by FotMob position, else MID); each match's
+    (competition, home, away); each match's referee key (SnapshotProvider.referees)."""
+    from .snapshots import SnapshotProvider
     rows = store.db.execute(
         "SELECT r.kickoff, s.player_id, s.minutes, s.starter, s.shots, s.shots_on, s.fouls_committed, s.fouls_drawn, "
-        "(CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END), s.assists, s.position "
+        "(CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END), s.assists, s.position, s.fixture_id, s.team, "
+        "r.competition, r.home, r.away "
         "FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id WHERE s.minutes > 0 ORDER BY r.kickoff").fetchall()
     ours = dict(store.db.execute("SELECT l.fotmob_id, p.position FROM fotmob_player_links l JOIN players p ON p.id = l.goal_id").fetchall())
     roles: dict[str, str] = {}
+    fixtures: dict[str, tuple[str, str, str]] = {}
     out = []
     for r in rows:
         pid = r[1]
         if pid not in roles:
             roles[pid] = ours.get(pid) or ROLE_OF_POSITION.get(r[10], "MID")
-        out.append((r[0], pid, r[2], r[3], *(v or 0 for v in r[4:10])))
-    return out, roles
+        fixtures.setdefault(r[11], (r[13], r[14], r[15]))
+        out.append((r[0], pid, r[2], r[3], *(v or 0 for v in r[4:10]), r[11], r[12]))
+    return out, roles, fixtures, SnapshotProvider(store).referees()
 
 
 def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, PlayerParams] | None = None,
-                     data: tuple[list[tuple], dict[str, str]] | None = None) -> PlayerReport:
-    """Starts of [start, end), outfield players only, each predicted from the appearances of earlier days."""
+                     data: tuple | None = None) -> PlayerReport:
+    """Starts of [start, end), outfield players only, each predicted from the appearances (and match context) of earlier days."""
+    from .playercontext import MatchContext, apply
     variants = variants or VARIANTS
-    apps, roles = data or load_appearances(store)
+    apps, roles, fixtures, refs = data or load_appearances(store)
+    ctx = MatchContext()
+    nstat = len(STATS)
     keep = max(p.last for p in variants.values())
     hist: dict[str, deque] = defaultdict(lambda: deque(maxlen=keep))
     role_sum: dict[str, list[float]] = defaultdict(lambda: [0.0] * (len(STATS) + 1))  # role -> STATS sums, minutes
@@ -135,7 +146,8 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
         while j < len(apps) and apps[j][0][:10] == day:
             j += 1
         batch = apps[i:j]
-        for ko, pid, mins, starter, *vals in batch:
+        for ko, pid, mins, starter, *rest in batch:
+            vals, fid, team = rest[:nstat], rest[nstat], rest[nstat + 1]
             if not starter or not (s0 <= ko < e0) or roles.get(pid) == "GK":
                 continue
             rs = role_sum[roles.get(pid, "MID")]
@@ -146,17 +158,28 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
             got = {v: expected_counts(mine, prior, p) for v, p in variants.items()}
             if any(g is None for g in got.values()):
                 continue
+            comp, home, away = fixtures.get(fid, ("", "", ""))
+            if team in (home, away) and any(p.opp or p.venue or p.ref for p in variants.values()):
+                f = ctx.factors(away if team == home else home, comp, team == home, refs.get(fid))
+                got = {v: apply(g, f, p.opp, p.venue, p.ref) if (p.opp or p.venue or p.ref) else g
+                       for (v, g), p in zip(got.items(), variants.values())}
             n += 1
             y = dict(zip(STATS, vals))
             for v, p in variants.items():
                 for label, stat, k in LINES:
                     scores[v][label].add(at_least(got[v][stat], k, p.disp), int(y[stat] >= k))
-        for ko, pid, mins, starter, *vals in batch:  # the day's matches enter the history only after all of them are predicted
+        totals: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: dict.fromkeys(STATS, 0.0)))
+        for ko, pid, mins, starter, *rest in batch:  # the day's matches enter the history only after all of them are predicted
+            vals, fid, team = rest[:nstat], rest[nstat], rest[nstat + 1]
             hist[pid].append((mins, starter, *vals))
             rs = role_sum[roles.get(pid, "MID")]
             for x, v in enumerate(vals):
                 rs[x] += v
+                totals[fid][team][STATS[x]] += v
             rs[-1] += mins
+        for fid, by_team in totals.items():
+            comp, home, away = fixtures.get(fid, ("", "", ""))
+            ctx.add(comp, home, away, by_team, refs.get(fid))
         i = j
     return PlayerReport(start, end, n, scores)
 
