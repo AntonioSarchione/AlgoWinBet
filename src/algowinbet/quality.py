@@ -169,20 +169,40 @@ def _nested_meta(samples: list[dict], min_n: int = MIN_N) -> None:
 
 
 SHRINK_PRIOR, SHRINK_WEIGHT = 0.5, 50  # with few picks the share stays near one half (worth 50 picks)
+SHRINK_DRAWS = 2000  # resamples for the interval
 
 
-def edge_shrink(bets: list[dict]) -> dict:
+def _shrink_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float | None]:
+    """(lambda, raw slope) of edge_shrink for edges x and outcomes over the market y."""
+    sxx, sxy = float(x @ x), float(x @ y)
+    if sxx <= 0:
+        return SHRINK_PRIOR, None
+    mean_sq = sxx / len(x)
+    lam = (sxy + SHRINK_PRIOR * SHRINK_WEIGHT * mean_sq) / (sxx + SHRINK_WEIGHT * mean_sq)
+    return float(min(1.0, max(0.0, lam))), sxy / sxx
+
+
+def edge_shrink(bets: list[dict], draws: int = SHRINK_DRAWS) -> dict:
     """Share of the predicted edge over the market price that the picked selections actually earned: least squares of
     (won - p_market) on (p - p_market) through the origin, pulled toward SHRINK_PRIOR, clipped to [0, 1]. Picking the
-    best edges among thousands inflates them, so the share is usually well below 1."""
+    best edges among thousands inflates them, so the share is usually well below 1. "ci" / "raw_ci": 90% interval of the
+    share and of the raw slope from the picks resampled (fixed seed, so a rerun on the same picks gives the same interval);
+    only shown, the analysis uses "lambda"."""
     d = [(b["p"] - b["pm"], (1.0 if b["won"] else 0.0) - b["pm"]) for b in bets if b.get("pm") is not None]
     if not d:
         return {"lambda": 1.0, "raw": None, "n": 0}
-    sxx = sum(x * x for x, _ in d)
-    sxy = sum(x * y for x, y in d)
-    mean_sq = sxx / len(d)
-    lam = (sxy + SHRINK_PRIOR * SHRINK_WEIGHT * mean_sq) / (sxx + SHRINK_WEIGHT * mean_sq) if sxx > 0 else SHRINK_PRIOR
-    return {"lambda": float(min(1.0, max(0.0, lam))), "raw": float(sxy / sxx) if sxx > 0 else None, "n": len(d)}
+    x, y = np.array(d).T
+    lam, raw = _shrink_fit(x, y)
+    out = {"lambda": lam, "raw": raw, "n": len(d)}
+    if len(d) >= 2 and draws:
+        idx = np.random.default_rng(0).integers(0, len(d), size=(draws, len(d)))
+        fits = [_shrink_fit(x[i], y[i]) for i in idx]
+        lams = [f[0] for f in fits]
+        raws = [f[1] for f in fits if f[1] is not None]
+        out["ci"] = [float(np.quantile(lams, 0.05)), float(np.quantile(lams, 0.95))]
+        if raws:
+            out["raw_ci"] = [float(np.quantile(raws, 0.05)), float(np.quantile(raws, 0.95))]
+    return out
 
 
 def _sisal_vs_sharp(samples: list[dict]) -> dict:
@@ -381,7 +401,9 @@ def print_quality(report: dict) -> None:
     es = report.get("edge_shrink") or {}
     if es.get("n"):
         raw = f"{es['raw']:.2f}" if es.get("raw") is not None else "–"
-        print(f"\nEV prudente: quota del vantaggio sul mercato confermata dai risultati {es['lambda']:.2f} (grezza {raw}, {es['n']} giocate)")
+        ci = (f", intervallo 90% {es['ci'][0]:.2f}–{es['ci'][1]:.2f}" if es.get("ci") else "") + \
+             (f", grezza {es['raw_ci'][0]:.2f}–{es['raw_ci'][1]:.2f}" if es.get("raw_ci") else "")
+        print(f"\nEV prudente: quota del vantaggio sul mercato confermata dai risultati {es['lambda']:.2f} (grezza {raw}, {es['n']} giocate{ci})")
     if report.get("sisal_vs_sharp"):
         print("\nSisal contro prezzo equo Pinnacle (2 ore prima del calcio d'inizio):")
         for fam, v in report["sisal_vs_sharp"].items():

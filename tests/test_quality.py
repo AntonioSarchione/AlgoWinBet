@@ -75,3 +75,6 @@ def test_edge_shrink_is_low_when_picked_edges_do_not_win_more_than_the_market():
     assert edge_shrink(real)["lambda"] > 0.9
     few = edge_shrink(fake[:4])
     assert 0.3 < few["lambda"] < 0.5  # few picks: pulled toward one half
+    assert lo["ci"][0] <= lo["lambda"] <= lo["ci"][1] and lo["raw_ci"][0] < lo["raw"] < lo["raw_ci"][1]
+    assert edge_shrink(fake)["ci"] == lo["ci"]  # fixed seed: same picks, same interval
+    assert few["ci"][1] - few["ci"][0] > lo["ci"][1] - lo["ci"][0]  # fewer picks, wider interval

@@ -498,6 +498,8 @@ export type QualityReport = {
   n_matches: number;
   meta?: Record<string, QualityMeta>;
   calib_methods?: Record<string, { n: number; platt: number; beta: number; isotonic: number; chosen: "platt" | "beta" | "isotonic" }>;
+  // prudent EV: share of the model's edge over the market that the picks of the value test earned (ci: 90% interval)
+  edge_shrink?: { lambda: number; raw: number | null; n: number; ci?: [number, number]; raw_ci?: [number, number] };
 };
 export type QualityRun = { id: number; created_at: string; window_start: string; window_end: string; model_version: string; report: QualityReport };
 

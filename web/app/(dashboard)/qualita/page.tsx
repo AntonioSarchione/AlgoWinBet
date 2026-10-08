@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Activity, Gauge, LineChart, Scale, Target } from "lucide-react";
 import { latestQuality, type QualityFamily } from "@/lib/db";
 import { ago, pct, shortDate, signed } from "@/app/_components/format";
+import { EdgeShrink } from "@/app/_components/EdgeShrink";
 import { Empty } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
@@ -113,6 +114,7 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
   const rep = run.report;
   const league = rep.groups.campionati?.["1X2"];
   const v1x2 = rep.value["1X2"];
+  const es = rep.edge_shrink;
   const dModel = gap(league?.ll_model_same, league?.ll_close_same);
   const dEns = gap(league?.ll_ens_same, league?.ll_close_same);
   const dMeta = gap(league?.ll_meta_same, league?.ll_close_same);
@@ -293,6 +295,7 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             Selezioni che avrebbero superato le soglie live (EV ≥ {pct(rep.thresholds.min_ev)}, probabilità ≥ {pct(rep.thresholds.min_probability)}) alla quota di quel momento:
             Sisal quando l&apos;abbiamo, altrimenti la media del mercato. Il CLV (quota presa contro chiusura) misura il valore vero; il ROI su pochi casi è soprattutto fortuna.
           </p>
+          {es && es.n > 0 && <EdgeShrink es={es} />}
         </section>
       </div>
 
