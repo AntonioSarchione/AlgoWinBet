@@ -33,9 +33,9 @@ class PlayerParams:
 
 
 VARIANTS = {"attuale": PlayerParams(), "ruolo": PlayerParams(prior_90=1e9)}
-TUNE = {"attuale": PlayerParams(), "ruolo": PlayerParams(prior_90=1e9), "prior6": PlayerParams(prior_90=6.0),
-        "prior10": PlayerParams(prior_90=10.0), "ultime20": PlayerParams(last=20), "ultime20+prior6": PlayerParams(last=20, prior_90=6.0),
-        "disp4": PlayerParams(disp=4.0)}
+TUNE = {"attuale": PlayerParams(), "ruolo": PlayerParams(prior_90=1e9),
+        **{f"u{n}p{k:g}": PlayerParams(last=n, prior_90=k) for n in (20, 40) for k in (1.0, 3.0, 8.0, 20.0)},
+        **{f"u{n}p{k:g}d4": PlayerParams(last=n, prior_90=k, disp=4.0) for n in (20, 40) for k in (3.0, 20.0)}}
 
 
 def at_least(rate: float, k: int, disp: float = 0.0) -> float:
