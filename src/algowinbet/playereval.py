@@ -113,18 +113,18 @@ def load_appearances(store) -> tuple[list[tuple], dict[str, str], dict[str, tupl
     rows = store.db.execute(
         "SELECT r.kickoff, s.player_id, s.minutes, s.starter, s.shots, s.shots_on, s.fouls_committed, s.fouls_drawn, "
         "(CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END), s.assists, s.position, s.fixture_id, s.team, "
-        "r.competition, r.home, r.away "
+        "r.competition, r.home, r.away, s.goals, s.saves, s.goals_conceded, r.home_goals, r.away_goals "
         "FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id WHERE s.minutes > 0 ORDER BY r.kickoff").fetchall()
     ours = dict(store.db.execute("SELECT l.fotmob_id, p.position FROM fotmob_player_links l JOIN players p ON p.id = l.goal_id").fetchall())
     roles: dict[str, str] = {}
-    fixtures: dict[str, tuple[str, str, str]] = {}
+    fixtures: dict[str, tuple] = {}  # fixture -> (competition, home, away, home goals, away goals)
     out = []
     for r in rows:
         pid = r[1]
         if pid not in roles:
             roles[pid] = ours.get(pid) or ROLE_OF_POSITION.get(r[10], "MID")
-        fixtures.setdefault(r[11], (r[13], r[14], r[15]))
-        out.append((r[0], pid, r[2], r[3], *(v or 0 for v in r[4:10]), r[11], r[12]))
+        fixtures.setdefault(r[11], (r[13], r[14], r[15], r[19], r[20]))
+        out.append((r[0], pid, r[2], r[3], *(v or 0 for v in r[4:10]), r[11], r[12], r[16] or 0, r[17], r[18]))
     from .snapshots import referee_key
     refs = SnapshotProvider(store).referees()  # under the canonical result id
     for fid, source, name in store.db.execute("SELECT fixture_id, source, name FROM referees").fetchall():  # and under its own
@@ -167,7 +167,7 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
             got = {v: expected_counts(mine, prior, p) for v, p in variants.items()}
             if any(g is None for g in got.values()):
                 continue
-            comp, home, away = fixtures.get(fid, ("", "", ""))
+            comp, home, away = fixtures.get(fid, ("", "", ""))[:3]
             with_ref += fid in refs
             if team in (home, away) and any(p.opp or p.venue or p.ref for p in variants.values()):
                 f = ctx.factors(away if team == home else home, comp, team == home, refs.get(fid))
@@ -186,9 +186,10 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
             for x, v in enumerate(vals):
                 rs[x] += v
                 totals[fid][team][STATS[x]] += v
+            totals[fid][team]["goals"] = totals[fid][team].get("goals", 0.0) + (rest[nstat + 2] if len(rest) > nstat + 2 else 0)
             rs[-1] += mins
         for fid, by_team in totals.items():
-            comp, home, away = fixtures.get(fid, ("", "", ""))
+            comp, home, away = fixtures.get(fid, ("", "", ""))[:3]
             ctx.add(comp, home, away, by_team, refs.get(fid))
         i = j
     return PlayerReport(start, end, n, scores, with_ref)
@@ -228,3 +229,125 @@ def print_player_eval(rep: PlayerReport, calibration: tuple[str, ...] = ("ammoni
                 c, p, y = s.bins[b]
                 lo = BIN_EDGES[b - 1] if b else 0.0
                 print(f"    {lo:.2f}-{min(BIN_EDGES[b], 1.0):.2f}  {c:6d}  {p / c:.3f}  {y / c:.3f}")
+
+
+# ------------------------------------------------------------------------------------------------------------ keepers
+KEEPER_LINES = (("parate 2+", "sv", 2), ("parate 3+", "sv", 3), ("parate 4+", "sv", 4), ("tiri in porta subiti 4+", "ts", 4),
+                ("tiri in porta subiti 6+", "ts", 6), ("porta inviolata", "gc", 0), ("gol subiti 2+", "gc", 2))
+KEEPER_FULL = 80  # minutes of a keeper's match that counts
+
+
+@dataclass(frozen=True)
+class KeeperParams:
+    last: int = 20  # full matches read
+    k: float = 5.0  # matches of the keepers' average added to his own
+    disp: float = 0.0  # saves and shots on target faced: negative binomial shape (0: Poisson); goals conceded always Poisson
+    opp: float = 0.0  # opponent's own attack (shots on target, goals) and venue factors
+    venue: float = 0.0
+
+
+KEEPER_VARIANTS = {"media": KeeperParams(last=10, k=0.0), "k5": KeeperParams(), "k5+contesto": KeeperParams(opp=1.0, venue=1.0)}
+KEEPER_TUNE = {**KEEPER_VARIANTS, "k2": KeeperParams(k=2.0), "k10": KeeperParams(k=10.0), "k20": KeeperParams(k=20.0),
+               "ultime40": KeeperParams(last=40), "k10+contesto": KeeperParams(k=10.0, opp=1.0, venue=1.0),
+               "k10+contesto3/4": KeeperParams(k=10.0, opp=0.75, venue=1.0),
+               "k10+contesto+disp8": KeeperParams(k=10.0, opp=1.0, venue=1.0, disp=8.0),
+               "k20+contesto": KeeperParams(k=20.0, opp=1.0, venue=1.0)}
+
+
+def keeper_rates(hist: list[tuple[float, float, float]], mu: tuple[float, float, float], prm: KeeperParams) -> tuple[float, float, float]:
+    """Expected shots on target faced, goals conceded, saves in a full match from his last full matches (most recent first)
+    and the keepers' average, with prm.k matches of it."""
+    h = hist[:prm.last]
+    n = len(h)
+    return tuple((sum(x[i] for x in h) + prm.k * mu[i]) / (n + prm.k) if n + prm.k > 0 else mu[i] for i in range(3))
+
+
+def evaluate_keepers(store, start: datetime, end: datetime, variants: dict[str, KeeperParams] | None = None,
+                     data: tuple | None = None) -> PlayerReport:
+    """Full matches of keepers in [start, end), each predicted from the keeper's earlier full matches: shots on target
+    faced (the opponent's players' shots on target), goals conceded (our result) and saves (FotMob's when read, else the
+    difference)."""
+    from .playercontext import MatchContext, apply
+    variants = variants or KEEPER_VARIANTS
+    apps, roles, fixtures, _refs = data or load_appearances(store)
+    nstat = len(STATS)
+    ctx = MatchContext()
+    hist: dict[str, deque] = defaultdict(lambda: deque(maxlen=max(p.last for p in variants.values())))
+    acc = [0.0, 0.0, 0.0, 0]  # keepers' sums of ts, gc, sv and full matches
+    scores = {v: {label: LineScore() for label, _, _ in KEEPER_LINES} for v in variants}
+    s0, e0 = start.isoformat(), end.isoformat()
+    n = 0
+    i = 0
+    while i < len(apps):
+        day = apps[i][0][:10]
+        j = i
+        while j < len(apps) and apps[j][0][:10] == day:
+            j += 1
+        batch = apps[i:j]
+        totals: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: dict.fromkeys(STATS, 0.0)))
+        for ko, pid, mins, starter, *rest in batch:
+            vals, fid, team = rest[:nstat], rest[nstat], rest[nstat + 1]
+            for x, v in enumerate(vals):
+                totals[fid][team][STATS[x]] += v
+            totals[fid][team]["goals"] = totals[fid][team].get("goals", 0.0) + rest[nstat + 2]
+        done = []
+        for ko, pid, mins, starter, *rest in batch:
+            fid, team, fm_sv, fm_gc = rest[nstat], rest[nstat + 1], rest[nstat + 3], rest[nstat + 4]
+            if roles.get(pid) != "GK" or mins < KEEPER_FULL or fid not in fixtures:
+                continue
+            comp, home, away, hg, ag = fixtures[fid]
+            if team not in (home, away) or hg is None or ag is None:
+                continue
+            opp = away if team == home else home
+            if opp not in totals[fid]:
+                continue
+            ts = totals[fid][opp]["shots_on"]
+            gc = fm_gc if fm_gc is not None else (ag if team == home else hg)
+            sv = fm_sv if fm_sv is not None else max(0.0, ts - gc)
+            done.append((pid, ts, gc, sv))
+            if s0 <= ko < e0 and acc[3] >= 50 and hist[pid]:
+                mu = (acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3])
+                mine = list(reversed(hist[pid]))
+                f = ctx.attack(opp, comp, team == home)
+                n += 1
+                y = {"ts": ts, "gc": gc, "sv": sv}
+                for v, prm in variants.items():
+                    r_ts, r_gc, r_sv = keeper_rates(mine, mu, prm)
+                    m = apply({"shots_on": r_ts, "goals": r_gc}, f, prm.opp, prm.venue)
+                    scale = m["shots_on"] / r_ts if r_ts > 0 else 1.0
+                    rate = {"ts": m["shots_on"], "gc": m["goals"], "sv": r_sv * scale}
+                    for label, stat, k in KEEPER_LINES:
+                        if stat == "gc" and k == 0:
+                            p = 1.0 - at_least(rate["gc"], 1)
+                            hit = int(y["gc"] == 0)
+                        else:
+                            p = at_least(rate[stat], k, prm.disp if stat != "gc" else 0.0)
+                            hit = int(y[stat] >= k)
+                        scores[v][label].add(p, hit)
+        for pid, ts, gc, sv in done:  # the day's matches enter the history after all of them are predicted
+            hist[pid].append((ts, gc, sv))
+            acc[0] += ts
+            acc[1] += gc
+            acc[2] += sv
+            acc[3] += 1
+        for fid, by_team in totals.items():
+            if fid in fixtures:
+                comp, home, away = fixtures[fid][:3]
+                ctx.add(comp, home, away, by_team)
+        i = j
+    return PlayerReport(start, end, n, scores)
+
+
+def print_keeper_eval(rep: PlayerReport, base: str = "k5") -> None:
+    print(f"portieri, replay {rep.start:%Y-%m-%d} - {rep.end:%Y-%m-%d}: {rep.starts} partite intere")
+    for label, _, _ in KEEPER_LINES:
+        print(f"  {label}")
+        for v, by in rep.scores.items():
+            s = by[label]
+            if not s.terms:
+                continue
+            line = f"    {v:20} log loss {sum(s.terms) / len(s.terms):.4f}  succede {s.hits} (attesi {s.exp:.0f})"
+            if v != base and base in rep.scores:
+                m, hw = _diff(s, rep.scores[base][label])
+                line += f"  vs {base} {m:+.4f} ± {hw:.4f}" + ("  (meglio)" if m + hw < 0 else "  (peggio)" if m - hw > 0 else "")
+            print(line)

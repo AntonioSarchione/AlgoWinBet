@@ -47,3 +47,19 @@ def test_context_factors_follow_the_opponent_the_venue_and_the_referee():
     assert ctx.factors("Leaky", "Serie A", True, "new")["ref"] == {}  # a referee never seen: no factor
     out = apply({"shots": 2.0, "cards": 0.2}, f, opp=1.0)
     assert out["shots"] == 2.0 * f["opp"]["shots"] and out["cards"] == 0.2 * f["opp"]["cards"]
+
+
+def test_keeper_replay_reads_shots_faced_from_the_opponents_rows():
+    from algowinbet.playereval import KeeperParams, evaluate_keepers
+    apps, roles, fixtures = [], {"fotmob:gA": "GK", "fotmob:gB": "GK", "fotmob:sA": "FWD", "fotmob:sB": "FWD"}, {}
+    for d in range(80):
+        ko, fid = (T0 + timedelta(days=d)).isoformat(), f"m{d}"
+        fixtures[fid] = ("Serie A", "A", "B", 1, 0)  # A scores once a match, B never
+        # (ko, player, minutes, starter, shots, on target, fouls, fouls won, booked, assists, fixture, team, goals, saves, conceded)
+        apps += [(ko, "fotmob:gA", 90, 1, 0, 0, 0, 0, 0, 0, fid, "A", 0, None, None), (ko, "fotmob:gB", 90, 1, 0, 0, 0, 0, 0, 0, fid, "B", 0, None, None),
+                 (ko, "fotmob:sA", 90, 1, 6, 5, 1, 1, 0, 0, fid, "A", 1, None, None), (ko, "fotmob:sB", 90, 1, 2, 1, 1, 1, 0, 0, fid, "B", 0, None, None)]
+    rep = evaluate_keepers(None, T0 + timedelta(days=60), T0 + timedelta(days=80), {"k5": KeeperParams()}, data=(apps, roles, fixtures, {}))
+    assert rep.starts == 40  # both keepers, 20 days
+    s = rep.scores["k5"]["parate 4+"]
+    assert s.hits == 20  # B's keeper faces 5 on target and concedes 1: 4 saves; A's keeper saves 1
+    assert rep.scores["k5"]["porta inviolata"].hits == 20  # A never concedes

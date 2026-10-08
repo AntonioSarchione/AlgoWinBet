@@ -73,7 +73,7 @@ def match_context(store, now: datetime):
     ctx = MatchContext()
     rows = store.db.execute(
         "SELECT s.fixture_id, s.team, r.competition, r.home, r.away, SUM(s.shots), SUM(s.shots_on), SUM(s.fouls_committed), "
-        "SUM(s.fouls_drawn), SUM(CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END), SUM(s.assists) "
+        "SUM(s.fouls_drawn), SUM(CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END), SUM(s.assists), SUM(s.goals) "
         "FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id WHERE s.minutes > 0 AND r.kickoff >= ? AND r.kickoff < ? "
         "GROUP BY s.fixture_id, s.team ORDER BY r.kickoff", ((now - SINCE).isoformat(), now.isoformat())).fetchall()
     by_fx: dict[str, tuple] = {}

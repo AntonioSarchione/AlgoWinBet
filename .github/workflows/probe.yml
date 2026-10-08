@@ -80,7 +80,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xinames" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-names --max "${ARG:-40}" "${dr[@]}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "goalusage" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet goal-usage --days "${ARG:-3}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xiplayer" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-player "$ARG" ${PARAMS:+--team "$PARAMS"} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-eval --since "${ARG:-2026-01-01}" ${PARAMS:+--tune} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-eval --since "${ARG:-2026-01-01}" $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "pubcheck" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet pub-check --team "${ARG:-PSV}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobref" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-referee --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobkeys" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-keys --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi

@@ -1505,11 +1505,15 @@ def cmd_xi_eval(a) -> None:
 
 def cmd_player_eval(a) -> None:
     """Player numbers of the lineups tab replayed day by day against what the players really did (no API request)."""
-    from .playereval import TUNE, evaluate_players, print_player_eval
+    from .playereval import KEEPER_TUNE, TUNE, evaluate_keepers, evaluate_players, load_appearances, print_keeper_eval, print_player_eval
     store = SnapshotStore(a.db)
     try:
         start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
-        print_player_eval(evaluate_players(store, start, datetime.now(timezone.utc), variants=TUNE if a.tune else None))
+        data = load_appearances(store)
+        if a.keepers:
+            print_keeper_eval(evaluate_keepers(store, start, datetime.now(timezone.utc), variants=KEEPER_TUNE if a.tune else None, data=data))
+        else:
+            print_player_eval(evaluate_players(store, start, datetime.now(timezone.utc), variants=TUNE if a.tune else None, data=data))
     finally:
         store.close()
 
@@ -2758,6 +2762,7 @@ def build_parser() -> argparse.ArgumentParser:
     pe = sub.add_parser("player-eval", help="numeri dei giocatori (tiri, falli, cartellino, assist) rigiocati giorno per giorno (nessuna richiesta API)")
     pe.add_argument("--since", default="2026-01-01")
     pe.add_argument("--tune", action="store_true", help="varianti (ultime presenze, peso del ruolo, binomiale negativa)")
+    pe.add_argument("--keepers", action="store_true", help="i portieri: tiri in porta subiti, gol subiti, parate")
     pe.add_argument("--db", default="turso")
     pe.set_defaults(fn=cmd_player_eval)
     se = sub.add_parser("scorer-eval", help="Fase 9: marcatori rigiocati settimana per settimana (nessuna richiesta API)")
