@@ -138,7 +138,7 @@ class FotMobPrematch:
         return out
 
     def run(self, st: CollectStats) -> PrematchReport:
-        from .fotmobcollector import FotMobError, pid
+        from .fotmobcollector import FotMobError, pid, referee_of
         rep = PrematchReport()
         now = self.col.now()
         due = due_reads(self.store, {lg.competition for lg in self.col.leagues}, now)
@@ -165,6 +165,9 @@ class FotMobPrematch:
             self.col._ok(page)
             st.requests += 1
             rep.pages += 1
+            ref = referee_of(pp)
+            if ref:
+                st.add("arbitri FotMob", self.store.save_referees(SOURCE, [(f.id, ref)], now))
             lineup = (pp.get("content") or {}).get("lineup") or {}
             absent, xi = {}, []
             for key, team in (("homeTeam", f.home), ("awayTeam", f.away)):

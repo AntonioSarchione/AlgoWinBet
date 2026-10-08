@@ -103,6 +103,13 @@ def add_gk_columns(store) -> None:
     store.db.commit()
 
 
+def referee_of(pp: dict) -> str | None:
+    """The referee on a match page (matchFacts.infoBox.Referee.text), finished or coming; None when not appointed yet."""
+    ref = ((((pp.get("content") or {}).get("matchFacts") or {}).get("infoBox") or {}).get("Referee")) or {}
+    name = ref.get("text") if isinstance(ref, dict) else None
+    return str(name).strip() or None if name else None
+
+
 def pid(fotmob_id) -> str:
     return f"fotmob:{fotmob_id}"
 
@@ -412,6 +419,9 @@ class FotMobCollector:
             r = self.provider.result_of(fid)
             stats, absences, kept = self.parse_match(pp, fid, r.home if r else None, r.away if r else None)
             self.client.keep(f"/match/{ext}", None, kept)
+            ref = referee_of(pp)
+            if ref:
+                st.add("arbitri FotMob", self.store.save_referees(SOURCE, [(fid, ref)], self.now()))
             if stats:
                 st.add("statistiche giocatori FotMob", self.store._bulk(
                     "INSERT OR REPLACE INTO fotmob_player_stats(fixture_id,team,player_id,name,position,starter,minutes,rating,goals,assists,"

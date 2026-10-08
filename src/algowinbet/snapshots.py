@@ -563,7 +563,7 @@ class SnapshotProvider:
                       key=lambda r: (r.kickoff, r.fixture_id))
 
     def referees(self) -> dict[str, str]:
-        """Referee key per match under the canonical result id (football-data first, then API-Football)."""
+        """Referee key per match under the canonical result id (football-data first, then API-Football and FotMob)."""
         try:
             rows = self.store.db.execute("SELECT fixture_id, source, name FROM referees").fetchall()
         except sqlite3.Error:

@@ -46,7 +46,8 @@ def _match(mid, ko):
                                    "awayTeam": {"id": 20, "starters": [], "unavailable": []}},
                         "matchFacts": {"events": {"events": [{"type": "Card", "card": "Yellow", "playerId": 2},
                                                              {"type": "Card", "card": "YellowRed", "playerId": 2},
-                                                             {"type": "Goal", "playerId": 1}]}}}}
+                                                             {"type": "Goal", "playerId": 1}]},
+                                       "infoBox": {"Referee": {"text": "Serdar Gözübüyük", "country": "Netherlands"}}}}}
 
 
 class FakeFotMob:
@@ -98,6 +99,7 @@ def test_recent_match_is_linked_and_its_player_stats_saved():
     assert s.db.execute("SELECT team, name, kind, expected_return, market_value FROM fotmob_absences").fetchall() == [
         ("PEC Zwolle", "Hurt", "injury", "Late October", 500000)]
     assert st.saved["statistiche giocatori FotMob"] == 2
+    assert s.db.execute("SELECT fixture_id, source, name FROM referees").fetchall() == [("g1", "fotmob", "Serdar Gözübüyük")]
     kept = json.loads(s.raw_body(s.db.execute("SELECT id FROM raw_requests WHERE endpoint='/match/500'").fetchone()[0]))
     assert kept["players"]["1"]["shots"][0]["expectedGoals"] == 0.47  # the shot map is kept, not the 1 MB page
 
