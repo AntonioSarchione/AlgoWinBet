@@ -321,3 +321,11 @@ def test_backfill_never_raises_on_a_dropped_turso_connection():
     col.due = lambda: (_ for _ in ()).throw(ValueError("Hrana: `http error: stream closed`"))
     st, left = col.backfill(60)
     assert left == -1 and any("Turso caduta" in e for e in st.errors)
+
+
+def test_score_of_a_season_page_match():
+    from algowinbet.fotmobcollector import score_of
+    assert score_of({"home": {"score": 2}, "away": {"score": 1}, "status": {"finished": True}}) == [2, 1]
+    assert score_of({"home": {}, "away": {}, "status": {"finished": True, "scoreStr": "0 - 3"}}) == [0, 3]
+    assert score_of({"home": {"score": 1}, "away": {"score": 0}, "status": {"finished": False}}) is None
+    assert score_of({"home": {"score": 3}, "away": {"score": 0}, "status": {"finished": True, "awarded": True}}) is None

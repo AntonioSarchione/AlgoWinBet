@@ -103,6 +103,21 @@ def add_gk_columns(store) -> None:
     store.db.commit()
 
 
+def score_of(m: dict) -> list[int] | None:
+    """[home, away] goals of a finished match on a season page (home.score / away.score, else status.scoreStr "2 - 1"),
+    None when not finished, cancelled or awarded, or unreadable."""
+    st = m.get("status") or {}
+    if not st.get("finished") or st.get("cancelled") or st.get("awarded"):
+        return None
+    h, a = (m.get("home") or {}).get("score"), (m.get("away") or {}).get("score")
+    if isinstance(h, int) and isinstance(a, int):
+        return [h, a]
+    parts = str(st.get("scoreStr") or "").replace(" ", "").split("-")
+    if len(parts) == 2 and all(x.isdigit() for x in parts):
+        return [int(parts[0]), int(parts[1])]
+    return None
+
+
 def referee_of(pp: dict) -> str | None:
     """The referee on a match page (matchFacts.infoBox.Referee.text), finished or coming; None when not appointed yet."""
     ref = ((((pp.get("content") or {}).get("matchFacts") or {}).get("infoBox") or {}).get("Referee")) or {}
@@ -288,7 +303,8 @@ class FotMobCollector:
         params = {"season": season} if season else None
         pp = self.client.page(f"/leagues/{league.fotmob_id}/fixtures/x", params)
         matches = [{"id": str(m.get("id")), "home": {"name": (m.get("home") or {}).get("name")}, "away": {"name": (m.get("away") or {}).get("name")},
-                    "status": {"utcTime": (m.get("status") or {}).get("utcTime"), "finished": bool((m.get("status") or {}).get("finished"))}}
+                    "status": {"utcTime": (m.get("status") or {}).get("utcTime"), "finished": bool((m.get("status") or {}).get("finished"))},
+                    "score": score_of(m)}
                    for m in ((pp.get("fixtures") or {}).get("allMatches") or [])]
         # the seasons before the one the page shows, newest first, whatever order FotMob lists them in (newest first, 2026-10-06)
         shown = str((pp.get("details") or {}).get("selectedSeason") or season or "")

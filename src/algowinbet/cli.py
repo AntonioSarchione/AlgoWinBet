@@ -957,7 +957,7 @@ def _result_holes(store: SnapshotStore, col, names: TeamNames) -> dict[str, list
             continue
         first = min(r.kickoff for r in results)
         holes = out.setdefault(lg.competition, [])
-        for _, (_, page) in sorted(col._stored_pages(lg).items()):
+        for season, (_, page) in sorted(col._stored_pages(lg).items()):
             for m in page.get("matches") or []:
                 ko = _utc(m)
                 if m["id"] in linked or not m["status"]["finished"] or ko is None or ko < first or now - ko < timedelta(hours=6):
@@ -967,7 +967,7 @@ def _result_holes(store: SnapshotStore, col, names: TeamNames) -> dict[str, list
                 seen = f"GOAL {goal[0][4]} {goal[0][3]:%d/%m %H:%M}" if goal else "GOAL: nessuna partita"
                 if goal and store.db.execute("SELECT 1 FROM results WHERE fixture_id = ?", (goal[0][0],)).fetchone():
                     seen += ", risultato presente (nomi diversi?)"
-                holes.append((ko, home, away, seen))
+                holes.append((ko, home, away, seen, m, season))
     return out
 
 
@@ -989,12 +989,65 @@ def cmd_results_holes(a) -> None:
         if lg.competition not in holes:
             continue
         by_day: dict[str, list[str]] = {}
-        for ko, home, away, seen in holes[lg.competition]:
+        for ko, home, away, seen, *_ in holes[lg.competition]:
             by_day.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
         first = min(r.kickoff for r in col._results(lg))
         print(f"{lg.competition}: {len(holes[lg.competition])} partite senza nostro risultato (dal {first:%d/%m/%Y})")
         for day, ms in sorted(by_day.items()):
             print(f"  {day}: {len(ms)} · " + " | ".join(ms[:a.show]) + (" ..." if len(ms) > a.show else ""))
+
+
+def cmd_results_fotmob(a) -> None:
+    """Results our sources never had (finished FotMob matches GOAL knows nothing of, see results-holes), made from the
+    FotMob season pages: the pages missing the score are read again (one FotMob page per season), then each match becomes
+    a result "fotmob:<id>" linked to its FotMob page, whose player stats the next FotMob run reads. No API request."""
+    from .autorun import AutoConfig
+    from .domain import MatchResult
+    from .fotmobcollector import FotMobError, _utc
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    names = TeamNames.load(a.aliases)
+    col = _fotmob_for(cfg, store, names)
+    def gaps() -> dict[str, list[tuple]]:  # UEFA cups only: a league hole can be a name spelled differently, not a missing match
+        return {comp: [h for h in hs if h[3] == "GOAL: nessuna partita"] for comp, hs in _result_holes(store, col, names).items()
+                if comp.startswith("UEFA")}
+    holes = gaps()
+    by_comp = {lg.competition: lg for lg in col.leagues}
+    for comp, hs in sorted(holes.items()):
+        stale = sorted({h[5] for h in hs if "score" not in h[4]})
+        if not stale:
+            continue
+        print(f"{comp}: rilettura delle pagine {', '.join(stale)}" + (" (prova: niente letture)" if a.dry_run else ""))
+        if a.dry_run:
+            continue
+        for season in stale:
+            try:
+                col._season_page(by_comp[comp], None if season == "current" else season)
+            except FotMobError as e:
+                print(f"  {season}: {e}")
+    holes = gaps()
+    now = datetime.now(timezone.utc)
+    for comp, hs in sorted(holes.items()):
+        made, links = [], []
+        for ko, home, away, _seen, m, _season in hs:
+            sc = m.get("score")
+            if not sc:
+                continue
+            fid = f"fotmob:{m['id']}"
+            made.append(MatchResult(fixture_id=fid, competition=comp, home=home, away=away, kickoff=_utc(m), home_goals=sc[0], away_goals=sc[1]))
+            links.append(("fotmob", str(m["id"]), fid, now.isoformat()))
+        if not hs:
+            continue
+        print(f"{comp}: {len(hs)} buchi, {len(made)} con il punteggio FotMob" + (" (prova: niente scritto)" if a.dry_run else ""))
+        if a.dry_run or not made:
+            continue
+        n = store.save_results("fotmob", made, now)
+        saved = {r[0] for r in store.db.execute(f"SELECT fixture_id FROM results WHERE fixture_id IN ({','.join('?' * len(made))})",
+                                                [r.fixture_id for r in made]).fetchall()}
+        links = [x for x in links if x[2] in saved]  # a result dropped as a repeat of a stored match gets no link
+        store._bulk("INSERT OR IGNORE INTO fixture_links(source, ext_id, fixture_id, linked_at)", links)
+        print(f"  salvati {n} risultati, collegati {len(links)}")
+    store.db.commit()
 
 
 def refill_windows(days: list, gap: int = 3) -> list[tuple]:
@@ -2680,6 +2733,12 @@ def build_parser() -> argparse.ArgumentParser:
     rr.add_argument("--aliases", default="configs/team_aliases.json")
     rr.add_argument("--db", default="algowinbet.db")
     rr.set_defaults(fn=cmd_results_refill)
+    rf = sub.add_parser("results-fotmob", help="risultati che GOAL non ha mai avuto, dalle pagine stagione FotMob (nessuna richiesta API)")
+    rf.add_argument("--dry-run", action="store_true")
+    rf.add_argument("--config", default="configs/collect.json")
+    rf.add_argument("--aliases", default="configs/team_aliases.json")
+    rf.add_argument("--db", default="algowinbet.db")
+    rf.set_defaults(fn=cmd_results_fotmob)
     rh = sub.add_parser("results-holes", help="partite finite sulle pagine FotMob senza nostro risultato, e cosa sa GOAL (nessuna richiesta)")
     rh.add_argument("--show", type=int, default=3, help="partite mostrate per giorno")
     rh.add_argument("--config", default="configs/collect.json")
