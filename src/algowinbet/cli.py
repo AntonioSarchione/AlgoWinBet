@@ -801,6 +801,39 @@ def cmd_fotmob_referee(a) -> None:
         print(f"{what}: Referee {json.dumps(ref, ensure_ascii=False)[:200] if ref is not None else 'assente'}")
 
 
+def cmd_pub_check(a) -> None:
+    """The latest published run at a glance: the highest scorer probabilities and the player cards of one match (no request)."""
+    store = SnapshotStore(a.db)
+    run = store.db.execute("SELECT id, created_at FROM pub_runs ORDER BY id DESC LIMIT 1").fetchone()
+    if not run:
+        print("nessuna analisi pubblicata")
+        return
+    print(f"run {run[0]} del {run[1][:16]}")
+    top = []
+    for home, away, sc in store.db.execute("SELECT home, away, scorers FROM pub_fixtures WHERE run_id = ? AND scorers IS NOT NULL", (run[0],)):
+        for team, s in json.loads(sc).items():
+            top += [(p.get("a", 0), p.get("name") or p.get("n") or p.get("id"), team, f"{home}-{away}") for p in s.get("players") or []]
+    print("marcatori più probabili:")
+    for p, name, team, match in sorted(top, key=lambda x: -x[0])[:10]:
+        print(f"  {p:.0%}  {name} ({team}, {match})")
+    row = store.db.execute("SELECT f.home, f.away, p.cards FROM pub_players p JOIN pub_fixtures f ON f.run_id = p.run_id AND f.fixture_id = p.fixture_id "
+                           "WHERE p.run_id = ? AND (f.home LIKE ? OR f.away LIKE ?) ORDER BY f.kickoff LIMIT 1",
+                           (run[0], f"%{a.team}%", f"%{a.team}%")).fetchone()
+    if not row:
+        print(f"nessuna scheda per {a.team}")
+        return
+    cards = json.loads(row[2])
+    names = dict(store.db.execute(f"SELECT id, name FROM players WHERE id IN ({','.join('?' * len(cards))})", list(cards)).fetchall())
+    print(f"schede {row[0]}-{row[1]} ({len(cards)} giocatori), i 8 con più tiri attesi:")
+    out = sorted(((k, v) for k, v in cards.items() if not v.get("gk")), key=lambda kv: -kv[1].get("sh", 0))[:8]
+    for k, v in out:
+        print(f"  {names.get(k, k)}: xG {v.get('xg')} TP/TT {v.get('sot')}/{v.get('sh')} FF/FS {v.get('fc')}/{v.get('fd')} "
+              f"CG {v.get('cg', 0):.0%} AS {v.get('as', 0):.0%} min {v.get('min')}")
+    for k, v in cards.items():
+        if v.get("gk"):
+            print(f"  portiere {names.get(k, k)}: TS {v.get('ts')} GS {v.get('gc')} PP {v.get('sv')} CG {v.get('cg', 0):.0%}")
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2677,6 +2710,10 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--config", default="configs/collect.json")
     pg.add_argument("--apply", action="store_true", help="senza: solo elenco, nessuna cancellazione")
     pg.set_defaults(fn=cmd_registry_purge_stats)
+    pk = sub.add_parser("pub-check", help="ultima analisi pubblicata: marcatori più probabili e schede di una partita")
+    pk.add_argument("--team", default="PSV")
+    pk.add_argument("--db", default="turso")
+    pk.set_defaults(fn=cmd_pub_check)
     fr = sub.add_parser("fotmob-referee", help="dove FotMob mette l'arbitro (2 pagine FotMob)")
     fr.add_argument("--comp", default="Serie A")
     fr.add_argument("--db", default="turso")
