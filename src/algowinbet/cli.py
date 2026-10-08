@@ -780,6 +780,27 @@ def cmd_fotmob_keys(a) -> None:
     print("mappate e presenti: " + ", ".join(k for k in ("saves", "goals_conceded", "expected_goals_on_target_faced") if k in keys))
 
 
+def cmd_fotmob_referee(a) -> None:
+    """Where FotMob puts the referee (2 FotMob pages: the last finished match and the next one of a competition). Prints the
+    infoBox keys and the referee field only."""
+    from .fotmobcollector import FotMobClient
+    store = SnapshotStore(a.db)
+    client = FotMobClient(store=store)
+    for what, sql in (("finita", "SELECT l.ext_id FROM fixture_links l JOIN results r ON r.fixture_id = l.fixture_id WHERE l.source = 'fotmob' "
+                                 "AND r.competition = ? ORDER BY r.kickoff DESC LIMIT 1"),
+                      ("prossima", "SELECT l.ext_id FROM fixture_links l JOIN fixtures f ON f.fixture_id = l.fixture_id WHERE l.source = 'fotmob' "
+                                   "AND f.competition = ? AND f.kickoff > ? ORDER BY f.kickoff LIMIT 1")):
+        args = (a.comp,) if what == "finita" else (a.comp, datetime.now(timezone.utc).isoformat())
+        row = store.db.execute(sql, args).fetchone()
+        if not row:
+            print(f"{what}: nessuna partita FotMob collegata")
+            continue
+        info = ((client.page(f"/match/{row[0]}").get("content") or {}).get("matchFacts") or {}).get("infoBox") or {}
+        ref = info.get("Referee")
+        print(f"{what}: infoBox {sorted(info)}")
+        print(f"{what}: Referee {json.dumps(ref, ensure_ascii=False)[:200] if ref is not None else 'assente'}")
+
+
 def cmd_fotmob_tick(a) -> None:
     """One FotMob run (fotmob workflow): the coming matches first (absences, official XI), then the finished ones (player
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
@@ -2644,6 +2665,10 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--config", default="configs/collect.json")
     pg.add_argument("--apply", action="store_true", help="senza: solo elenco, nessuna cancellazione")
     pg.set_defaults(fn=cmd_registry_purge_stats)
+    fr = sub.add_parser("fotmob-referee", help="dove FotMob mette l'arbitro (2 pagine FotMob)")
+    fr.add_argument("--comp", default="Serie A")
+    fr.add_argument("--db", default="turso")
+    fr.set_defaults(fn=cmd_fotmob_referee)
     rb = sub.add_parser("referees-backfill", help="Fase 7: arbitri delle partite passate dai dati già salvati (nessuna richiesta)")
     rb.add_argument("--db", default="turso")
     rb.add_argument("--config", default="configs/collect.json")

@@ -73,3 +73,12 @@ def test_net_growth_reads_the_quote_rows_of_a_report_six_days_old():
     days, rows = _rows_then(store.db, now)
     assert round(days) == 7 and rows == 1200  # the newest report at least 6 days old
     assert _rows_then(store.db, now - _td(days=5)) is None  # no report old enough yet: fall back to the rows of the last week
+
+
+def test_suspended_api_football_account_is_a_warning():
+    st = _store()
+    st.db.execute("INSERT INTO raw_requests(source, fetched_at) VALUES('goal-api', ?)", ((NOW - timedelta(hours=1)).isoformat(),))
+    st.db.execute("INSERT INTO pub_runs(created_at) VALUES(?)", ((NOW - timedelta(hours=2)).isoformat(),))
+    assert "src-api-football-blocked" not in _levels(health.run_health(st, NOW)[0])
+    st.mark_job("api-football-blocked", NOW - timedelta(hours=3), "suspended")
+    assert _levels(health.run_health(st, NOW)[0])["src-api-football-blocked"] == "warn"

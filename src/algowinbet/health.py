@@ -103,6 +103,11 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
         checks.append(Check(f"src-{src}", f"Raccolta {name}", ("error" if src == "goal-api" else "warn") if stale else "ok",
                             f"ultima richiesta {_age(now, t)}"))
 
+    blocked = _ts(_one(db, "SELECT done_at FROM jobs WHERE name = 'api-football-blocked'"))
+    if blocked and now - blocked < timedelta(hours=48):
+        checks.append(Check("src-api-football-blocked", "Account API-Football", "warn",
+                            f"sospeso (ultima risposta {_age(now, blocked)}): richieste in pausa, una prova al giorno"))
+
     # 2. published analysis
     t = _ts(_one(db, "SELECT MAX(created_at) FROM pub_runs"))
     lvl = "error" if t is None or now - t > timedelta(hours=72) else "warn" if now - t > STALE else "ok"

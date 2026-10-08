@@ -215,3 +215,36 @@ def test_player_stats_of_finished_matches_only_from_spare_budget():
     rows = s.db.execute("SELECT team, player_id, shots, shots_on, fouls_committed, yellow FROM player_match_stats ORDER BY player_id").fetchall()
     assert rows == [("Milan", "apif:100", 5, 3, 0, 0), ("Inter", "apif:200", 0, 0, 4, 1)]  # the unused substitute is skipped
     assert col.player_stats_due() == []
+
+
+def test_suspended_account_pauses_requests_for_a_day():
+    st = SnapshotStore(":memory:")
+    calls = []
+    clock = {"now": NOW}
+
+    def suspended(url, headers):
+        calls.append(url)
+        return 200, {}, json.dumps({"errors": {"access": "Your account is suspended"}, "response": []}).encode()
+
+    c = ApiFootballClient(api_key="k", store=st, transport=suspended, sleep=lambda s: None, now=lambda: clock["now"])
+    for _ in range(3):
+        try:
+            c.get("/fixtures", {"date": "2026-10-03"})
+        except Exception as e:
+            last = str(e)
+    assert len(calls) == 1 and "in pausa" in last  # only the first request reaches the API
+    assert c.blocked_since() == NOW
+    clock["now"] = NOW + timedelta(hours=25)
+    try:
+        c.get("/fixtures", {"date": "2026-10-04"})
+    except Exception:
+        pass
+    assert len(calls) == 2 and c.blocked_since() == NOW + timedelta(hours=25)  # one try a day, still suspended
+
+
+def test_free_status_answer_lifts_the_pause():
+    st = SnapshotStore(":memory:")
+    st.mark_job("api-football-blocked", NOW, "suspended")
+    ok = lambda url, headers: (200, {}, json.dumps({"errors": [], "response": {"subscription": {"plan": "Free", "active": True}}}).encode())
+    c = ApiFootballClient(api_key="k", store=st, transport=ok, sleep=lambda s: None, now=lambda: NOW)
+    assert c.status()["active"] and c.blocked_since() is None

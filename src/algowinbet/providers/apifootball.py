@@ -10,7 +10,7 @@ import json
 import os
 import time
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..snapshots import BudgetGuard, SnapshotStore
@@ -20,6 +20,8 @@ SOURCE = "api-football"
 BASE_URL = "https://v3.football.api-sports.io"
 FREE_ENDPOINTS = {"/status"}
 MIN_INTERVAL_S = 6.5  # 10 requests a minute, with a margin
+BLOCKED_JOB = "api-football-blocked"  # jobs row written when the account answers "access" (suspended, blocked)
+BLOCKED_PAUSE = timedelta(hours=24)  # then one request a day checks whether the account is back
 
 
 class ApiFootballError(RuntimeError):
@@ -49,6 +51,10 @@ class ApiFootballClient:
     def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict:
         """One request. Returns the JSON envelope ({get, parameters, errors, results, paging, response})."""
         params = {k: v for k, v in (params or {}).items() if v is not None}
+        if endpoint not in FREE_ENDPOINTS:
+            since = self.blocked_since()
+            if since and self.now() - since < BLOCKED_PAUSE:
+                raise ApiFootballError(f"account API-Football sospeso dal {since:%d/%m %H:%M} UTC: richieste in pausa per 24 ore")
         if self.budget and endpoint not in FREE_ENDPOINTS:
             self.budget.check(1)  # raises BudgetExceeded before anything is sent
         wait = MIN_INTERVAL_S - (self.clock() - self._last)
@@ -79,13 +85,28 @@ class ApiFootballClient:
         except ValueError as e:
             raise ApiFootballError(f"risposta non JSON da {endpoint}", 200) from e
         errors = env.get("errors")
+        if isinstance(errors, dict) and "access" in errors and self.store:  # account suspended: stop asking for a day
+            self.store.mark_job(BLOCKED_JOB, self.now(), str(errors["access"])[:200])
         if errors:  # the API answers 200 with an "errors" object for plan limits, wrong parameters, daily quota...
             raise ApiFootballError(f"errore API-Football su {endpoint}: {errors}", 200)
         return env
 
+    def blocked_since(self) -> datetime | None:
+        """When the account last answered "access" (suspended), None when it never did or the store is missing."""
+        if not self.store:
+            return None
+        row = self.store.db.execute("SELECT done_at FROM jobs WHERE name = ?", (BLOCKED_JOB,)).fetchone()
+        if not row or not row[0]:
+            return None
+        t = datetime.fromisoformat(row[0])
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
     def status(self) -> dict:
-        """Free call: account, plan and today's request count."""
+        """Free call: account, plan and today's request count. An answer without errors lifts the pause of a suspended account."""
         r = self.get("/status").get("response") or {}
+        if self.store and self.blocked_since():
+            self.store.db.execute("DELETE FROM jobs WHERE name = ?", (BLOCKED_JOB,))
+            self.store.db.commit()
         req = r.get("requests") or {}
         sub = r.get("subscription") or {}
         return {"plan": sub.get("plan"), "active": sub.get("active"), "end": sub.get("end"),
