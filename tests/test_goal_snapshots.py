@@ -558,3 +558,23 @@ def test_old_names_take_at_most_40_requests_and_leave_what_the_night_needs():
     col.client.budget = BudgetGuard(store, "goal-api", daily=1000, reserve=50, now=lambda: NOW)
     st = col.name_history(20)
     assert len(t.calls) == 1 and st.saved == {"players": 24} and store.job_done(f"xi-names-day:{NOW:%Y-%m-%d}")
+
+
+def test_lineup_timing_lists_the_goal_lineup_requests(tmp_path, capsys):
+    import argparse
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+    from algowinbet.cli import cmd_lineup_timing
+    from algowinbet.domain import Fixture
+    from algowinbet.snapshots import SnapshotStore
+    db = str(tmp_path / "t.db")
+    store = SnapshotStore(db)
+    from algowinbet.apifcollector import SCHEMA as APIF_SCHEMA
+    store.db.executescript(APIF_SCHEMA)  # fixture_links
+    ko = datetime.now(timezone.utc) - timedelta(hours=2)
+    store.save_fixtures("goal-api", [Fixture(id="goal:77", competition="Serie A", home="Inter", away="Milan", kickoff=ko)], ko - timedelta(days=1))
+    body = _json.dumps({"data": {"hasLineups": True, "home": {"startingLineups": [1] * 11}, "away": {"startingLineups": [1] * 11}}}).encode()
+    store.put_raw("goal-api", "/fixtures/77/lineups", None, 200, body, ko - timedelta(minutes=45))
+    cmd_lineup_timing(argparse.Namespace(db=db, days=1))
+    out = capsys.readouterr().out
+    assert "GOAL 45' 200 hasLineups=True 11+11" in out

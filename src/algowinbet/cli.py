@@ -517,7 +517,7 @@ def cmd_lineup_timing(a) -> None:
         ko = datetime.fromisoformat(ko)
         reqs = []
         goal_id = fid.split(":", 1)[-1]
-        for rid, at, status in store.db.execute("SELECT id, fetched_at, status FROM raw_requests WHERE source='goal' AND endpoint=? ORDER BY id",
+        for rid, at, status in store.db.execute("SELECT id, fetched_at, status FROM raw_requests WHERE source='goal-api' AND endpoint=? ORDER BY id",
                                                 (f"/fixtures/{goal_id}/lineups",)).fetchall():
             reqs.append(f"GOAL {mins(ko, at)}' {status} {players(rid, 'goal')}")
         if fid in links:
