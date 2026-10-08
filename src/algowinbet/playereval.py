@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .playercard import DISP, LAST, PRIOR_90, expected_counts as card_counts
+from .playercard import CONTEXT, DISP, LAST, PRIOR_90, expected_counts as card_counts
 
 # (label, stat, at least)
 LINES = (("tiri 1+", "shots", 1), ("tiri 2+", "shots", 2), ("tiri 3+", "shots", 3), ("tiri in porta 1+", "shots_on", 1),
@@ -31,9 +31,9 @@ class PlayerParams:
     last: int = LAST
     prior_90: float | tuple = tuple(sorted(PRIOR_90.items()))  # one weight for every stat, or (stat, weight) pairs
     disp: float = DISP  # > 0: negative binomial with this shape, 0: Poisson
-    opp: float = 0.0  # weights of the match context factors (playercontext.py): opponent, venue, referee; 0 = left out
-    venue: float = 0.0
-    ref: float = 0.0
+    opp: float = CONTEXT["opp"]  # weights of the match context factors (playercontext.py): opponent, venue, referee; 0 = left out
+    venue: float = CONTEXT["venue"]
+    ref: float = CONTEXT["ref"]
 
     def weights(self) -> dict[str, float]:
         return dict(self.prior_90) if isinstance(self.prior_90, tuple) else {k: float(self.prior_90) for k in STATS}
@@ -43,11 +43,13 @@ def _with(**kw) -> tuple:
     return tuple(sorted({**PRIOR_90, **kw}.items()))
 
 
-# "modello": what the lineups tab publishes (playercard.py); "prima": the settings before the replay (10 appearances, weight 3, Poisson)
-VARIANTS = {"modello": PlayerParams(), "prima": PlayerParams(last=10, prior_90=3.0, disp=0.0), "ruolo": PlayerParams(prior_90=1e9)}
-TUNE = {**VARIANTS, "avv+campo": PlayerParams(opp=1.0, venue=1.0), "avv¾+campo": PlayerParams(opp=0.75, venue=1.0),
-        "arbitro": PlayerParams(ref=1.0), "avv+campo+arb": PlayerParams(opp=1.0, venue=1.0, ref=1.0),
-        "avv+campo+arb½": PlayerParams(opp=1.0, venue=1.0, ref=0.5)}
+# "modello": what the lineups tab publishes (playercard.py); "prima": the settings before the replay (10 appearances, weight 3,
+# Poisson, no context); "senza contesto": the model in the player's average match
+VARIANTS = {"modello": PlayerParams(), "senza contesto": PlayerParams(opp=0.0, venue=0.0, ref=0.0),
+            "prima": PlayerParams(last=10, prior_90=3.0, disp=0.0, opp=0.0, venue=0.0, ref=0.0),
+            "ruolo": PlayerParams(prior_90=1e9, opp=0.0, venue=0.0, ref=0.0)}
+TUNE = {**VARIANTS, "avversario½": PlayerParams(opp=0.5), "avversario1": PlayerParams(opp=1.0), "arbitro½": PlayerParams(ref=0.5),
+        "arbitro1": PlayerParams(ref=1.0)}
 
 
 def at_least(rate: float, k: int, disp: float = 0.0) -> float:

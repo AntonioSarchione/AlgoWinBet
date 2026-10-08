@@ -58,3 +58,14 @@ def test_keeper_numbers_from_fotmob_win_over_the_team_estimate():
     st.db.execute("UPDATE fotmob_player_stats SET saves = 5, goals_conceded = 2, shots_on_faced = 7 WHERE player_id = 'fotmob:2'")
     g = json.loads(player_cards(st, {"goal:next": {"goal:gk"}}, NOW, {})["goal:next"])["goal:gk"]
     assert g["ts"] == 7 and g["gc"] == 2 and g["sv"] == 5 and g["cs"] == 0
+
+
+def test_opponent_and_venue_move_the_outfield_numbers():
+    st = _store()
+    for k in range(12):  # Roma, away every time, never shoots: the teams facing it (Milan, at home) shoot 4 a match
+        st.db.execute("INSERT INTO fotmob_player_stats(fixture_id, team, player_id, name, starter, minutes, shots, shots_on, "
+                      "fouls_committed, fouls_drawn, yellow) VALUES(?, 'Roma', 'fotmob:9', 'Other', 1, 90, 0, 0, 1, 1, 0)", (f"goal:m{k}",))
+    plain = json.loads(player_cards(st, {"goal:next": {"goal:st"}}, NOW, {})["goal:next"])["goal:st"]
+    home = json.loads(player_cards(st, {"goal:next": {"goal:st"}}, NOW, {}, {"goal:next": ("Serie A", "Milan", "Roma")})["goal:next"])["goal:st"]
+    away = json.loads(player_cards(st, {"goal:next": {"goal:st"}}, NOW, {}, {"goal:next": ("Serie A", "Roma", "Milan")})["goal:next"])["goal:st"]
+    assert home["sh"] > plain["sh"] > away["sh"]  # Milan at home against a side that lets shots in: more; away from home: fewer

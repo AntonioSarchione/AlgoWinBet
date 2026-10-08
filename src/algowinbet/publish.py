@@ -185,7 +185,8 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
         import time as _time
         from .playercard import match_pools, player_cards
         t0 = _time.monotonic()
-        pc = player_cards(store, match_pools(prov, res.fixtures, xi), t, prov.match_stat_values(("shots_on_target", "shots_on_goal")))
+        pc = player_cards(store, match_pools(prov, res.fixtures, xi), t, prov.match_stat_values(("shots_on_target", "shots_on_goal")),
+                          {f.id: (f.competition, f.home, f.away) for f in res.fixtures})
         print(f"schede giocatori: {len(pc)} partite in {_time.monotonic() - t0:.0f}s", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"schede giocatori: non calcolate ({type(e).__name__}: {e})", flush=True)

@@ -22,6 +22,9 @@ SINCE = timedelta(days=400)
 # 90-minute spells of the role average added to each player's own minutes, per stat (xG not replayed: as shots on target)
 PRIOR_90 = {"xg": 5.0, "shots_on": 5.0, "shots": 3.0, "fouls_committed": 5.0, "fouls_drawn": 3.0, "cards": 20.0, "assists": 40.0}
 DISP = 4.0           # negative binomial shape of the counts
+# match context (playercontext.py) weights: player-eval --tune, the opponent at 3/4 and the venue in full beat the player's
+# average match on all 11 lines; the referee (known for 14% of the 2026 starts) changed nothing yet
+CONTEXT = {"opp": 0.75, "venue": 1.0, "ref": 0.0}
 MIN_MINUTES = 90     # below this (all appearances together) no card: too little to say anything
 START_MINUTES = 80.0  # minutes of a start when the player has no start of his own in the window
 STATS = ("xg", "shots_on", "shots", "fouls_committed", "fouls_drawn", "cards", "assists")
@@ -64,11 +67,31 @@ def _chunks(xs: list, n: int = 400):
         yield xs[i:i + n]
 
 
-def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: dict | None = None) -> dict[str, str]:
+def match_context(store, now: datetime):
+    """MatchContext fed with the team totals of the FotMob matches of the last SINCE days, oldest first."""
+    from .playercontext import CTX_STATS, MatchContext
+    ctx = MatchContext()
+    rows = store.db.execute(
+        "SELECT s.fixture_id, s.team, r.competition, r.home, r.away, SUM(s.shots), SUM(s.shots_on), SUM(s.fouls_committed), "
+        "SUM(s.fouls_drawn), SUM(CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END), SUM(s.assists) "
+        "FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id WHERE s.minutes > 0 AND r.kickoff >= ? AND r.kickoff < ? "
+        "GROUP BY s.fixture_id, s.team ORDER BY r.kickoff", ((now - SINCE).isoformat(), now.isoformat())).fetchall()
+    by_fx: dict[str, tuple] = {}
+    for fid, team, comp, home, away, *vals in rows:
+        info = by_fx.setdefault(fid, (comp, home, away, {}))
+        info[3][team] = {k: float(v or 0) for k, v in zip(CTX_STATS, vals)}
+    for comp, home, away, totals in by_fx.values():  # dicts keep the kickoff order of the query
+        ctx.add(comp, home, away, totals)
+    return ctx
+
+
+def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: dict | None = None,
+                 fixtures: dict[str, tuple[str, str, str]] | None = None) -> dict[str, str]:
     """fixture id -> JSON {player id: card} for the players of `pools` (fixture id -> our player ids). Outfield card: "xg",
     "sot", "sh", "fc", "fd" per match started, "cg" = probability of at least one booking, "n" appearances, "min" minutes of a
     start. Goalkeeper card ("gk": 1): "gc" goals conceded and "sv" saves per full match, "cs" share of clean sheets, "cg", "n".
-    team_stats: fixture id -> {stat: (home, away)} (provider.match_stat_values), for the saves."""
+    team_stats: fixture id -> {stat: (home, away)} (provider.match_stat_values), for the saves. fixtures: fixture id ->
+    (competition, home, away): the outfield numbers then follow the opponent and the venue (CONTEXT)."""
     wanted = sorted(set().union(*pools.values())) if pools else []
     if not wanted:
         return {}
@@ -86,7 +109,7 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
         for r in store.db.execute(
                 "SELECT s.player_id, s.minutes, s.starter, s.xg, s.shots_on, s.shots, s.fouls_committed, s.fouls_drawn, "
                 "CASE WHEN COALESCE(s.yellow, 0) + COALESCE(s.red, 0) > 0 THEN 1 ELSE 0 END, r.kickoff, s.fixture_id, s.team = r.home, "
-                "r.home_goals, r.away_goals, s.saves, s.goals_conceded, s.shots_on_faced, s.assists "
+                "r.home_goals, r.away_goals, s.saves, s.goals_conceded, s.shots_on_faced, s.assists, s.team "
                 "FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id "
                 f"WHERE s.player_id IN ({','.join('?' * len(part))}) AND s.minutes > 0 AND r.kickoff >= ? AND r.kickoff < ?",
                 (*part, since, now.isoformat())).fetchall():
@@ -116,24 +139,39 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
                         acc[k][1] += r[0]
         prior[role] = {k: (s_ / m * 90 if m else 0.0) for k, (s_, m) in acc.items()}
 
-    card: dict[str, dict] = {}
+    keepers: dict[str, dict] = {}
+    base: dict[str, tuple[dict, float, int, str]] = {}  # outfield: expected counts, minutes of a start, appearances, team
     for g, a in apps.items():
         total = sum(r[0] for r in a)
         if total < MIN_MINUTES:
             continue
         if roles.get(g) == "GK":
-            card[g] = _keeper(a, prior["GK"]["cards"], team_stats or {})
+            keepers[g] = _keeper(a, prior["GK"]["cards"], team_stats or {})
             continue
         got = expected_counts([(r[0], r[1], {k: r[AT[k]] for k in STATS}) for r in a], prior[roles.get(g, "MID")])
-        if got is None:
-            continue
-        exp, mins = got
-        card[g] = {"xg": None if exp["xg"] is None else round(exp["xg"], 2), "sot": round(exp["shots_on"] or 0, 2),
-                   "sh": round(exp["shots"] or 0, 2), "fc": round(exp["fouls_committed"] or 0, 2), "fd": round(exp["fouls_drawn"] or 0, 2),
-                   "cg": round(p_any(exp["cards"] or 0), 3), "as": round(p_any(exp["assists"] or 0), 3), "n": len(a), "min": round(mins)}
+        if got is not None:
+            base[g] = (got[0], got[1], len(a), a[0][17])
+
+    from .playercontext import apply
+    ctx = match_context(store, now) if fixtures else None
     out = {}
     for fid, ids in pools.items():
-        mine = {g: card[g] for g in ids if g in card}
+        side = {}
+        if ctx is not None and fid in fixtures:
+            comp, home, away = fixtures[fid]
+            side = {home: ctx.factors(away, comp, True), away: ctx.factors(home, comp, False)}
+        mine = {}
+        for g in ids:
+            if g in keepers:
+                mine[g] = keepers[g]
+            elif g in base:
+                exp, mins, n, team = base[g]
+                if team in side:
+                    exp = apply(exp, side[team], CONTEXT["opp"], CONTEXT["venue"], CONTEXT["ref"])
+                mine[g] = {"xg": None if exp["xg"] is None else round(exp["xg"], 2), "sot": round(exp["shots_on"] or 0, 2),
+                           "sh": round(exp["shots"] or 0, 2), "fc": round(exp["fouls_committed"] or 0, 2),
+                           "fd": round(exp["fouls_drawn"] or 0, 2), "cg": round(p_any(exp["cards"] or 0), 3),
+                           "as": round(p_any(exp["assists"] or 0), 3), "n": n, "min": round(mins)}
         if mine:
             out[fid] = json.dumps(mine, ensure_ascii=False, separators=(",", ":"))
     return out
