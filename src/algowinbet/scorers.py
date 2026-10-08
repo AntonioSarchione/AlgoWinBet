@@ -32,7 +32,9 @@ from .config import Config
 ROLES = ("GK", "DEF", "MID", "FWD")
 GOAL_KINDS = ("GOAL", "PENALTY")
 HALF_LIFE = 365.0  # days
-K = 6.0  # shrinkage strength, in team goals scored while the player was on the pitch (tuned by the replay)
+K = 25.0  # shrinkage strength, in team goals scored while the player was on the pitch. Replay 2025-07 - 2026-10 (2060 matches,
+# scorer-eval --tune): 25 beat 6 with the XI (log loss 0.1841 vs 0.1875), before it and with our probable XI, and fixed
+# the overconfidence above 30% (0.34 predicted, 0.29 true before; 0.34 and 0.34 now); 10-15 and 35-75 were worse than 25
 K_PEN = 4.0
 BENCH_PRIOR = 0.25  # a bench player's share relative to a starter of his role, before data (most never enter)
 OWN_GOAL_SHARE = 0.03
@@ -325,9 +327,8 @@ UNLISTED = 0.002  # anytime probability of a player missing from a pre-XI list (
 
 
 VARIANTS = {"modello": Params(), "giocatore": Params(shrink=False), "ruolo": Params(role_only=True)}
-# scorer-eval --tune: the model now against stronger shrinkage and a negative binomial, to fix the calibration above 30%
-TUNE = {"modello": Params(), "k25": Params(k=25.0), "k35": Params(k=35.0), "k50": Params(k=50.0), "k75": Params(k=75.0),
-        "k35+pen8": Params(k=35.0, k_pen=8.0)}
+# scorer-eval --tune: the model against nearby shrinkage strengths and a negative binomial (rerun as the data grows)
+TUNE = {"modello": Params(), "k15": Params(k=15.0), "k35": Params(k=35.0), "pen8": Params(k_pen=8.0), "disp8": Params(disp=8.0)}
 
 
 def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetime, competitions: list[str],
