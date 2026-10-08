@@ -1018,6 +1018,14 @@ def _near_results(store: SnapshotStore, comp: str, ko: datetime, home: str, away
                              f"%{words[0]}%", f"%{words[0]}%", f"%{words[1]}%", f"%{words[1]}%")).fetchall()
 
 
+def _same_teams_near(store: SnapshotStore, comp: str, hole: tuple) -> bool:
+    """A result of ours near the hole with both its teams (longest word of each name, either side): the same match under
+    other names, so not a missing one."""
+    ko, home, away = hole[0], hole[1], hole[2]
+    words = [max(n.replace("-", " ").split(), key=len).lower() for n in (home, away)]
+    return any(all(w in f"{h} {a}".lower() for w in words) for h, a, _, _ in _near_results(store, comp, ko, home, away))
+
+
 def _fotmob_for(cfg, store: SnapshotStore, names: TeamNames):
     from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
     return FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names)
@@ -1065,7 +1073,7 @@ def cmd_results_fotmob(a) -> None:
         for comp, hs in _result_holes(store, col, names).items():
             hs = [h for h in hs if h[3] == "GOAL: nessuna partita"]
             if not comp.startswith("UEFA"):
-                hs = [h for h in hs if a.leagues and not _near_results(store, comp, h[0], h[1], h[2])]
+                hs = [h for h in hs if a.leagues and not _same_teams_near(store, comp, h)]
             out[comp] = hs
         return out
     holes = gaps()
