@@ -1472,12 +1472,13 @@ def cmd_xi_eval(a) -> None:
 
 def cmd_scorer_eval(a) -> None:
     """Fase 9 acceptance test: goalscorer probabilities replayed week by week against who really scored (no API request)."""
-    from .scorers import evaluate_scorers, print_scorer_eval
+    from .scorers import TUNE, evaluate_scorers, print_scorer_eval
     store = SnapshotStore(a.db)
     try:
         end = datetime.now(timezone.utc)
         start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
-        print_scorer_eval(evaluate_scorers(store, SnapshotProvider(store), _cfg(a), start, end, DOMESTIC))
+        rep = evaluate_scorers(store, SnapshotProvider(store), _cfg(a), start, end, DOMESTIC, variants=TUNE if a.tune else None)
+        print_scorer_eval(rep, calibration_all=a.tune)
     finally:
         store.close()
 
@@ -2710,6 +2711,7 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--since", default="2025-07-01", help="prima partita giudicata; lo storico prima serve da base")
     se.add_argument("--db", default="turso")
     se.add_argument("--config", default=None)
+    se.add_argument("--tune", action="store_true", help="varianti di calibrazione (shrinkage, binomiale negativa)")
     se.set_defaults(fn=cmd_scorer_eval)
     le = sub.add_parser("lineup-eval", help="le formazioni ufficiali migliorano le probabilità? (replay, nessuna richiesta API)")
     le.add_argument("--weeks", type=int, default=10)

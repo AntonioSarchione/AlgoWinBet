@@ -119,6 +119,7 @@ class Params:
     normalise: bool = True
     shrink: bool = True  # False: the player's raw share (reference "giocatore")
     role_only: bool = False  # True: the role share only (reference "ruolo")
+    disp: float = 0.0  # > 0: goals negative binomial with this shape instead of Poisson (uncertain rate: fewer sure scorers)
 
 
 class Tally:
@@ -248,9 +249,15 @@ def predict_team(tally: Tally, team: str, lam: float, lam_opp: float, prm: Param
     out = []
     for pid, (ps, _pb) in members.items():
         rate = lam_np * raw_np[pid] + lam_pen * raw_pen[pid]
-        out.append(PlayerPrediction(pid, names.get(pid, pid), roles.get(pid, "MID"), ps, rate, 1.0 - math.exp(-rate),
-                                    (rate / total_rate) * p_any_goal if total_rate > 0 else 0.0,
-                                    1.0 - math.exp(-rate) * (1.0 + rate)))
+        if prm.disp > 0:
+            a = prm.disp
+            p0 = (1.0 + rate / a) ** -a
+            p1 = rate * (1.0 + rate / a) ** (-a - 1.0)
+        else:
+            p0 = math.exp(-rate)
+            p1 = rate * p0
+        out.append(PlayerPrediction(pid, names.get(pid, pid), roles.get(pid, "MID"), ps, rate, 1.0 - p0,
+                                    (rate / total_rate) * p_any_goal if total_rate > 0 else 0.0, 1.0 - p0 - p1))
     return sorted(out, key=lambda x: -x.rate)
 
 
@@ -318,6 +325,9 @@ UNLISTED = 0.002  # anytime probability of a player missing from a pre-XI list (
 
 
 VARIANTS = {"modello": Params(), "giocatore": Params(shrink=False), "ruolo": Params(role_only=True)}
+# scorer-eval --tune: the model now against stronger shrinkage and a negative binomial, to fix the calibration above 30%
+TUNE = {"modello": Params(), "k10": Params(k=10.0), "k15": Params(k=15.0), "k25": Params(k=25.0),
+        "disp4": Params(disp=4.0), "disp8": Params(disp=8.0), "k15+disp8": Params(k=15.0, disp=8.0)}
 
 
 def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetime, competitions: list[str],
@@ -415,7 +425,7 @@ def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetim
     return ScorerReport(start, end, n_matches, scores, diffs)
 
 
-def print_scorer_eval(rep: ScorerReport) -> None:
+def print_scorer_eval(rep: ScorerReport, calibration_all: bool = False) -> None:
     print(f"marcatori, replay {rep.start:%Y-%m-%d} - {rep.end:%Y-%m-%d}: {rep.matches} partite")
     for name, by in rep.scores.items():
         for when, s in by.items():
@@ -423,11 +433,12 @@ def print_scorer_eval(rep: ScorerReport) -> None:
                 print(f"  {name:10} {when:9} giocatori {s.n:6}  log loss {s.ll / s.n:.4f}  Brier {s.brier / s.n:.4f}  "
                       f"segnano {s.hits} (attesi {s.exp:.0f})")
     for k, (m, hw) in rep.diffs.items():
-        print(f"  {k}: {m:+.4f} ± {hw:.4f}" + ("  (meglio)" if m + hw < 0 else ""))
-    s = rep.scores.get("modello", {}).get("xi")
-    if s and s.n:
-        print("  calibrazione (modello, con formazione): fascia di probabilità, giocatori, probabilità media, frequenza vera")
-        for b in sorted(s.bins):
-            n, p, y = s.bins[b]
-            lo = BIN_EDGES[b - 1] if b else 0.0
-            print(f"    {lo:.2f}-{min(BIN_EDGES[b], 1.0):.2f}  {n:6d}  {p / n:.3f}  {y / n:.3f}")
+        print(f"  {k}: {m:+.4f} ± {hw:.4f}" + ("  (meglio)" if m + hw < 0 else "  (peggio)" if m - hw > 0 else ""))
+    for name in rep.scores if calibration_all else ["modello"]:
+        s = rep.scores.get(name, {}).get("xi")
+        if s and s.n:
+            print(f"  calibrazione ({name}, con formazione): fascia di probabilità, giocatori, probabilità media, frequenza vera")
+            for b in sorted(s.bins):
+                n, p, y = s.bins[b]
+                lo = BIN_EDGES[b - 1] if b else 0.0
+                print(f"    {lo:.2f}-{min(BIN_EDGES[b], 1.0):.2f}  {n:6d}  {p / n:.3f}  {y / n:.3f}")
