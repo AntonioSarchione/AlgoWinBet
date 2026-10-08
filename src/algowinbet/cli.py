@@ -1028,10 +1028,11 @@ def cmd_results_holes(a) -> None:
         by_day: dict[str, list[str]] = {}
         for ko, home, away, seen, *_ in holes[lg.competition]:
             if a.near:  # a result of ours within 3 days with one of the two teams: a name spelled differently, or a wrong date
+                words = [max(n.replace("-", " ").split(), key=len).lower() for n in (home, away)]  # "SC Heerenveen" -> heerenveen
                 near = store.db.execute("SELECT home, away, kickoff, source FROM results WHERE competition = ? AND kickoff BETWEEN ? AND ? "
-                                        "AND (home IN (?, ?) OR away IN (?, ?))",
+                                        "AND (LOWER(home) LIKE ? OR LOWER(away) LIKE ? OR LOWER(home) LIKE ? OR LOWER(away) LIKE ?)",
                                         (lg.competition, (ko - timedelta(days=3)).isoformat(), (ko + timedelta(days=3)).isoformat(),
-                                         home, away, home, away)).fetchall()
+                                         f"%{words[0]}%", f"%{words[0]}%", f"%{words[1]}%", f"%{words[1]}%")).fetchall()
                 seen += "; vicino: " + (", ".join(f"{h}-{w} {k[:10]} {s}" for h, w, k, s in near) if near else "nessuno")
             by_day.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
         first = min(r.kickoff for r in col._results(lg))
