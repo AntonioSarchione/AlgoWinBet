@@ -1008,6 +1008,16 @@ def _result_holes(store: SnapshotStore, col, names: TeamNames) -> dict[str, list
     return out
 
 
+def _near_results(store: SnapshotStore, comp: str, ko: datetime, home: str, away: str) -> list[tuple]:
+    """Our results of the competition within 3 days of a hole with one of its teams, matched by the longest word of each
+    name ("SC Heerenveen" -> heerenveen): a name spelled differently or a wrong date shows up here."""
+    words = [max(n.replace("-", " ").split(), key=len).lower() for n in (home, away)]
+    return store.db.execute("SELECT home, away, kickoff, source FROM results WHERE competition = ? AND kickoff BETWEEN ? AND ? "
+                            "AND (LOWER(home) LIKE ? OR LOWER(away) LIKE ? OR LOWER(home) LIKE ? OR LOWER(away) LIKE ?)",
+                            (comp, (ko - timedelta(days=3)).isoformat(), (ko + timedelta(days=3)).isoformat(),
+                             f"%{words[0]}%", f"%{words[0]}%", f"%{words[1]}%", f"%{words[1]}%")).fetchall()
+
+
 def _fotmob_for(cfg, store: SnapshotStore, names: TeamNames):
     from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
     return FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names)
@@ -1028,11 +1038,7 @@ def cmd_results_holes(a) -> None:
         by_day: dict[str, list[str]] = {}
         for ko, home, away, seen, *_ in holes[lg.competition]:
             if a.near:  # a result of ours within 3 days with one of the two teams: a name spelled differently, or a wrong date
-                words = [max(n.replace("-", " ").split(), key=len).lower() for n in (home, away)]  # "SC Heerenveen" -> heerenveen
-                near = store.db.execute("SELECT home, away, kickoff, source FROM results WHERE competition = ? AND kickoff BETWEEN ? AND ? "
-                                        "AND (LOWER(home) LIKE ? OR LOWER(away) LIKE ? OR LOWER(home) LIKE ? OR LOWER(away) LIKE ?)",
-                                        (lg.competition, (ko - timedelta(days=3)).isoformat(), (ko + timedelta(days=3)).isoformat(),
-                                         f"%{words[0]}%", f"%{words[0]}%", f"%{words[1]}%", f"%{words[1]}%")).fetchall()
+                near = _near_results(store, lg.competition, ko, home, away)
                 seen += "; vicino: " + (", ".join(f"{h}-{w} {k[:10]} {s}" for h, w, k, s in near) if near else "nessuno")
             by_day.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
         first = min(r.kickoff for r in col._results(lg))
@@ -1052,9 +1058,16 @@ def cmd_results_fotmob(a) -> None:
     store = SnapshotStore(a.db)
     names = TeamNames.load(a.aliases)
     col = _fotmob_for(cfg, store, names)
-    def gaps() -> dict[str, list[tuple]]:  # UEFA cups only: a league hole can be a name spelled differently, not a missing match
-        return {comp: [h for h in hs if h[3] == "GOAL: nessuna partita"] for comp, hs in _result_holes(store, col, names).items()
-                if comp.startswith("UEFA")}
+    def gaps() -> dict[str, list[tuple]]:
+        """UEFA cups: every hole GOAL never had. Leagues (--leagues): only the holes with no result of ours near them, since a
+        league hole can be a name spelled differently rather than a missing match."""
+        out = {}
+        for comp, hs in _result_holes(store, col, names).items():
+            hs = [h for h in hs if h[3] == "GOAL: nessuna partita"]
+            if not comp.startswith("UEFA"):
+                hs = [h for h in hs if a.leagues and not _near_results(store, comp, h[0], h[1], h[2])]
+            out[comp] = hs
+        return out
     holes = gaps()
     by_comp = {lg.competition: lg for lg in col.leagues}
     for comp, hs in sorted(holes.items()):
@@ -2779,6 +2792,7 @@ def build_parser() -> argparse.ArgumentParser:
     rr.set_defaults(fn=cmd_results_refill)
     rf = sub.add_parser("results-fotmob", help="risultati che GOAL non ha mai avuto, dalle pagine stagione FotMob (nessuna richiesta API)")
     rf.add_argument("--dry-run", action="store_true")
+    rf.add_argument("--leagues", action="store_true", help="anche i campionati, solo i buchi senza nostri risultati vicini")
     rf.add_argument("--config", default="configs/collect.json")
     rf.add_argument("--aliases", default="configs/team_aliases.json")
     rf.add_argument("--db", default="algowinbet.db")
