@@ -25,6 +25,13 @@ DISP = 4.0           # negative binomial shape of the counts
 # match context (playercontext.py) weights: player-eval --tune, the opponent at 3/4 and the venue in full beat the player's
 # average match on all 11 lines; the referee (known for 14% of the 2026 starts) changed nothing yet
 CONTEXT = {"opp": 0.75, "venue": 1.0, "ref": 0.0}
+# keepers (player-eval --keepers --tune, 3,481 full matches of 2026): his last KEEPER_LAST full matches with KEEPER_K
+# matches of the keepers' average, times the opponent's own attack and the venue, beat the plain average of his matches on
+# all 7 lines (saves 2+/3+/4+, shots on target faced 4+/6+, clean sheet, conceded 2+)
+KEEPER_LAST = 20
+KEEPER_K = 20.0
+KEEPER_CONTEXT = {"opp": 1.0, "venue": 1.0}
+KEEPER_FULL = 80  # minutes of a keeper's match that counts
 MIN_MINUTES = 90     # below this (all appearances together) no card: too little to say anything
 START_MINUTES = 80.0  # minutes of a start when the player has no start of his own in the window
 STATS = ("xg", "shots_on", "shots", "fouls_committed", "fouls_drawn", "cards", "assists")
@@ -68,7 +75,8 @@ def _chunks(xs: list, n: int = 400):
 
 
 def match_context(store, now: datetime):
-    """MatchContext fed with the team totals of the FotMob matches of the last SINCE days, oldest first."""
+    """MatchContext fed with the team totals of the FotMob matches of the last SINCE days, oldest first, and those totals
+    (fixture id -> (competition, home, away, {team: {stat: total}}))."""
     from .playercontext import CTX_STATS, MatchContext
     ctx = MatchContext()
     rows = store.db.execute(
@@ -82,14 +90,15 @@ def match_context(store, now: datetime):
         info[3][team] = {k: float(v or 0) for k, v in zip(CTX_STATS, vals)}
     for comp, home, away, totals in by_fx.values():  # dicts keep the kickoff order of the query
         ctx.add(comp, home, away, totals)
-    return ctx
+    return ctx, by_fx
 
 
 def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: dict | None = None,
                  fixtures: dict[str, tuple[str, str, str]] | None = None) -> dict[str, str]:
     """fixture id -> JSON {player id: card} for the players of `pools` (fixture id -> our player ids). Outfield card: "xg",
     "sot", "sh", "fc", "fd" per match started, "cg" = probability of at least one booking, "n" appearances, "min" minutes of a
-    start. Goalkeeper card ("gk": 1): "gc" goals conceded and "sv" saves per full match, "cs" share of clean sheets, "cg", "n".
+    start. Goalkeeper card ("gk": 1): "ts" shots on target faced, "gc" goals conceded and "sv" saves in a full match, "cs"
+    probability of a clean sheet, "cg", "n".
     team_stats: fixture id -> {stat: (home, away)} (provider.match_stat_values), for the saves. fixtures: fixture id ->
     (competition, home, away): the outfield numbers then follow the opponent and the venue (CONTEXT)."""
     wanted = sorted(set().union(*pools.values())) if pools else []
@@ -139,31 +148,46 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
                         acc[k][1] += r[0]
         prior[role] = {k: (s_ / m * 90 if m else 0.0) for k, (s_, m) in acc.items()}
 
-    keepers: dict[str, dict] = {}
+    from .playercontext import apply
+    ctx, by_fx = match_context(store, now)
+    keepers: dict[str, tuple[list, float, int]] = {}  # full matches (ts, gc, sv), booking probability, appearances
     base: dict[str, tuple[dict, float, int, str]] = {}  # outfield: expected counts, minutes of a start, appearances, team
     for g, a in apps.items():
         total = sum(r[0] for r in a)
         if total < MIN_MINUTES:
             continue
         if roles.get(g) == "GK":
-            keepers[g] = _keeper(a, prior["GK"]["cards"], team_stats or {})
+            keepers[g] = _keeper(a, prior["GK"]["cards"], team_stats or {}, by_fx)
             continue
         got = expected_counts([(r[0], r[1], {k: r[AT[k]] for k in STATS}) for r in a], prior[roles.get(g, "MID")])
         if got is not None:
             base[g] = (got[0], got[1], len(a), a[0][17])
 
-    from .playercontext import apply
-    ctx = match_context(store, now) if fixtures else None
+    seen = [m for h, _, _ in keepers.values() for m in h]
+    mu = tuple(sum(m[i] for m in seen) / len(seen) for i in range(3)) if seen else (4.0, 1.4, 2.8)
     out = {}
     for fid, ids in pools.items():
-        side = {}
-        if ctx is not None and fid in fixtures:
+        side, attack = {}, {}
+        if fixtures and fid in fixtures:
             comp, home, away = fixtures[fid]
             side = {home: ctx.factors(away, comp, True), away: ctx.factors(home, comp, False)}
+            attack = {home: ctx.attack(away, comp, True), away: ctx.attack(home, comp, False)}
         mine = {}
         for g in ids:
             if g in keepers:
-                mine[g] = keepers[g]
+                h, cg, n = keepers[g]
+                if not h:
+                    mine[g] = {"gk": 1, "ts": None, "gc": None, "sv": None, "cs": None, "cg": cg, "n": n}
+                    continue
+                last = h[:KEEPER_LAST]
+                ts, gc, sv = ((sum(m[i] for m in last) + KEEPER_K * mu[i]) / (len(last) + KEEPER_K) for i in range(3))
+                team = apps[g][0][17]
+                if team in attack:
+                    m = apply({"shots_on": ts, "goals": gc}, attack[team], KEEPER_CONTEXT["opp"], KEEPER_CONTEXT["venue"])
+                    sv *= m["shots_on"] / ts if ts > 0 else 1.0
+                    ts, gc = m["shots_on"], m["goals"]
+                mine[g] = {"gk": 1, "ts": round(ts, 2), "gc": round(gc, 2), "sv": round(sv, 2), "cs": round(math.exp(-gc), 3),
+                           "cg": cg, "n": n}
             elif g in base:
                 exp, mins, n, team = base[g]
                 if team in side:
@@ -177,32 +201,32 @@ def player_cards(store, pools: dict[str, set[str]], now: datetime, team_stats: d
     return out
 
 
-def _keeper(a: list[tuple], card_prior: float, team_stats: dict) -> dict:
-    """Per match he played (nearly) whole: shots on target faced, goals conceded and saves. FotMob's own numbers when the
-    row has them (r[13:16]: saves, goals conceded, shots on target faced), else the team's: the opponent's shots on target
-    (match stats), the goals of our result, saves = shots on target faced - goals conceded."""
-    full = [r for r in a if r[0] >= 80]
-    ts, gc, sv = [], [], []
-    for r in full:
+def _keeper(a: list[tuple], card_prior: float, team_stats: dict, by_fx: dict) -> tuple[list[tuple[float, float, float]], float, int]:
+    """His full matches, most recent first, as (shots on target faced, goals conceded, saves), his booking probability and
+    his appearances. Shots on target faced: the opponent's players' shots on target (FotMob rows, as the replay reads them),
+    else FotMob's own number, else the opponent's team match stats; goals conceded: FotMob's, else our result; saves:
+    FotMob's, else the difference."""
+    out = []
+    for r in a:
+        if r[0] < KEEPER_FULL:
+            continue
         fm_sv, fm_gc, fm_ts = r[13], r[14], r[15]
         conceded = fm_gc if fm_gc is not None else (None if r[11] is None or r[12] is None else (r[12] if r[10] else r[11]))
-        sot = (team_stats.get(r[9], {}).get("shots_on_target") or team_stats.get(r[9], {}).get("shots_on_goal"))
-        faced = fm_ts if fm_ts is not None else (None if not sot else (sot[1] if r[10] else sot[0]))
-        if fm_ts is None and fm_sv is not None and conceded is not None:
+        teams = (by_fx.get(r[9]) or (None, None, None, {}))[3]
+        opp = [t for t in teams if t != r[17]]
+        faced = teams[opp[0]].get("shots_on") if len(opp) == 1 and r[17] in teams else None
+        if faced is None:
+            sot = team_stats.get(r[9], {}).get("shots_on_target") or team_stats.get(r[9], {}).get("shots_on_goal")
+            faced = fm_ts if fm_ts is not None else (None if not sot else (sot[1] if r[10] else sot[0]))
+        if faced is None and fm_sv is not None and conceded is not None:
             faced = fm_sv + conceded
-        saves = fm_sv if fm_sv is not None else (None if faced is None or conceded is None else max(0.0, faced - conceded))
-        if conceded is not None:
-            gc.append(conceded)
-        if faced is not None:
-            ts.append(faced)
-        if saves is not None:
-            sv.append(saves)
+        if faced is None or conceded is None:
+            continue
+        out.append((float(faced), float(conceded), float(fm_sv) if fm_sv is not None else max(0.0, faced - conceded)))
     mins = sum(r[0] for r in a)
     w = PRIOR_90["cards"]
     rate = (sum(r[7] for r in a) + card_prior * w) / (mins / 90 + w)
-    avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else None  # noqa: E731
-    return {"gk": 1, "ts": avg(ts), "gc": avg(gc), "sv": avg(sv),
-            "cs": round(sum(1 for c in gc if c == 0) / len(gc), 3) if gc else None, "cg": round(p_any(rate), 3), "n": len(a)}
+    return out, round(p_any(rate), 3), len(a)
 
 
 def match_pools(prov, fixtures, xi) -> dict[str, set[str]]:

@@ -147,8 +147,8 @@ export function PitchBoard({ sides, cards, label, children }: {
                 <div><dt>CG</dt><dd>{pc(c.cg)}</dd></div>
               </dl>
               <p className="note">
-                A partita intera, ultime {c.n} presenze{c.cs != null ? `, porta inviolata nel ${pc(c.cs)}` : ""}. TS tiri in porta subiti · GS gol subiti ·
-                PP parate · CG probabilità di cartellino.
+                In questa partita, da {c.n} presenze e dall&apos;attacco avversario{c.cs != null ? `; porta inviolata: ${pc(c.cs)}` : ""}. TS tiri in porta subiti ·
+                GS gol subiti · PP parate · CG probabilità di cartellino.
               </p>
             </>
           ) : (

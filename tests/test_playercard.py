@@ -45,7 +45,8 @@ def test_cards_per_match_started_from_the_last_appearances():
     assert 0.3 < s["cg"] < 0.6  # booked in 6 of 12
     assert s["as"] == 0.0  # no assist, and his role (only him) none either
     g = out["goal:gk"]
-    assert g["gk"] == 1 and g["gc"] == 0.5 and g["cs"] == 0.5 and g["sv"] == 3.5 and g["cg"] == 0.0
+    assert g["gk"] == 1 and g["gc"] == 0.5 and g["sv"] == 3.5 and g["cg"] == 0.0
+    assert g["cs"] == 0.607  # clean sheet: Poisson with 0.5 goals conceded expected
     assert "goal:new" not in out and "goal:nobody" not in out  # too few minutes, no FotMob appearance
 
 
@@ -57,7 +58,7 @@ def test_keeper_numbers_from_fotmob_win_over_the_team_estimate():
     st = _store()
     st.db.execute("UPDATE fotmob_player_stats SET saves = 5, goals_conceded = 2, shots_on_faced = 7 WHERE player_id = 'fotmob:2'")
     g = json.loads(player_cards(st, {"goal:next": {"goal:gk"}}, NOW, {})["goal:next"])["goal:gk"]
-    assert g["ts"] == 7 and g["gc"] == 2 and g["sv"] == 5 and g["cs"] == 0
+    assert g["ts"] == 7 and g["gc"] == 2 and g["sv"] == 5 and g["cs"] == 0.135
 
 
 def test_opponent_and_venue_move_the_outfield_numbers():

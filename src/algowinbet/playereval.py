@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .playercard import CONTEXT, DISP, LAST, PRIOR_90, expected_counts as card_counts
+from .playercard import CONTEXT, DISP, KEEPER_CONTEXT, KEEPER_FULL, KEEPER_K, KEEPER_LAST, LAST, PRIOR_90, expected_counts as card_counts
 
 # (label, stat, at least)
 LINES = (("tiri 1+", "shots", 1), ("tiri 2+", "shots", 2), ("tiri 3+", "shots", 3), ("tiri in porta 1+", "shots_on", 1),
@@ -234,24 +234,21 @@ def print_player_eval(rep: PlayerReport, calibration: tuple[str, ...] = ("ammoni
 # ------------------------------------------------------------------------------------------------------------ keepers
 KEEPER_LINES = (("parate 2+", "sv", 2), ("parate 3+", "sv", 3), ("parate 4+", "sv", 4), ("tiri in porta subiti 4+", "ts", 4),
                 ("tiri in porta subiti 6+", "ts", 6), ("porta inviolata", "gc", 0), ("gol subiti 2+", "gc", 2))
-KEEPER_FULL = 80  # minutes of a keeper's match that counts
 
 
 @dataclass(frozen=True)
-class KeeperParams:
-    last: int = 20  # full matches read
-    k: float = 5.0  # matches of the keepers' average added to his own
+class KeeperParams:  # defaults: what the lineups tab publishes (playercard.py)
+    last: int = KEEPER_LAST  # full matches read
+    k: float = KEEPER_K  # matches of the keepers' average added to his own
     disp: float = 0.0  # saves and shots on target faced: negative binomial shape (0: Poisson); goals conceded always Poisson
-    opp: float = 0.0  # opponent's own attack (shots on target, goals) and venue factors
-    venue: float = 0.0
+    opp: float = KEEPER_CONTEXT["opp"]  # opponent's own attack (shots on target, goals) and venue factors
+    venue: float = KEEPER_CONTEXT["venue"]
 
 
-KEEPER_VARIANTS = {"media": KeeperParams(last=10, k=0.0), "k5": KeeperParams(), "k5+contesto": KeeperParams(opp=1.0, venue=1.0)}
-KEEPER_TUNE = {**KEEPER_VARIANTS, "k2": KeeperParams(k=2.0), "k10": KeeperParams(k=10.0), "k20": KeeperParams(k=20.0),
-               "ultime40": KeeperParams(last=40), "k10+contesto": KeeperParams(k=10.0, opp=1.0, venue=1.0),
-               "k10+contesto3/4": KeeperParams(k=10.0, opp=0.75, venue=1.0),
-               "k10+contesto+disp8": KeeperParams(k=10.0, opp=1.0, venue=1.0, disp=8.0),
-               "k20+contesto": KeeperParams(k=20.0, opp=1.0, venue=1.0)}
+KEEPER_VARIANTS = {"modello": KeeperParams(), "media": KeeperParams(last=10, k=0.0, opp=0.0, venue=0.0),
+                   "senza contesto": KeeperParams(opp=0.0, venue=0.0)}
+KEEPER_TUNE = {**KEEPER_VARIANTS, "k10": KeeperParams(k=10.0), "k40": KeeperParams(k=40.0), "ultime40": KeeperParams(last=40),
+               "contesto3/4": KeeperParams(opp=0.75), "disp8": KeeperParams(disp=8.0)}
 
 
 def keeper_rates(hist: list[tuple[float, float, float]], mu: tuple[float, float, float], prm: KeeperParams) -> tuple[float, float, float]:
@@ -338,7 +335,7 @@ def evaluate_keepers(store, start: datetime, end: datetime, variants: dict[str, 
     return PlayerReport(start, end, n, scores)
 
 
-def print_keeper_eval(rep: PlayerReport, base: str = "k5") -> None:
+def print_keeper_eval(rep: PlayerReport, base: str = "modello") -> None:
     print(f"portieri, replay {rep.start:%Y-%m-%d} - {rep.end:%Y-%m-%d}: {rep.starts} partite intere")
     for label, _, _ in KEEPER_LINES:
         print(f"  {label}")
