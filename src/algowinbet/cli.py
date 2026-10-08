@@ -1027,6 +1027,12 @@ def cmd_results_holes(a) -> None:
             continue
         by_day: dict[str, list[str]] = {}
         for ko, home, away, seen, *_ in holes[lg.competition]:
+            if a.near:  # a result of ours within 3 days with one of the two teams: a name spelled differently, or a wrong date
+                near = store.db.execute("SELECT home, away, kickoff, source FROM results WHERE competition = ? AND kickoff BETWEEN ? AND ? "
+                                        "AND (home IN (?, ?) OR away IN (?, ?))",
+                                        (lg.competition, (ko - timedelta(days=3)).isoformat(), (ko + timedelta(days=3)).isoformat(),
+                                         home, away, home, away)).fetchall()
+                seen += "; vicino: " + (", ".join(f"{h}-{w} {k[:10]} {s}" for h, w, k, s in near) if near else "nessuno")
             by_day.setdefault(f"{ko:%Y-%m-%d}", []).append(f"{home}-{away} ({seen})")
         first = min(r.kickoff for r in col._results(lg))
         print(f"{lg.competition}: {len(holes[lg.competition])} partite senza nostro risultato (dal {first:%d/%m/%Y})")
@@ -2778,6 +2784,7 @@ def build_parser() -> argparse.ArgumentParser:
     rf.set_defaults(fn=cmd_results_fotmob)
     rh = sub.add_parser("results-holes", help="partite finite sulle pagine FotMob senza nostro risultato, e cosa sa GOAL (nessuna richiesta)")
     rh.add_argument("--show", type=int, default=3, help="partite mostrate per giorno")
+    rh.add_argument("--near", action="store_true", help="per ogni buco, i nostri risultati vicini con una delle due squadre")
     rh.add_argument("--config", default="configs/collect.json")
     rh.add_argument("--aliases", default="configs/team_aliases.json")
     rh.add_argument("--db", default="algowinbet.db")

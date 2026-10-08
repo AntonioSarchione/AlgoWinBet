@@ -71,7 +71,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosteval" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-eval --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuptiming" ]; then algowinbet lineup-timing --days "${ARG:-7}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobcheck" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-check --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultholes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-holes ${ARG:+--show "$ARG"} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultholes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-holes ${ARG:+--show "$ARG"} ${PARAMS:+--near} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobplayers" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-players --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobnext" ]; then read -ra lg <<< "${ARG:-55}"; algowinbet fotmob-next "${lg[@]}" ${PARAMS:+--n "$PARAMS"}; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultsrefill" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-refill "${dr[@]}" --db "$DB"; exit $?; fi
