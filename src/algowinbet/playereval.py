@@ -45,9 +45,9 @@ def _with(**kw) -> tuple:
 
 # "modello": what the lineups tab publishes (playercard.py); "prima": the settings before the replay (10 appearances, weight 3, Poisson)
 VARIANTS = {"modello": PlayerParams(), "prima": PlayerParams(last=10, prior_90=3.0, disp=0.0), "ruolo": PlayerParams(prior_90=1e9)}
-TUNE = {**VARIANTS, "avversario": PlayerParams(opp=1.0), "avversario½": PlayerParams(opp=0.5), "campo": PlayerParams(venue=1.0),
-        "arbitro": PlayerParams(ref=1.0), "arbitro½": PlayerParams(ref=0.5), "avv+campo": PlayerParams(opp=1.0, venue=1.0),
-        "tutto": PlayerParams(opp=1.0, venue=1.0, ref=1.0), "tutto½": PlayerParams(opp=0.5, venue=1.0, ref=0.5)}
+TUNE = {**VARIANTS, "avv+campo": PlayerParams(opp=1.0, venue=1.0), "avv¾+campo": PlayerParams(opp=0.75, venue=1.0),
+        "arbitro": PlayerParams(ref=1.0), "avv+campo+arb": PlayerParams(opp=1.0, venue=1.0, ref=1.0),
+        "avv+campo+arb½": PlayerParams(opp=1.0, venue=1.0, ref=0.5)}
 
 
 def at_least(rate: float, k: int, disp: float = 0.0) -> float:
@@ -100,6 +100,7 @@ class PlayerReport:
     end: datetime
     starts: int
     scores: dict[str, dict[str, LineScore]]  # variant -> line -> score
+    with_ref: int = 0  # starts whose match has a known referee
 
 
 def load_appearances(store) -> tuple[list[tuple], dict[str, str], dict[str, tuple[str, str, str]], dict[str, str]]:
@@ -122,7 +123,13 @@ def load_appearances(store) -> tuple[list[tuple], dict[str, str], dict[str, tupl
             roles[pid] = ours.get(pid) or ROLE_OF_POSITION.get(r[10], "MID")
         fixtures.setdefault(r[11], (r[13], r[14], r[15]))
         out.append((r[0], pid, r[2], r[3], *(v or 0 for v in r[4:10]), r[11], r[12]))
-    return out, roles, fixtures, SnapshotProvider(store).referees()
+    from .snapshots import referee_key
+    refs = SnapshotProvider(store).referees()  # under the canonical result id
+    for fid, source, name in store.db.execute("SELECT fixture_id, source, name FROM referees").fetchall():  # and under its own
+        key = referee_key(name)
+        if key and (fid not in refs or source == "football-data"):
+            refs[fid] = key
+    return out, roles, fixtures, refs
 
 
 def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, PlayerParams] | None = None,
@@ -138,7 +145,7 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
     role_sum: dict[str, list[float]] = defaultdict(lambda: [0.0] * (len(STATS) + 1))  # role -> STATS sums, minutes
     scores = {v: {label: LineScore() for label, _, _ in LINES} for v in variants}
     s0, e0 = start.isoformat(), end.isoformat()
-    n = 0
+    n = with_ref = 0
     i = 0
     while i < len(apps):
         day = apps[i][0][:10]
@@ -159,6 +166,7 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
             if any(g is None for g in got.values()):
                 continue
             comp, home, away = fixtures.get(fid, ("", "", ""))
+            with_ref += fid in refs
             if team in (home, away) and any(p.opp or p.venue or p.ref for p in variants.values()):
                 f = ctx.factors(away if team == home else home, comp, team == home, refs.get(fid))
                 got = {v: apply(g, f, p.opp, p.venue, p.ref) if (p.opp or p.venue or p.ref) else g
@@ -181,7 +189,7 @@ def evaluate_players(store, start: datetime, end: datetime, variants: dict[str, 
             comp, home, away = fixtures.get(fid, ("", "", ""))
             ctx.add(comp, home, away, by_team, refs.get(fid))
         i = j
-    return PlayerReport(start, end, n, scores)
+    return PlayerReport(start, end, n, scores, with_ref)
 
 
 def _diff(a: LineScore, b: LineScore) -> tuple[float, float]:
@@ -194,7 +202,8 @@ def _diff(a: LineScore, b: LineScore) -> tuple[float, float]:
 
 
 def print_player_eval(rep: PlayerReport, calibration: tuple[str, ...] = ("ammonito", "tiri in porta 1+", "assist")) -> None:
-    print(f"giocatori, replay {rep.start:%Y-%m-%d} - {rep.end:%Y-%m-%d}: {rep.starts} partite da titolare (portieri esclusi)")
+    print(f"giocatori, replay {rep.start:%Y-%m-%d} - {rep.end:%Y-%m-%d}: {rep.starts} partite da titolare (portieri esclusi), "
+          f"{rep.with_ref} con l'arbitro noto")
     base = rep.scores.get("modello")
     for label, _, _ in LINES:
         print(f"  {label}")
