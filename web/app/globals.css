@@ -502,6 +502,19 @@ th.num .th-sort { justify-content: flex-end; }
 @media (hover: hover) { .pitch-team li > button:hover .shirt { transform: scale(1.1); } }
 @media (prefers-reduced-motion: reduce) { .pitch-team li > button .shirt { transition: none; } }
 .pitch-board { position: relative; }
+.pitch-extras { display: grid; gap: 10px; max-width: 560px; margin: 12px auto 0; }
+.pitch-extra { display: grid; gap: 6px; }
+.pitch-extra-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.pitch-extra ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.pitch-extra li > button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 10px 4px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--card-2); cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; font-size: 12.5px; }
+.pitch-extra li > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pitch-extra li.is-sel > button { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); font-weight: 700; }
+.pitch-extra li.pitch-flag .chip-sub { color: var(--bad); }
+@media (hover: hover) { .pitch-extra li > button:hover { border-color: var(--accent); } }
+.chip-shirt { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; flex: none; }
+.chip-shirt-home { background: var(--s1); }
+.chip-shirt-away { background: var(--s2); }
+.chip-sub { color: var(--muted); font-size: 11.5px; }
 .player-card { position: absolute; z-index: 20; width: min(260px, calc(100% - 8px)); padding: 10px 12px 10px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
 .player-card::before { content: ""; position: absolute; top: -6px; left: calc(var(--arrow) - 6px); width: 12px; height: 12px; background: var(--card); border-left: 1px solid var(--line); border-top: 1px solid var(--line); transform: rotate(45deg); }
 .player-card.is-above::before { top: auto; bottom: -6px; transform: rotate(225deg); }

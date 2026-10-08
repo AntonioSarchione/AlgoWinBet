@@ -9,7 +9,9 @@ export type PlayerCard = {
   gk?: 1; ts?: number | null; gc?: number | null; sv?: number | null; cs?: number | null;
 };
 export type PitchPlayer = { id: string; x: number; y: number; shirt: string; name: string; prob: string | null; flag: string | null; role: string };
-export type PitchSide = { side: "home" | "away"; team: string; label: string; probable: boolean; players: PitchPlayer[] };
+// players off the pitch (our probable lineup's alternatives, the official bench): a row of chips under it, same card
+export type PitchExtra = { label: string; players: PitchPlayer[] };
+export type PitchSide = { side: "home" | "away"; team: string; label: string; probable: boolean; players: PitchPlayer[]; extras?: PitchExtra[] };
 
 const ROLE_NAME: Record<string, string> = { P: "Portiere", D: "Difensore", C: "Centrocampista", A: "Attaccante" };
 const num = (v: number | null | undefined, d = 2) => (v == null ? "–" : v.toFixed(d).replace(/\.?0+$/, "") || "0");
@@ -17,8 +19,9 @@ const pc = (v: number | null | undefined) => (v == null ? "–" : `${Math.round(
 
 type Pos = { left: number; top: number; above: boolean; arrow: number };
 
-/** The pitch of the lineups tab. A tap or click on a player highlights him and opens his card next to him; a tap on another
- * player moves the card there, a tap anywhere else (or Esc, or the close button) closes it. The card lives outside the pitch
+/** The pitch of the lineups tab, with the players off it (alternatives, bench) as chips underneath. A tap or click on a player
+ * highlights him and opens his card next to him; a tap on another player moves the card there, a tap anywhere else (or Esc,
+ * or the close button) closes it. The card lives outside the pitch
  * (which clips its content) and is placed from the player's on-screen box, kept inside the board, flipped above the player
  * when there is no room below; it follows the board when its size changes (rotation, sidebar). */
 export function PitchBoard({ sides, cards, label, children }: {
@@ -77,7 +80,16 @@ export function PitchBoard({ sides, cards, label, children }: {
     };
   }, [sel, close, place]);
 
-  const player = sel ? sides.flatMap((s) => s.players.map((p) => ({ s, p }))).find(({ s, p }) => key(s.side, p.id) === sel) : undefined;
+  const everyone = sides.flatMap((s) => [...s.players, ...(s.extras ?? []).flatMap((e) => e.players)].map((p) => ({ s, p })));
+  const player = sel ? everyone.find(({ s, p }) => key(s.side, p.id) === sel) : undefined;
+  const register = (k: string) => (el: HTMLButtonElement | null) => {
+    if (el) buttons.current.set(k, el);
+    else buttons.current.delete(k);
+  };
+  const toggle = (k: string) => () => {
+    if (sel === k) close();
+    else { setPos(null); setSel(k); }
+  };
   const c = player ? cards[player.p.id] : undefined;
 
   return (
@@ -93,16 +105,10 @@ export function PitchBoard({ sides, cards, label, children }: {
                   <button
                     type="button"
                     data-player=""
-                    ref={(el) => {
-                      if (el) buttons.current.set(k, el);
-                      else buttons.current.delete(k);
-                    }}
+                    ref={register(k)}
                     aria-expanded={sel === k}
                     aria-controls={sel === k ? "player-card" : undefined}
-                    onClick={() => {
-                      if (sel === k) close();
-                      else { setPos(null); setSel(k); }
-                    }}
+                    onClick={toggle(k)}
                   >
                     <span className="shirt" aria-hidden="true">
                       <span className="shirt-role">{p.shirt}</span>
@@ -117,6 +123,30 @@ export function PitchBoard({ sides, cards, label, children }: {
           </ul>
         ))}
       </div>
+      {sides.some((s) => s.extras?.some((e) => e.players.length)) && (
+        <div className="pitch-extras">
+          {sides.flatMap((s) => (s.extras ?? []).filter((e) => e.players.length).map((e) => (
+            <div key={`${s.side}-${e.label}`} className="pitch-extra">
+              <span className="pitch-extra-head"><span className={`pitch-dot pitch-dot-${s.side}`} aria-hidden="true" /> {e.label}</span>
+              <ul aria-label={`${s.team}, ${e.label.toLowerCase()}`}>
+                {e.players.map((p) => {
+                  const k = key(s.side, p.id);
+                  return (
+                    <li key={p.id} className={`${p.flag ? "pitch-flag " : ""}${sel === k ? "is-sel" : ""}`}>
+                      <button type="button" data-player="" ref={register(k)} aria-expanded={sel === k}
+                        aria-controls={sel === k ? "player-card" : undefined} onClick={toggle(k)}>
+                        <span className={`chip-shirt chip-shirt-${s.side}`} aria-hidden="true">{p.shirt}</span>
+                        <span className="chip-name">{p.name}</span>
+                        {(p.prob || p.flag) && <span className="chip-sub">{[p.prob, p.flag].filter(Boolean).join(" · ")}</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )))}
+        </div>
+      )}
       {player && (
         <div
           id="player-card"

@@ -5,7 +5,7 @@ import { layout, type Detail } from "@/lib/pitch";
 import { dayTime, pct } from "./format";
 import { Empty, TeamBadge } from "./ui";
 import { ABSENCE_LABEL, Absences } from "./Absences";
-import { PitchBoard, type PitchSide, type PlayerCard } from "./PitchBoard";
+import { PitchBoard, type PitchPlayer, type PitchSide, type PlayerCard } from "./PitchBoard";
 
 const ROLE: Record<string, string> = { GK: "P", DEF: "D", MID: "C", FWD: "A" };
 
@@ -82,6 +82,10 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
   );
   const flag = (x: Side, id: string) => (x.statuses[id] ? ` (${(ABSENCE_LABEL[x.statuses[id]] ?? x.statuses[id]).toLowerCase()})` : "");
   const onPitch = sides.map((x) => ({ x, s: spots(x) })).filter((v) => v.s);
+  const offPitch = (x: Side, id: string): PitchPlayer => ({
+    id, x: 0, y: 0, shirt: role(id), name: name(id), role: role(id), prob: x.probs[id] != null ? pct(x.probs[id], 0) : null,
+    flag: x.statuses[id] ? (ABSENCE_LABEL[x.statuses[id]] ?? x.statuses[id]).toLowerCase() : null,
+  });
   const anyOurs = sides.some((x) => x.kind === "ours");
 
   return (
@@ -92,7 +96,7 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
       </div>
       {onPitch.length > 0 && (
         <PitchBoard
-          label={`Formazioni in campo: ${home} in alto, ${away} in basso. Tocca un giocatore per le sue statistiche`}
+          label={`Formazioni in campo: ${home} in alto, ${away} in basso. Tocca un giocatore, anche tra alternative e panchina, per le sue statistiche`}
           cards={cards}
           sides={onPitch.map(({ x, s }): PitchSide => ({
             side: x.side, team: x.team, label: `${label(x)}, ${x.formation ?? "modulo n/d"}`, probable: x.kind === "ours",
@@ -101,6 +105,10 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
               prob: x.probs[p.id] != null ? pct(x.probs[p.id], 0) : null,
               flag: x.statuses[p.id] ? (ABSENCE_LABEL[x.statuses[p.id]] ?? x.statuses[p.id]).toLowerCase() : null,
             })),
+            extras: [
+              { label: "Alternative", players: x.alt.map((r) => offPitch(x, r[0])) },
+              { label: "Panchina", players: x.bench.map((p) => ({ ...offPitch(x, p), shirt: String(x.detail[p]?.n ?? role(p)) })) },
+            ],
           }))}
         >
           <svg className="pitch-lines pitch-v" viewBox="0 0 68 105" preserveAspectRatio="none" aria-hidden="true">
@@ -137,10 +145,10 @@ export function Lineups({ lineups, players, home, away, absences = [], probable 
                   Nella probabile ma segnalati: {x.starters.filter((p) => x.statuses[p]).map((p) => `${name(p)}${flag(x, p)}`).join(", ")}
                 </p>
               )}
-              {x.alt.length > 0 && (
+              {x.alt.length > 0 && !spots(x) && (
                 <p className="note">Alternative: {x.alt.map((r) => `${r[1]} ${pct(r[3], 0)}${flag(x, r[0])}`).join(", ")}</p>
               )}
-              {x.bench.length > 0 && (
+              {x.bench.length > 0 && !spots(x) && (
                 <p className="note">
                   Panchina: {x.bench.map((p) => (x.detail[p]?.n ? `${x.detail[p]!.n} ${name(p)}` : name(p))).join(", ")}
                 </p>
