@@ -326,8 +326,8 @@ UNLISTED = 0.002  # anytime probability of a player missing from a pre-XI list (
 
 VARIANTS = {"modello": Params(), "giocatore": Params(shrink=False), "ruolo": Params(role_only=True)}
 # scorer-eval --tune: the model now against stronger shrinkage and a negative binomial, to fix the calibration above 30%
-TUNE = {"modello": Params(), "k10": Params(k=10.0), "k15": Params(k=15.0), "k25": Params(k=25.0),
-        "disp4": Params(disp=4.0), "disp8": Params(disp=8.0), "k15+disp8": Params(k=15.0, disp=8.0)}
+TUNE = {"modello": Params(), "k25": Params(k=25.0), "k35": Params(k=35.0), "k50": Params(k=50.0), "k75": Params(k=75.0),
+        "k35+pen8": Params(k=35.0, k_pen=8.0)}
 
 
 def evaluate_scorers(store, provider, cfg: Config, start: datetime, end: datetime, competitions: list[str],
