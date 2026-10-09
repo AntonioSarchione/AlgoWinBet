@@ -39,16 +39,22 @@ export default async function Sistema() {
       ]
     : [];
   const over = quotas.filter((q) => q.used >= q.limit);
+  const reset = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toLocaleDateString("it-IT", { day: "numeric", month: "long", timeZone: "UTC" });
+  const share = (q: (typeof quotas)[number]) => `${q.l} ${fmt(q.used)} su ${fmt(q.limit)} ${q.u} (${Math.round((100 * q.used) / q.limit)}%)`;
   const dbCheck: HealthCheck = {
-    key: "turso-quota",
-    label: "Database · quote Turso del mese",
+    key: "turso-account",
+    label: "Account database Turso",
     level: !turso.ok || quotas.some((q) => q.used >= 0.7 * q.limit) ? "warn" : "ok",
-    detail: turso.ok
-      ? quotas.map((q) => `${q.l} ${fmt(q.used)} su ${fmt(q.limit)} ${q.u} (${Math.round((100 * q.used) / q.limit)}%)`).join(" · ")
-        + (over.length ? `. Oltre il limite (${over.map((q) => q.l).join(", ")}): raccolta sospesa fino al 1° del mese, quando le quote si azzerano.` : ".")
-      : `Consumi non disponibili: ${turso.reason}.`,
+    detail: !turso.ok
+      ? `consumi non disponibili: ${turso.reason}`
+      : over.length
+        ? `quota mensile del piano gratuito superata (${over.map(share).join(", ")}): l'account può essere bloccato in qualsiasi momento. `
+          + `Raccolta e workflow sospesi fino al ${reset}, quando le quote si azzerano. Altre quote: ${quotas.filter((q) => !over.includes(q)).map(share).join(" · ")}`
+        : quotas.map(share).join(" · "),
   };
-  const checks: HealthCheck[] = [dbCheck, ...(health?.checks ?? [])];
+  // the morning checks saved before the rename keep the old label
+  const RENAMED: Record<string, string> = { "Spazio del database": "Spazio database Turso" };
+  const checks: HealthCheck[] = [dbCheck, ...(health?.checks ?? []).map((c) => ({ ...c, label: RENAMED[c.label] ?? c.label }))];
   const worst = checks.some((c) => c.level === "error") ? "error" : checks.some((c) => c.level === "warn") ? "warn" : "ok";
   const W = LEVEL[worst];
   const backfill = st.jobs.filter((j) => j.name.startsWith("backfill:"));

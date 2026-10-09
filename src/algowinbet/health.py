@@ -183,7 +183,7 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
             growth = max(0.0, week * sizes["quotes"] / rows)
         days_left = (TURSO_FREE_BYTES - size) / (growth / 7) if growth else None
         lvl = "error" if frac >= DB_ERROR else "warn" if frac >= DB_WARN or (days_left is not None and days_left < FULL_SOON_DAYS) else "ok"
-        checks.append(Check("db", "Spazio del database", lvl,
+        checks.append(Check("db", "Spazio database Turso", lvl,
                             f"{size / 1e6:.0f} MB su {TURSO_FREE_BYTES / 1e9:.0f} GB ({frac:.0%})"
                             + (f" · prezzi +{growth / 1e6:.0f} MB a settimana, piano pieno tra circa {days_left / 30:.0f} mesi" if days_left else "")
                             + (f" · più grandi: {top}" if top else "")))
