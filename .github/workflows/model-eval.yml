@@ -27,6 +27,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
+      # The replica kept by the collector runs: only what changed since is synced. Without it every run downloaded the whole
+      # database (~560 MB) and Turso counts every synced byte against the plan's monthly quota.
+      - name: restore database replica
+        uses: actions/cache/restore@v6
+        with:
+          path: data/turso-replica.db*
+          key: turso-replica-${{ github.run_id }}
+          restore-keys: turso-replica-
       - name: run
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}

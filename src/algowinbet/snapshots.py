@@ -149,8 +149,12 @@ def connect(path: str | Path):
         replica.parent.mkdir(parents=True, exist_ok=True)
         import time
         t0, had = time.monotonic(), replica.exists()
-        conn = libsql.connect(str(replica), sync_url=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))
-        conn.sync()
+        try:
+            conn = libsql.connect(str(replica), sync_url=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))
+            conn.sync()
+        except Exception as e:  # e.g. the plan's monthly sync quota used up: the run goes on talking to the primary directly
+            print(f"replica non disponibile ({e}): connessione diretta al database principale", flush=True)
+            return libsql.connect(database=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", "")), False
         size = replica.stat().st_size / 1e6 if replica.exists() else 0.0
         print(f"replica del database: {'aggiornata' if had else 'scaricata da zero'} in {time.monotonic() - t0:.0f}s ({size:.0f} MB)", flush=True)
         return HybridConnection(conn, lambda: libsql.connect(database=p, auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""))), True

@@ -157,7 +157,7 @@ const OPP_COLS =
 
 // "gol" became "goal" in every label on 2026-10-09: rows and JSON written before keep the old word, shown with the new one
 export const goalify = (s: string) =>
-  s.replace(/NoGol/g, "NoGoal").replace(/Multigol/g, "Multigoal").replace(/Gol/g, "Goal").replace(/gol/g, "goal");
+  s.replace(/\bNoGol\b/g, "NoGoal").replace(/\bMultigol\b/g, "Multigoal").replace(/\bGol\b/g, "Goal").replace(/\bgol\b/g, "goal");
 
 const withMatch = (rows: (OppRow & { match_label?: string })[]) =>
   rows.map(({ match_label, ...o }) => ({ ...o, market: goalify(o.market), match: match_label ?? o.match ?? "" }));
