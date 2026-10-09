@@ -22,7 +22,10 @@ const LEVEL = {
   error: { label: "Errore", cls: "status-AVOID", icon: XCircle, state: "fail" },
 } as const;
 const TURSO_FREE_MB = 5000;
-const TURSO_SYNC_MB = 3000; // free plan: bytes synced to the embedded replicas per billing cycle
+// Turso free plan, per billing cycle (the 1st of the month): synced to the embedded replicas, rows read and written
+const TURSO_SYNC_MB = 3000;
+const TURSO_READS_M = 500;
+const TURSO_WRITES_M = 10;
 
 export default async function Sistema() {
   const [st, use, tick, health, turso] = await Promise.all([systemStatus(), usage(), lastTick(), latestHealth(), tursoUsage()]);
@@ -38,15 +41,19 @@ export default async function Sistema() {
   const linked = datasets.reduce((n, d) => n + d.linked, 0);
 
   // Turso's count (Platform API): shown with or without the morning's size measure
+  // Turso's own counts (Platform API), with or without the morning's size measure: hitting any limit blocks the account
   const synced = turso.ok ? (
-    <Meter
-      label="Turso · byte sincronizzati nel mese (MB)"
-      used={Math.round(turso.usage.bytesSynced / 1e6)}
-      limit={TURSO_SYNC_MB}
-      hint="Copie locali del database nelle run di GitHub Actions: si azzera a inizio ciclo di fatturazione"
-    />
+    <>
+      <Meter label="Turso · byte sincronizzati nel mese (MB)" used={Math.round(turso.usage.bytesSynced / 1e6)} limit={TURSO_SYNC_MB}
+        hint="Copie locali del database nelle run di GitHub Actions" />
+      <Meter label="Turso · righe lette nel mese (milioni)" used={Math.round(turso.usage.rowsRead / 1e6)} limit={TURSO_READS_M}
+        hint="Sito, avvio delle raccolte e run senza copia locale" />
+      <Meter label="Turso · righe scritte nel mese (milioni)" used={Math.round(turso.usage.rowsWritten / 1e5) / 10} limit={TURSO_WRITES_M}
+        hint="Raccolta, pubblicazione delle analisi, registro" />
+      <p className="note">Piano gratuito Turso: superare uno qualsiasi dei limiti blocca tutto l&apos;account fino all&apos;inizio del mese seguente.</p>
+    </>
   ) : (
-    <p className="note">Byte sincronizzati non disponibili: {turso.reason}.</p>
+    <p className="note">Consumi Turso non disponibili: {turso.reason}.</p>
   );
   return (
     <>

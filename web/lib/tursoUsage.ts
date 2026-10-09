@@ -3,10 +3,10 @@
 // (TURSO_ORG). A failure is returned as a short reason for the page (never the token), and is not cached.
 import { unstable_cache } from "next/cache";
 
-export type TursoUsage = { bytesSynced: number; storageBytes: number };
+export type TursoUsage = { bytesSynced: number; storageBytes: number; rowsRead: number; rowsWritten: number };
 export type TursoUsageResult = { ok: true; usage: TursoUsage } | { ok: false; reason: string };
 
-type Totals = { bytes_synced?: number; storage_bytes?: number };
+type Totals = { bytes_synced?: number; storage_bytes?: number; rows_read?: number; rows_written?: number };
 
 class UsageError extends Error {}
 
@@ -19,23 +19,15 @@ async function fetchUsage(org: string): Promise<TursoUsage> {
     const why = r.status === 401 || r.status === 403 ? "token non valido o non della piattaforma" : r.status === 404 ? "organizzazione non trovata (TURSO_ORG)" : "";
     throw new UsageError(`Turso ha risposto ${r.status}${why ? `: ${why}` : ""}`);
   }
-  const j = (await r.json()) as { organization?: { usage?: Totals; databases?: { total?: Totals }[] } };
-  const dbs = j.organization?.databases;
-  if (!Array.isArray(dbs)) {
-    console.error("tursoUsage: chiavi della risposta", Object.keys(j), Object.keys(j.organization ?? {}));
-    throw new UsageError("risposta di Turso in un formato inatteso");
-  }
-  // TEMPORARY (2026-10-09): which counter holds the cycle's bytes synced. Counters only, no token or name.
-  console.log("tursoUsage org", JSON.stringify(j.organization?.usage), "dbs", JSON.stringify(dbs.map((d) => d.total)));
-  // the cycle's consumption is the sum over the databases (organization.usage is documented as the plan's allowances)
-  return {
-    bytesSynced: dbs.reduce((a, d) => a + (d.total?.bytes_synced ?? 0), 0),
-    storageBytes: dbs.reduce((a, d) => a + (d.total?.storage_bytes ?? 0), 0),
-  };
+  // organization.usage holds this cycle's consumption (seen 2026-10-09: bytes_synced 3385192448 with the dashboard at
+  // 3.38 GB; the documentation calls it the plan's allowances, and the per-database totals came back null)
+  const u = ((await r.json()) as { organization?: { usage?: Totals } }).organization?.usage;
+  if (!u || typeof u.bytes_synced !== "number") throw new UsageError("risposta di Turso in un formato inatteso");
+  return { bytesSynced: u.bytes_synced, storageBytes: u.storage_bytes ?? 0, rowsRead: u.rows_read ?? 0, rowsWritten: u.rows_written ?? 0 };
 }
 
 // one request every 30 minutes at most; a thrown error is not cached, so a fixed setting shows on the next visit
-const cached = unstable_cache(fetchUsage, ["tursoUsage2"], { revalidate: 1800 });
+const cached = unstable_cache(fetchUsage, ["tursoUsage3"], { revalidate: 1800 });
 
 export async function tursoUsage(): Promise<TursoUsageResult> {
   const org = process.env.TURSO_ORG?.trim();
