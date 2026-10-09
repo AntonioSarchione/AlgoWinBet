@@ -9,7 +9,7 @@ on:
         required: false
         default: "52"
       variants:
-        description: "varianti separate da spazio (vuoto = tutte): base senza-elo-nazionali senza-storico-nazionali storico-nazionali-2 storico-nazionali-6 elo-nazionali-0.08 elo-nazionali-0.25 campionati elo-club emivita-180 emivita-540 tutto nazionali-emivita-730 nazionali-emivita-1460 nazionali-importanza"
+        description: "varianti separate da spazio (vuoto = tutte): base senza-elo-nazionali senza-storico-nazionali storico-nazionali-2 storico-nazionali-6 elo-nazionali-0.08 elo-nazionali-0.25 campionati elo-club emivita-180 emivita-540 xg-0.3 xg-0.5 xg-0.7 tutto nazionali-emivita-730 nazionali-emivita-1460 nazionali-importanza"
         required: false
         default: ""
 
@@ -38,4 +38,4 @@ jobs:
           # inputs arrive as environment variables, never interpolated into the script
           args=(--db turso --weeks "${WEEKS:-52}")
           if [ -n "$VARIANTS" ]; then args+=(--variants $VARIANTS); fi
-          algowinbet model-eval "${args[@]}"
+          TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet model-eval "${args[@]}"

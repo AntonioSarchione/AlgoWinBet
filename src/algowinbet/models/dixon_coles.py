@@ -27,8 +27,11 @@ def _tau(i: np.ndarray, j: np.ndarray, lh: np.ndarray, la: np.ndarray, rho: floa
 
 class DixonColes:
     def __init__(self, xi: float = math.log(2) / 365.0, l2: float = 1.0, comp_mu: bool = False,
-                 l2_comp_home: float | None = None, l2_comp_mu: float = 0.0):
+                 l2_comp_home: float | None = None, l2_comp_mu: float = 0.0, xg_weight: float = 0.0):
         self.xi = xi  # decay per day (default half-life 1 year)
+        # share of each match's target taken from its xG where known (0 = goals only): the strengths then follow the chances
+        # made and conceded, less the finishing luck of a few matches; rho still reads the real scores
+        self.xg_weight = xg_weight
         self.l2 = l2
         # league effects (pooled model only): each competition's home advantage as a deviation from the shared one, shrunk
         # with l2_comp_home (None = one home advantage for all); its goal level shrunk towards the overall level with
@@ -50,9 +53,11 @@ class DixonColes:
         self.fitted = False
 
     # ------------------------------------------------------------------ fit
-    def fit(self, results: list[MatchResult], as_of: datetime, prior: dict[str, tuple[float, float]] | None = None) -> "DixonColes":
+    def fit(self, results: list[MatchResult], as_of: datetime, prior: dict[str, tuple[float, float]] | None = None,
+            xg: dict[str, tuple[float, float]] | None = None) -> "DixonColes":
         """prior: team -> (attack, defence) centre of the ridge penalty (default 0 = league average). Used for newcomers
-        such as promoted clubs, which would otherwise be shrunk towards an average top-flight side."""
+        such as promoted clubs, which would otherwise be shrunk towards an average top-flight side. xg: fixture id ->
+        (home, away) xG, mixed into the target with xg_weight."""
         if len(results) < 10:
             raise ValueError("need at least 10 results to fit")
         names = sorted({r.home for r in results} | {r.away for r in results})
@@ -62,6 +67,12 @@ class DixonColes:
         ai = np.array([self.teams[r.away] for r in results])
         x = np.array([r.home_goals for r in results], dtype=float)
         y = np.array([r.away_goals for r in results], dtype=float)
+        xt, yt = x, y  # the Poisson targets of the strengths (the scores, or scores and xG mixed)
+        if self.xg_weight and xg:
+            k = self.xg_weight
+            g = [xg.get(r.fixture_id) for r in results]
+            xt = np.array([(1 - k) * a + k * v[0] if v else a for a, v in zip(x, g)])
+            yt = np.array([(1 - k) * b + k * v[1] if v else b for b, v in zip(y, g)])
         age = np.array([(as_of - r.kickoff).total_seconds() / 86400.0 for r in results])
         # weight = importance x 0.5^(age / half-life): the match's own half-life when it has one (national teams), else xi
         xi = np.array([math.log(2) / r.half_life_days if getattr(r, "half_life_days", None) else self.xi for r in results])
@@ -98,8 +109,8 @@ class DixonColes:
             eh = m + (h + dh[ci]) * hm + a[hi] - d[ai]
             ea = m + a[ai] - d[hi]
             lh, la = np.exp(eh), np.exp(ea)
-            ll = np.sum(w * (x * eh - lh + y * ea - la))
-            rh, ra = w * (x - lh), w * (y - la)
+            ll = np.sum(w * (xt * eh - lh + yt * ea - la))
+            rh, ra = w * (xt - lh), w * (yt - la)
             ga = np.bincount(hi, rh, T) + np.bincount(ai, ra, T)
             gd = -np.bincount(ai, rh, T) - np.bincount(hi, ra, T)
             gmu = -np.bincount(ci, rh + ra, C) + 2 * lmu * (mu - mu0)

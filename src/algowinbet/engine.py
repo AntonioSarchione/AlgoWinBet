@@ -136,6 +136,14 @@ class Engine:
             self._models[key] = self._fit_hist(history_at(self.provider, competition, cutoff, m.history_seasons), cutoff, comp_mu=False)
         return self._models[key]
 
+    def match_xg(self) -> dict[str, tuple[float, float]]:
+        """Full-time (home, away) xG per result, read once."""
+        if "expected_goals" not in self._stat_rows:
+            fn = getattr(self.provider, "match_stat_values", None)
+            self._stat_rows["expected_goals"] = {k: v["expected_goals"] for k, v in (fn(("expected_goals",)) if fn else {}).items()
+                                                 if "expected_goals" in v}
+        return self._stat_rows["expected_goals"]
+
     def count_model(self, stat: str, cutoff: datetime) -> CountModel | None:
         """Corners / cards model on every match with that statistic known at cutoff (same seasons and decay as goals)."""
         key = (stat, cutoff)
@@ -207,13 +215,14 @@ class Engine:
         m = self.cfg.model
         if len(hist) < m.min_history:
             return None
-        kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2, comp_mu=comp_mu, l2_comp_home=m.l2_comp_home, l2_comp_mu=m.l2_comp_mu)
+        kw = dict(xi=math.log(2) / m.xi_half_life_days, l2=m.l2, comp_mu=comp_mu, l2_comp_home=m.l2_comp_home, l2_comp_mu=m.l2_comp_mu,
+                  xg_weight=m.xg_weight)
         prior = newcomer_prior(hist, cutoff, m.newcomer_prior)
         if m.club_elo_per_100 or m.nation_elo_per_100:
             clubs, nations = self.elo()
             teams = {t for r in hist for t in (r.home, r.away)}
             prior.update(elo_prior(teams, cutoff, clubs, nations, m.club_elo_per_100, m.nation_elo_per_100))
-        model = DixonColes(**kw).fit(hist, cutoff, prior=prior)
+        model = DixonColes(**kw).fit(hist, cutoff, prior=prior, xg=self.match_xg() if m.xg_weight else None)
         boots = DixonColes.bootstrap(hist, cutoff, m.n_bootstrap, seed=1, **kw) if m.n_bootstrap else []
         return model, boots
 

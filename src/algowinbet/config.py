@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class ModelCfg(BaseModel):
     xi_half_life_days: float = 365.0
     l2: float = 1.0
+    xg_weight: float = 0.0  # share of the goal-model target taken from the match xG where known (model-eval "xg-*")
     n_bootstrap: int = 0  # >0 = parametric uncertainty by bootstrap (slow); 0 = analytic proxy
     min_history: int = 40
     pooled: bool = True  # one model over all competitions (needed for European cups); False = one model per competition

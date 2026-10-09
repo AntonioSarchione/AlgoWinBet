@@ -39,6 +39,10 @@ VARIANTS: dict[str, dict] = {
     "elo-nazionali-0.25": {"nation_elo_per_100": 0.25},
     "emivita-180": {"xi_half_life_days": 180.0},
     "emivita-540": {"xi_half_life_days": 540.0},
+    # xG mixed into the target of the strengths where the match has it (FotMob / football-data team stats)
+    "xg-0.3": {"xg_weight": 0.3},
+    "xg-0.5": {"xg_weight": 0.5},
+    "xg-0.7": {"xg_weight": 0.7},
     "tutto": {"l2_comp_home": 50.0, "l2_comp_mu": 20.0, "club_elo_per_100": 0.10},
     # national teams (base since 2026-10-02: Elo K table, no importance, 3-year half-life)
     "nazionali-emivita-730": {"nation_half_life_days": 730.0},
