@@ -132,6 +132,30 @@ class FootballDataCollector:
             return False
         return d.get("link_version", 1) >= LINK_VERSION or not d.get("n_unmatched")
 
+    def relink(self) -> list[tuple[str, str, int, int, int]]:
+        """Files with unlinked rows read again from the stored copy (no download: football-data answers 304 for a file that
+        did not change, so a renamed club of ours would never be picked up): (division, season, rows, linked before, now).
+        Saving is idempotent (stats replaced, quotes unique)."""
+        out = []
+        for name, detail in self.store.db.execute("SELECT name, detail FROM jobs WHERE name LIKE ?", (f"dataset-report:{SOURCE}:%",)).fetchall():
+            try:
+                d = json.loads(detail or "{}")
+            except ValueError:
+                continue
+            div, season = d.get("div"), d.get("season")
+            if not d.get("n_unmatched") or div not in self.divisions:
+                continue
+            row = self.store.db.execute("SELECT id FROM raw_requests WHERE source=? AND endpoint=? AND status=200 ORDER BY id DESC LIMIT 1",
+                                        (SOURCE, f"/mmz4281/{season}/{div}.csv")).fetchone()
+            if not row:
+                continue
+            st = CollectStats("datasets")
+            rep = self.load(self.store.raw_body(row[0]), div, row[0], st)
+            d.update(rows=rep.rows, linked=rep.linked, unmatched=rep.unmatched[:20], n_unmatched=len(rep.unmatched), link_version=LINK_VERSION)
+            self.store.mark_job(name, self.now(), json.dumps(d, ensure_ascii=False))
+            out.append((div, season, rep.rows, int(json.loads(detail).get("linked") or 0), rep.linked))
+        return out
+
     # ------------------------------------------------------------------ sync
     def due(self, previous_seasons: int = 2, refresh_days: float = 3.0) -> list[tuple[str, str]]:
         """(season, division) files to download now: past seasons not loaded yet, the current season every refresh_days.

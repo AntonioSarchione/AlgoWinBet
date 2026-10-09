@@ -234,3 +234,15 @@ def test_referee_column_saved_and_read_back_under_one_key():
     c.load(body, "E0", None, CollectStats("t"), only_referees=True)
     assert "goals" not in st.stats_of("goal:1")  # only the referee was read
     assert SnapshotProvider(st).referees() == {"goal:1": "m oliver"}
+
+
+def test_relink_reads_a_stored_file_again_after_our_results_are_renamed():
+    ko = datetime(2026, 9, 27, 13, 0, tzinfo=UTC)
+    st = store_with(("goal:1", "Inter", "Milan", ko), ("fotmob:9", "Giallorossi", "Lazio", ko))  # a result saved under another spelling
+    site = FakeSite(csv_body(row("27/09/2026", "14:00", "Inter", "Milan"), row("27/09/2026", "14:00", "Roma", "Lazio")))
+    c = FootballDataCollector(st, {"I1": "Serie A"}, now=lambda: NOW, fetch=site)
+    c.sync(previous_seasons=0)
+    assert c.relink() == [("I1", "2627", 2, 1, 1)]  # nothing changed yet: still one row unlinked
+    st.db.execute("UPDATE results SET home='Roma' WHERE fixture_id='fotmob:9'")
+    assert c.relink() == [("I1", "2627", 2, 1, 2)] and len(site.calls) == 1  # no new download
+    assert c.relink() == []  # nothing left to link

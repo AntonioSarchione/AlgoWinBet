@@ -1882,6 +1882,20 @@ def cmd_inspect(a) -> None:
     store.close()
 
 
+def cmd_dataset_relink(a) -> None:
+    """football-data files with unlinked rows linked again from the stored copies (no download, no API request): after a
+    rename of our results or new aliases."""
+    from .autorun import AutoConfig
+    from .fdcollector import FootballDataCollector
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    try:
+        for div, season, rows, before, now in FootballDataCollector(store, cfg.divisions, TeamNames.load(a.aliases)).relink():
+            print(f"{div}:{season}: abbinate {before} -> {now} su {rows}")
+    finally:
+        store.close()
+
+
 def cmd_dataset_report(a) -> None:
     """Season CSV link report: per file the link rate, and for each unlinked row our matches of those clubs within 3 days."""
     store = SnapshotStore(a.db)
@@ -2751,6 +2765,11 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--db", default="turso")
     sc.add_argument("--all", action="store_true", help="tutte le statistiche, non solo corner e cartellini")
     sc.set_defaults(fn=cmd_stat_coverage)
+    drl = sub.add_parser("dataset-relink", help="file football-data con righe non abbinate riletti dalla copia salvata (nessun download)")
+    drl.add_argument("--config", default="configs/collect.json")
+    drl.add_argument("--aliases", default="configs/team_aliases.json")
+    drl.add_argument("--db", default="algowinbet.db")
+    drl.set_defaults(fn=cmd_dataset_relink)
     dr = sub.add_parser("dataset-report", help="abbinamento dei CSV stagionali football-data alle nostre partite (nessuna richiesta)")
     dr.add_argument("--db", default="turso")
     dr.add_argument("--examples", type=int, default=6)
