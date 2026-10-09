@@ -127,6 +127,20 @@ h2, h3 { font-weight: 600; letter-spacing: 0.01em; }
   border: 1px solid var(--line); background: var(--card); color: var(--text-2); transition: border-color 160ms ease;
 }
 .theme-btn:hover { border-color: var(--line-strong); color: var(--text); }
+/* colours picker: a native select laid over the button (keyboard, screen readers and the phone's own picker) */
+.palette-pick { position: relative; cursor: pointer; }
+.palette-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
+.palette-pick:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.palette-pick > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.swatches { display: inline-flex; gap: 3px; flex: none; }
+.swatches i { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px var(--line-strong); }
+/* a bookmaker palette shows its three colours as a stripe under the logo */
+:root[data-palette] .brand { position: relative; }
+:root[data-palette] .brand::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -8px; height: 3px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--brand-1) 0 34%, var(--brand-2) 34% 67%, var(--brand-3) 67% 100%);
+  box-shadow: 0 0 0 1px var(--line);
+}
 .main { min-width: 0; padding: 20px 24px 48px; display: flex; flex-direction: column; gap: 18px; }
 .page-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
 .page-head h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
@@ -412,6 +426,7 @@ th.num .th-sort { justify-content: flex-end; }
   .nav a { min-width: 44px; justify-content: center; }
   .sidebar-foot { margin: 0 0 0 auto; flex-direction: row; gap: 8px; }
   .theme-btn span { display: none; }
+  :root[data-palette] .brand::after { bottom: -4px; }
   .main { padding: 16px 16px 40px; }
   .filters { grid-template-columns: minmax(0, 1fr); }
 }

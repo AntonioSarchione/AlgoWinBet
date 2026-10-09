@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, BookOpenCheck, CalendarDays, Gauge, LayoutDashboard, LogOut, Moon, Sparkles, Sun, Target, Wallet } from "lucide-react";
+import { Activity, BookOpenCheck, CalendarDays, Gauge, LayoutDashboard, LogOut, Moon, Palette, Sparkles, Sun, Target, Wallet } from "lucide-react";
+import PALETTES from "@/lib/palettes.json";
 import { LogoMark, Wordmark } from "./Logo";
 import { logout } from "@/app/login/actions";
 
@@ -20,10 +21,25 @@ const NAV = [
 export function Sidebar() {
   const path = usePathname();
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [palette, setPalette] = useState(""); // "" = AlgoWinBet's own colours
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+    setPalette(document.documentElement.dataset.palette ?? "");
   }, []);
+
+  function pick(id: string) {
+    setPalette(id);
+    if (id) document.documentElement.dataset.palette = id;
+    else delete document.documentElement.dataset.palette;
+    try {
+      if (id) localStorage.setItem("awb-palette", id);
+      else localStorage.removeItem("awb-palette");
+    } catch {
+      /* storage unavailable: the choice lasts for this page only */
+    }
+  }
+  const current = PALETTES.find((x) => x.id === palette);
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";
@@ -61,6 +77,17 @@ export function Sidebar() {
           <b>Probabilità, non certezze</b>
           Modello statistico + prezzi di mercato. Solo paper trading: nessuna scommessa viene piazzata.
         </div>
+        <label className="theme-btn palette-pick" title="Colori dell'app">
+          <Palette size={17} aria-hidden="true" />
+          <span>Colori: {current?.name ?? "AlgoWinBet"}</span>
+          <span className="swatches" aria-hidden="true">
+            {(current?.colors ?? ["#00e27a", "#00f2fe", "#4facfe"]).map((c) => <i key={c} style={{ background: c }} />)}
+          </span>
+          <select value={palette} onChange={(e) => pick(e.target.value)} aria-label="Colori dell'app">
+            <option value="">AlgoWinBet (predefiniti)</option>
+            {PALETTES.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </label>
         <button type="button" className="theme-btn" onClick={toggle} aria-label={theme === "dark" ? "Passa al tema chiaro" : "Passa al tema scuro"}>
           {theme === "dark" ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
           <span>{theme === "dark" ? "Tema chiaro" : "Tema scuro"}</span>

@@ -1,0 +1,12 @@
+[
+  { "id": "lottomatica", "name": "Lottomatica", "colors": ["#193A83", "#35A8E0", "#F58220"] },
+  { "id": "sisal", "name": "Sisal", "colors": ["#00543C", "#B7D934", "#E34235"] },
+  { "id": "bet365", "name": "bet365", "colors": ["#126E51", "#FFE419", "#38FFA8"] },
+  { "id": "snai", "name": "SNAI", "colors": ["#FF6900", "#292D39", "#FFFFFF"] },
+  { "id": "eurobet", "name": "Eurobet", "colors": ["#1F3B68", "#EC5932", "#F9D34A"] },
+  { "id": "eplay24", "name": "E-Play24", "colors": ["#E30613", "#222222", "#FFFFFF"] },
+  { "id": "daznbet", "name": "DAZN Bet", "colors": ["#111111", "#F7FF00", "#FFFFFF"] },
+  { "id": "pokerstars", "name": "PokerStars", "colors": ["#000000", "#D20A2E", "#FFFFFF"] },
+  { "id": "domusbet", "name": "DomusBet", "colors": ["#B52B2D", "#168348", "#171717"] },
+  { "id": "betsson", "name": "Betsson", "colors": ["#FF6600", "#016AA7", "#DCA86B"] }
+]
