@@ -2490,16 +2490,17 @@ def _collect_auto(a) -> None:
                           + (f" errori {nm.errors}" if nm.errors else ""), flush=True)
                 except Exception as e:  # noqa: BLE001 - names only: never a reason to lose the evening run
                     print(f"nomi giocatori di formazioni passate: non riuscito ({type(e).__name__}: {e})")
+            # 420 s in the morning: ~800 requests at 8 at a time took ~240 s on 2026-10-08, with room for a slower GOAL
             try:
                 try:
-                    lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240 if daily else 120, 120 if daily else LATE_KEEP)
+                    lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 420 if daily else 120, 120 if daily else LATE_KEEP)
                 except Exception as e:  # noqa: BLE001 - a dropped Turso connection: reconnected and tried once more
                     from .autorun import transient_db_error
                     if not transient_db_error(e):
                         raise
                     print(f"storico formazioni ed eventi: connessione a Turso caduta, nuovo tentativo ({e})", flush=True)
                     store.recover()
-                    lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 240 if daily else 120, 120 if daily else LATE_KEEP)
+                    lst, left = lineup_backfill(store, names, now, "2024-07-01", 900, 420 if daily else 120, 120 if daily else LATE_KEEP)
                 if lst is not None:
                     print(f"storico formazioni ed eventi{' (sera)' if late else ''}: {lst.requests} richieste, {lst.saved}; ancora da leggere: formazioni {left[0]}, "
                           f"eventi {left[1]}", flush=True)
