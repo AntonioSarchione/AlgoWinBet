@@ -23,8 +23,9 @@ export function toLegs(rows: OppRow[]): Cand[] {
 
 const slipKey = (sl: { legs: Cand[] }) => sl.legs.map((l) => `${l.fixture_id}|${l.sel_key}`).sort().join(" + ");
 
-/** Slips of every profile with `overrides` on the published optimizer settings. The published profile picks first; every
- * other profile shows its best slip that differs from the ones already shown. Returned in the configured profile order. */
+/** Slips of every profile with `overrides` on the published optimizer settings. The published profile picks first; a
+ * profile whose best slip is one already shown says so ("sameAs") instead of showing a worse one, and its other slips skip
+ * the ones already shown. Returned in the configured profile order. */
 export function runProfiles(legs: Cand[], settings: OptSettings, overrides: Partial<OptimizerCfg>): Record<string, ProfileResult> {
   const names = settings.optimizer.profiles ? Object.keys(settings.optimizer.profiles) : ["equilibrata"];
   const main = names.includes(settings.optimizer.profile ?? "") ? (settings.optimizer.profile as string) : names[0];
@@ -33,12 +34,16 @@ export function runProfiles(legs: Cand[], settings: OptSettings, overrides: Part
   for (const name of [main, ...names.filter((n) => n !== main)]) {
     const r: ProfileResult = optimize(legs, { ...settings, optimizer: withProfile({ ...settings.optimizer, ...overrides }, name) });
     const top = r.slips[0];
-    r.slips = r.slips.filter((sl) => !shown.has(slipKey(sl)));
-    if (!r.slips.length && top) {
+    // its best slip already shown by another profile: say so, never fall back to a worse one under this profile's name
+    // ("Massima probabilità" showing a less likely slip than «Equilibrata» because the most likely one is «Equilibrata»'s)
+    if (top && shown.has(slipKey(top))) {
       r.sameAs = shown.get(slipKey(top));
       const other = r.sameAs ?? "";
+      r.slips = [];
       r.noBet = true;
-      r.reasons = [`Con questi filtri la migliore schedina di questo profilo è la stessa di «${PROFILE_LABEL[other] ?? other}»: nessuna alternativa diversa.`];
+      r.reasons = [`Con questi filtri la migliore schedina di questo profilo è la stessa di «${PROFILE_LABEL[other] ?? other}».`];
+    } else {
+      r.slips = r.slips.filter((sl) => !shown.has(slipKey(sl)));
     }
     if (r.slips[0]) shown.set(slipKey(r.slips[0]), name);
     out[name] = r;
