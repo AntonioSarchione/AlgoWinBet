@@ -3,14 +3,17 @@ import { unstable_cache } from "next/cache";
 import {
   AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Coins, Database, Filter, Gauge,
   Gem, Layers, ListOrdered, Percent, Scale, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Ticket, Trophy, TrendingUp, Workflow,
-  XCircle, type LucideIcon,
+  Unlock, XCircle, type LucideIcon,
 } from "lucide-react";
-import { absencesFor, DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type Absence, type FixtureRow, type ModelMarket } from "@/lib/db";
+import { absencesFor, DEPLOY, fixtureBook, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, type Absence, type BookSel, type FixtureRow, type ModelMarket } from "@/lib/db";
 import { explainSlip, legMinOdds, legReason, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_LABEL, profileHint, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
-import { Empty, Meter, MatchCell, MiniRing, PBar, ProbGauge, TeamBadge } from "@/app/_components/ui";
+import { Empty, Fold, MatchCell, MiniRing, PBar, ProbGauge } from "@/app/_components/ui";
+import { QuickSearch } from "@/app/_components/QuickSearch";
+import { FREE_MAX_LEGS, freeSlip, type FreeOpt, type FreeResult } from "@/lib/freeslip";
+import { isEstimated } from "@/lib/books";
 import { LegAbsences } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
@@ -22,17 +25,6 @@ const PERIODS = [
   { v: "48", l: "Prossime 48 ore" },
   { v: "72", l: "Prossimi 3 giorni" },
   { v: "168", l: "Prossimi 7 giorni" },
-];
-
-const MAX_EVENTS = [
-  { v: "10", l: "Fino a 10" },
-  { v: "1", l: "1 (singola)" },
-  ...[2, 3, 4, 5, 6, 7, 8, 9].map((k) => ({ v: String(k), l: `Fino a ${k}` })),
-];
-
-const MIN_EVENTS = [
-  { v: "1", l: "Almeno 1" },
-  ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => ({ v: String(k), l: k === 5 ? "Almeno 5 (bonus Sisal)" : `Almeno ${k}` })),
 ];
 
 // the slips never take a selection under the published floor (40%, user's rule): "" = that floor
@@ -71,13 +63,32 @@ const homeSlips = unstable_cache(
 
 type SP = {
   min?: string; max?: string; lmin?: string; lmax?: string; h?: string; n?: string; nmin?: string; comp?: string | string[];
-  p?: string; pmin?: string; ev?: string; risk?: string; mk?: string | string[];
+  p?: string; pmin?: string; ev?: string; risk?: string; mk?: string | string[]; free?: string;
 };
+
+// number of legs from the URL: 1 to 20, else the default
+const legCount = (v: string | undefined, d: number) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, FREE_MAX_LEGS) : d;
+};
+
+// "Senza regole": every playable Sisal selection (pub_book) of the matches in the period
+async function freeOptions(runId: number, fixtures: FixtureRow[]): Promise<FreeOpt[]> {
+  const fx = new Map(fixtures.map((f) => [f.fixture_id, f]));
+  const book = await fixtureBook(runId, [...fx.keys()]);
+  return book.flatMap((b) => {
+    const f = fx.get(b.fixture_id)!;
+    return parseJSON<BookSel[]>(b.sels, []).map((x) => ({
+      fixture_id: f.fixture_id, competition: f.competition, kickoff: f.kickoff, match: `${f.home} - ${f.away}`, market: x.m, odds: x.o, p: x.p,
+      p_market: x.pm, bookmaker: x.b,
+    }));
+  });
+}
 
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const run = await latestRun();
-  const [use, tick] = await Promise.all([usage(), lastTick()]);
+  const tick = await lastTick();
   if (!run) {
     return (
       <div className="card">
@@ -90,8 +101,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   // ---- filters: every change rebuilds the slips on the published opportunities (web/lib/optimizer.ts) ----
   const now = Date.now();
   const hours = PERIODS.some((p) => p.v === sp.h) ? Number(sp.h) : 168;
-  const maxEvents = MAX_EVENTS.some((m) => m.v === sp.n) ? Number(sp.n) : 10;
-  const minEvents = Math.min(MIN_EVENTS.some((m) => m.v === sp.nmin) ? Number(sp.nmin) : 1, maxEvents); // never above the maximum
+  const maxEvents = legCount(sp.n, FREE_MAX_LEGS);
+  const minEvents = Math.min(legCount(sp.nmin, 1), maxEvents); // never above the maximum
+  const free = sp.free === "1";
   const qMin = Number(sp.min) || 0;
   const qMax = Number(sp.max) || 0;
   const lMin = Number(sp.lmin) || 0;
@@ -117,6 +129,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
     new Date(isoTime).getTime() <= now + hours * 3600_000 && (!picked.size || picked.has(comp));
   const comps = [...new Set(fixtures.map((f) => f.competition))].sort();
   const fx = fixtures.filter((f) => inWindow(f.kickoff, f.competition) && new Date(f.kickoff).getTime() > now - 2 * 3600_000);
+  const inPeriod = (f: FixtureRow) => {
+    const t = new Date(f.kickoff).getTime();
+    return t > now && t <= now + hours * 3600_000;
+  };
+  const freeRes = free
+    ? freeSlip(await freeOptions(run.id, fixtures.filter(inPeriod)), { qMin, qMax, lMin, lMax, nMin: minEvents, nMax: maxEvents })
+    : null;
   const results: Record<string, ProfileResult> = computed ?? {
     equilibrata: { slips: [], noBet: true, reasons: ["Analisi pubblicata con una versione precedente: le schedine arrivano dalla prossima pubblicazione."], eligible: 0, evaluated: 0 },
   };
@@ -139,13 +158,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const absent = best ? await absencesFor(best.legs.map((l) => l.fixture_id)).catch(() => ({}) as Record<string, Absence[]>) : {};
   const op = summary.top;
   const nOpp = summary.count;
-  const upcoming = fx.slice(0, 6);
+  // "Analisi rapida": every match of the published analysis not kicked off yet, whatever the filters
+  const upcoming = fixtures
+    .filter((f) => new Date(f.kickoff).getTime() > now)
+    .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
+    .map((f) => ({ id: f.fixture_id, home: f.home, away: f.away, competition: f.competition, kickoff: f.kickoff }));
   // strip above the deep analysis: every filtered match not started yet, nearest kickoff first
   const explorer = fx
     .filter((f) => new Date(f.kickoff).getTime() >= now)
     .sort((a, b) => a.kickoff.localeCompare(b.kickoff))
     .map(explorerMatch);
-  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || (sp.n && sp.n !== "10") || (sp.nmin && sp.nmin !== "1") || sp.pmin || sp.ev || sp.risk || !allMk);
+  const filtered = Boolean(picked.size || sp.min || sp.max || sp.lmin || sp.lmax || (sp.h && sp.h !== "168") || maxEvents !== FREE_MAX_LEGS || minEvents !== 1 || free || sp.pmin || sp.ev || sp.risk || !allMk);
   const mkLabel = allMk ? "Tutti i mercati" : pickedMk.size === 1 ? [...pickedMk][0] : `${pickedMk.size} mercati`;
   const discarded = (statusCounts.AVOID ?? 0) + (statusCounts.NEUTRAL ?? 0) + (statusCounts.INVALID ?? 0);
   const candidates = (statusCounts.STRONG ?? 0) + (statusCounts.CANDIDATE ?? 0) + (statusCounts.FAIR ?? 0) + (statusCounts.WATCH ?? 0);
@@ -164,7 +187,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
       </header>
 
       {/* key: a new query string remounts the form, so "Azzera" and back/forward reset the uncontrolled fields */}
-      <form key={JSON.stringify(sp)} className="card filters" method="get" role="search" aria-label="Filtra l'analisi">
+      <Fold title="Filtri" icon={Filter} className="fold-filters" side={filtered && <span className="count">attivi</span>}>
+      <form key={JSON.stringify(sp)} className="filters" method="get" role="search" aria-label="Filtra l'analisi">
         <div className="field">
           <label htmlFor="min">Quota schedina (min – max)</label>
           <div className="control">
@@ -195,28 +219,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </div>
         </div>
         <div className="field">
-          <label htmlFor="nmin">Numero minimo di eventi</label>
+          <label htmlFor="nmin">Numero di eventi (min – max)</label>
           <div className="control">
             <ListOrdered size={17} aria-hidden="true" />
-            <select id="nmin" name="nmin" defaultValue={String(minEvents)}>
-              {MIN_EVENTS.map((m) => (
-                <option key={m.v} value={m.v}>{m.l}</option>
-              ))}
-            </select>
+            <input id="nmin" name="nmin" type="number" inputMode="numeric" step="1" min="1" max={FREE_MAX_LEGS} placeholder="1" defaultValue={sp.nmin} aria-label="Numero minimo di eventi" />
+            <span className="dash">–</span>
+            <input name="n" type="number" inputMode="numeric" step="1" min="1" max={FREE_MAX_LEGS} placeholder={String(FREE_MAX_LEGS)} defaultValue={sp.n} aria-label="Numero massimo di eventi" />
           </div>
         </div>
-        <div className="field">
-          <label htmlFor="n">Numero massimo di eventi</label>
-          <div className="control">
-            <ListOrdered size={17} aria-hidden="true" />
-            <select id="n" name="n" defaultValue={String(maxEvents)}>
-              {MAX_EVENTS.map((m) => (
-                <option key={m.v} value={m.v}>{m.l}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="field">
+        <div className="field rule-field">
           <label htmlFor="pmin">Probabilità minima per evento</label>
           <div className="control">
             <Percent size={17} aria-hidden="true" />
@@ -225,7 +236,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             </select>
           </div>
         </div>
-        <div className="field">
+        <div className="field rule-field">
           <label htmlFor="ev">EV minimo della schedina</label>
           <div className="control">
             <Sigma size={17} aria-hidden="true" />
@@ -234,7 +245,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             </select>
           </div>
         </div>
-        <div className="field">
+        <div className="field rule-field">
           <label htmlFor="risk">Rischio massimo</label>
           <div className="control">
             <ShieldAlert size={17} aria-hidden="true" />
@@ -243,7 +254,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             </select>
           </div>
         </div>
-        <div className="field">
+        <div className="field rule-field">
           <span className="field-label" id="mk-label">Mercati</span>
           <details className="multi">
             <summary className="control" aria-labelledby="mk-label">
@@ -264,7 +275,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </details>
         </div>
         {sp.p && <input type="hidden" name="p" value={profile} />}
-        <div className="field">
+        <div className="field rule-field">
           <span className="field-label" id="comp-label">Campionati</span>
           <details className="multi">
             <summary className="control" aria-labelledby="comp-label">
@@ -284,6 +295,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             </fieldset>
           </details>
         </div>
+        <label className="check free-check" title="Spegne le regole del modello: restano quota schedina, quota evento, periodo e numero di eventi">
+          <input type="checkbox" id="free" name="free" value="1" defaultChecked={free} />
+          <Unlock size={15} aria-hidden="true" /> Senza regole
+        </label>
         <div style={{ display: "flex", gap: 8 }}>
           {filtered && (
             <Link href="/" className="btn btn-ghost" aria-label="Azzera filtri">Azzera</Link>
@@ -293,9 +308,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </button>
         </div>
       </form>
+      </Fold>
 
       <div className="layout">
         <div className="col">
+          {freeRes ? <FreeCard r={freeRes} /> : (<>
           {/* ---------------- hero ---------------- */}
           <section className="card hero" aria-labelledby="hero-title">
             <div className="hero-copy">
@@ -351,8 +368,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </section>
 
           {/* how the slips were found, with real numbers: published analysis first, then the dashboard search with these filters */}
-          <section className="card" aria-labelledby="funnel-title">
-            <div className="card-head"><h2 id="funnel-title"><Workflow size={17} aria-hidden="true" /> Riepilogo dell&apos;analisi</h2><span className="count">profilo {PROFILE_LABEL[profile] ?? profile}</span></div>
+          <Fold title="Riepilogo dell'analisi" icon={Workflow} id="funnel-title" side={<span className="count">profilo {PROFILE_LABEL[profile] ?? profile}</span>}>
             <ol className="funnel">
               <Step icon={Layers} label="Partite nel periodo" value={fx.length} />
               <Step icon={BarChart3} label="Mercati valutati" value={nMarkets} />
@@ -367,7 +383,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               Scartati: valore negativo, probabilità sotto il {pct(0.25)} o dati insufficienti. Candidati: selezioni Alta, Media, Equa e Da osservare
               dell&apos;analisi pubblicata. Idonei: quelli che entrano nella ricerca delle schedine con i filtri scelti.
             </p>
-          </section>
+          </Fold>
 
           {profileNames.length > 1 && (
             <nav className="profiles" aria-label="Profili di schedina">
@@ -470,10 +486,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               )}
             </section>
 
-            <section className="card" aria-labelledby="why-title">
-              <div className="card-head">
-                <h2 id="why-title"><Brain size={17} aria-hidden="true" /> {best ? "Perché questa schedina?" : "Perché nessuna schedina?"}</h2>
-              </div>
+            <Fold title={best ? "Perché questa schedina?" : "Perché nessuna schedina?"} icon={Brain} id="why-title">
               <div className="card-pad">
                 <ul className="checklist">
                   {best ? (
@@ -502,21 +515,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                   </>
                 )}
               </div>
-            </section>
+            </Fold>
           </div>
 
+          </>)}
+
           {/* ---------------- opportunities ---------------- */}
-          <section className="card" aria-labelledby="opp-title">
-            <div className="card-head">
-              <h2 id="opp-title"><TrendingUp size={17} aria-hidden="true" /> Migliori opportunità <span className="count">{nOpp}</span></h2>
-              <Link href="/opportunita" className="btn btn-ghost btn-sm">Vedi tutte <ChevronRight size={15} aria-hidden="true" /></Link>
-            </div>
+          <Fold title={<>Migliori opportunità <span className="count">{nOpp}</span></>} icon={TrendingUp} id="opp-title"
+            side={<Link href="/opportunita" className="btn btn-ghost btn-sm">Vedi tutte <ChevronRight size={15} aria-hidden="true" /></Link>}>
             {op.length ? <OppTable rows={op.slice(0, 8)} /> : (
               <Empty icon={Percent} title="Nessun mercato sopra le soglie">
                 Le quote arrivano da OddsPapi nelle 24 ore prima delle partite: senza prezzi recenti non si calcola il valore atteso.
               </Empty>
             )}
-          </section>
+          </Fold>
 
           {explorer.length > 0 && <MatchExplorer matches={explorer} initial={explorer.find((m) => m.p_home != null)?.id} />}
         </div>
@@ -524,66 +536,72 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
         {/* ---------------- right rail ---------------- */}
         <aside className="col rail" aria-label="Pannelli rapidi">
           <section className="card">
-            <div className="card-head"><h2><Search size={17} aria-hidden="true" /> Analisi rapida di una partita</h2></div>
-            <form action="/palinsesto" method="get" role="search" style={{ padding: "12px 16px 4px" }}>
-              <label htmlFor="q" className="sr-only">Cerca squadra o campionato</label>
-              <div className="control">
-                <Search size={17} aria-hidden="true" />
-                <input id="q" name="q" type="search" placeholder="Cerca squadra o campionato…" />
-              </div>
-            </form>
-            {upcoming.length ? (
-              <ul className="quick">
-                {upcoming.map((f) => (
-                  <li key={f.fixture_id}>
-                    <Link href={`/partita/${encodeURIComponent(f.fixture_id)}`}>
-                      <span className="badges" style={{ display: "flex", gap: 2 }}>
-                        <TeamBadge name={f.home} />
-                        <TeamBadge name={f.away} />
-                      </span>
-                      <span style={{ minWidth: 0 }}>
-                        <b>{f.home} - {f.away}</b>
-                        <small>{compShort(f.competition)} · {dayTime(f.kickoff)}</small>
-                      </span>
-                      <ChevronRight size={17} aria-hidden="true" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <Empty icon={CalendarClock} title="Nessuna partita nel periodo" />
-            )}
-          </section>
-
-          <section className="card">
-            <div className="card-head"><h2><Shapes size={17} aria-hidden="true" /> Mercati analizzati</h2></div>
-            <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
-              <div>
-                <span className="note">Con quote dei bookmaker (valore atteso)</span>
-                <div className="text-2">Tutti i mercati goal quotati da Sisal: 1X2, doppia chance, draw no bet, Under/Over e goal squadra, Goal/NoGoal, handicap, risultato e goal esatti, margine, primo/ultimo goal, 1° e 2° tempo, Parziale/Finale. Corner (1X2, totale, squadra) dal modello dei corner. Cartellini: solo 1X2 (squadra con più cartellini)</div>
-              </div>
-              <div>
-                <span className="note">Solo probabilità del modello (quota equa)</span>
-                <div className="text-2">Multigoal e Combo. Cartellini e marcatori arrivano con i loro modelli</div>
-              </div>
-            </div>
-          </section>
-
-          <section className="card">
-            <div className="card-head"><h2><Database size={17} aria-hidden="true" /> Budget richieste API</h2></div>
-            <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Calendario, risultati, formazioni, statistiche" />
-              <Meter label="API-Football · oggi" used={use.apifDay} limit={100} hint="Formazioni con posizioni, infortuni e squalifiche, rose. Prima i 7 campionati" />
-              <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint="Richieste conteggiate: solo fotografie Sisal. Storico Sisal e Pinnacle con richieste libere" />
-              <div className="kv" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-                <span>Ultima raccolta</span>
-                <span>{ago(tick)}</span>
-              </div>
-            </div>
+            <div className="card-head"><h2><Search size={17} aria-hidden="true" /> Analisi rapida</h2></div>
+            <QuickSearch matches={upcoming} />
           </section>
         </aside>
       </div>
     </>
+  );
+}
+
+// "Senza regole": the slip of lib/freeslip.ts, shown instead of the profiles (never recorded: it skips the model's rules)
+function FreeCard({ r }: { r: FreeResult }) {
+  const s = r.slip;
+  return (
+    <section className="card ticket" aria-labelledby="free-title">
+      <div className="card-head">
+        <h2 id="free-title">
+          <Unlock size={17} aria-hidden="true" /> Schedina senza regole {s && <span className="count">{s.legs.length} {s.legs.length === 1 ? "evento" : "eventi"}</span>}
+        </h2>
+        {s && <span className="muted">Quota totale <b className="num pos">{s.odds.toFixed(2)}</b></span>}
+      </div>
+      {s ? (
+        <>
+          <div className="table-wrap">
+            <table className="compact">
+              <thead>
+                <tr><th>#</th><th>Evento / Mercato</th><th className="num">Quota</th><th className="num">Probabilità</th><th className="num">EV</th></tr>
+              </thead>
+              <tbody>
+                {s.legs.map((l, i) => {
+                  const [home, away] = l.match.split(" - ");
+                  const ev = l.p * l.odds - 1;
+                  return (
+                    <tr key={l.fixture_id}>
+                      <td className="muted num">{i + 1}</td>
+                      <td className="wrap">
+                        <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={`/partita/${encodeURIComponent(l.fixture_id)}`} />
+                      </td>
+                      <td className="num">
+                        <span className="odds-chip">{l.odds.toFixed(2)}</span>
+                        {isEstimated(l.bookmaker) && <span className="sub">Sisal stimata</span>}
+                      </td>
+                      <td className="num">{pct(l.p, 1)}<PBar p={l.p} mark={l.p_market} /></td>
+                      <td className="num"><span className={`ev-chip ${ev >= 0 ? "pos" : "neg"}`}>{signed(ev)}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="ticket-foot">
+            <Mini icon={Gauge} label="Quota totale" value={s.odds.toFixed(2)} />
+            <Mini icon={Percent} label="Probabilità complessiva" value={pct(s.p, 1)} />
+            <Mini icon={TrendingUp} label="EV stimato" value={signed(s.ev)} tone={s.ev >= 0 ? "pos" : "neg"} />
+            <Mini icon={Ticket} label="Eventi" value={String(s.legs.length)} />
+          </div>
+        </>
+      ) : (
+        <Empty icon={CircleSlash} title="Nessuna schedina">{r.reason}</Empty>
+      )}
+      <p className="note card-pad">
+        Senza regole: niente stato, valore atteso, soglia del 40%, rischio, mercati e campionati. Restano quota evento di almeno 1.25 e mai
+        nazionali con club. Per ogni partita conta la probabilità, con un piccolo peso alla quota; tra le combinazioni che rispettano quota
+        totale, quota per evento, periodo e numero di eventi esce la più probabile. Selezioni Sisal nel range: {r.options.toLocaleString("it-IT")} su{" "}
+        {r.matches} partite. Non entra nel registro. Solo paper trading.
+      </p>
+    </section>
   );
 }
 

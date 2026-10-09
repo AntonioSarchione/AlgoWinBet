@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { compShort, dayTime, fairOdds, pct } from "./format";
 import { HBar, Ring, TeamBadge } from "./ui";
 import { isEstimated } from "@/lib/books";
@@ -85,18 +85,20 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
   };
 
   return (
-    <section className="card" aria-labelledby="deep-title">
-      <div className="card-head">
+    // closed by default (home page): the arrows sit in the header, preventDefault keeps their click from toggling the card
+    <details className="card fold">
+      <summary className="card-head">
         <h2 id="deep-title">Partite nel filtro <span className="count">{matches.length}</span></h2>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button type="button" className="btn btn-ghost btn-sm strip-nav" onClick={() => scroll(-1)} aria-label="Scorri a sinistra">
+        <span className="fold-side">
+          <button type="button" className="btn btn-ghost btn-sm strip-nav" onClick={(e) => { e.preventDefault(); scroll(-1); }} aria-label="Scorri a sinistra">
             <ChevronLeft size={16} aria-hidden="true" />
           </button>
-          <button type="button" className="btn btn-ghost btn-sm strip-nav" onClick={() => scroll(1)} aria-label="Scorri a destra">
+          <button type="button" className="btn btn-ghost btn-sm strip-nav" onClick={(e) => { e.preventDefault(); scroll(1); }} aria-label="Scorri a destra">
             <ChevronRight size={16} aria-hidden="true" />
           </button>
-        </div>
-      </div>
+          <ChevronDown size={18} className="fold-chev" aria-hidden="true" />
+        </span>
+      </summary>
       <div className="strip" ref={strip} role="group" aria-label="Partite ordinate dalla più vicina">
         {matches.map((m, i) => (
           <button key={m.id} type="button" className="strip-item" aria-pressed={m.id === f.id} onClick={() => setSel(m.id)} onKeyDown={(e) => move(e, i)}>
@@ -158,6 +160,6 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
           </div>
         </div>
       )}
-    </section>
+    </details>
   );
 }

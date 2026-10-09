@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import { pct } from "./format";
 
 import logos from "@/lib/logos.json";
@@ -60,14 +60,39 @@ export function Empty({ icon: Icon, title, children }: { icon: LucideIcon; title
   );
 }
 
-// 1X2 split as one stacked bar (2px gaps). Percentages are always printed next to it: colour is never the only cue.
-export function Split1X2({ h, d, a }: { h: number | null; d: number | null; a: number | null }) {
-  if (h == null || d == null || a == null) return <span className="muted">–</span>;
+// Card that opens and closes on its header (native <details>: keyboard and screen readers work without script). Closed unless
+// `open`. Controls in `side` stay clickable; a button there must call preventDefault, or its click also toggles the card.
+export function Fold({ title, icon: Icon, side, open = false, id, className, children }: {
+  title: React.ReactNode; icon?: LucideIcon; side?: React.ReactNode; open?: boolean; id?: string; className?: string; children: React.ReactNode;
+}) {
   return (
-    <span className="stack" role="img" aria-label={`1 ${pct(h)}, X ${pct(d)}, 2 ${pct(a)}`} title={`1 ${pct(h)} · X ${pct(d)} · 2 ${pct(a)}`}>
-      <span style={{ width: `${h * 100}%`, background: "var(--s1)" }} />
-      <span style={{ width: `${d * 100}%`, background: "var(--s2)" }} />
-      <span style={{ width: `${a * 100}%`, background: "var(--s3)" }} />
+    <details className={`card fold${className ? ` ${className}` : ""}`} open={open || undefined}>
+      <summary className="card-head">
+        <h2 id={id}>{Icon && <Icon size={17} aria-hidden="true" />} {title}</h2>
+        <span className="fold-side">
+          {side}
+          <ChevronDown size={18} className="fold-chev" aria-hidden="true" />
+        </span>
+      </summary>
+      {children}
+    </details>
+  );
+}
+
+// 1X2 split as one stacked bar (2px gaps). Percentages are always printed next to it: colour is never the only cue.
+// labeled: taller, each part says which outcome it is ("1 52%"); the text is left out of a part too narrow to hold it
+export function Split1X2({ h, d, a, labeled = false }: { h: number | null; d: number | null; a: number | null; labeled?: boolean }) {
+  if (h == null || d == null || a == null) return <span className="muted">–</span>;
+  const parts = [["1", h, "var(--s1)"], ["X", d, "var(--s2)"], ["2", a, "var(--s3)"]] as const;
+  const top = Math.max(h, d, a);
+  return (
+    <span className={`stack${labeled ? " stack-lg" : ""}`} role="img" aria-label={`1 ${pct(h)}, X ${pct(d)}, 2 ${pct(a)}`} title={`1 ${pct(h)} · X ${pct(d)} · 2 ${pct(a)}`}>
+      {parts.map(([l, p, c]) => (
+        <span key={l} style={{ width: `${p * 100}%`, background: c }} className={labeled && p === top ? "top" : undefined}>
+          {labeled && p >= 0.17 && <>{l} <b>{pct(p)}</b></>}
+          {labeled && p < 0.17 && p >= 0.08 && l}
+        </span>
+      ))}
     </span>
   );
 }
