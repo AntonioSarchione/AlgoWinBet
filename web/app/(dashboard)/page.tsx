@@ -15,7 +15,7 @@ import { LegAbsences } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
 import { RefreshButton } from "@/app/_components/RefreshButton";
-import { ACTIONS_BUDGET, MANUAL_MONTHLY } from "@/lib/refresh";
+import { MANUAL_MONTHLY } from "@/lib/refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -577,7 +577,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Calendario, risultati, formazioni, statistiche" />
               <Meter label="API-Football · oggi" used={use.apifDay} limit={100} hint="Formazioni con posizioni, infortuni e squalifiche, rose. Prima i 7 campionati" />
               <Meter label="OddsPapi · mese" used={use.oddsMonth} limit={250} hint="Richieste conteggiate: solo fotografie Sisal. Storico Sisal e Pinnacle con richieste libere" />
-              <Meter label="Minuti GitHub · mese" used={use.ghMonth} limit={ACTIONS_BUDGET} hint="Raccolta automatica; oltre 1.700 previsti a fine mese si salta il giro senza partite vicine, da 1.900 solo il giro del mattino" />
               <div className="kv" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 <span>Ultima raccolta</span>
                 <span>{ago(tick)}</span>
