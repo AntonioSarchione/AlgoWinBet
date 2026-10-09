@@ -75,7 +75,7 @@ export function Split1X2({ h, d, a }: { h: number | null; d: number | null; a: n
 // Colour of a probability on rings and bars: the band (globals.css --pr-0..4), never the only cue (the figure is printed).
 export const probColor = (p: number) => `var(--pr-${p < 0.2 ? 0 : p < 0.4 ? 1 : p < 0.6 ? 2 : p < 0.8 ? 3 : 4})`;
 
-export function Ring({ value, label, sub, top }: { value: number | null; label: string; sub?: string; top?: React.ReactNode }) {
+export function Ring({ value, label, sub, top }: { value: number | null; label: string; sub?: React.ReactNode; top?: React.ReactNode }) {
   const r = 42;
   const c = 2 * Math.PI * r;
   const v = value ?? 0;

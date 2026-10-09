@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { compShort, dayTime, fairOdds, pct } from "./format";
-import { HBar, Ring, Split1X2, TeamBadge } from "./ui";
+import { HBar, Ring, TeamBadge } from "./ui";
 import { isEstimated } from "@/lib/books";
 
 export type ExplorerMatch = {
@@ -27,11 +27,20 @@ type Side = "p_home" | "p_draw" | "p_away";
 
 // The pure model alone can sit far from the bookmakers (national teams: few matches in its history). Where Sisal prices the
 // 1X2, the ring shows the final probability (model shrunk toward the market, the one the slips use) and the Sisal price.
-function side(f: ExplorerMatch, k: Side) {
+function side(f: ExplorerMatch, k: Side): { value: number | null; sub: React.ReactNode } {
   const b = f.book[k];
   const model = f[k];
-  if (!b) return { value: model, sub: `quota equa ${fairOdds(model)}` };
-  return { value: b.pf, sub: `${isEstimated(b.book) ? "Sisal stimata" : "Sisal"} ${b.odds.toFixed(2)} · modello ${pct(model)}` };
+  if (!b) return { value: model, sub: <>quota equa <b className="num">{fairOdds(model)}</b></> };
+  return {
+    value: b.pf,
+    sub: (
+      <>
+        {isEstimated(b.book) ? "Sisal stimata" : "Sisal"} <b className="num">{b.odds.toFixed(2)}</b> · equa <b className="num">{fairOdds(b.pf)}</b>
+        <br />
+        modello {pct(model)}{b.pm != null && <> · mercato {pct(b.pm)}</>}
+      </>
+    ),
+  };
 }
 
 // Home: every match passing the filters in a scrollable strip (nearest kickoff first); the selected one drives the rings
@@ -115,6 +124,12 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
             <h4 className="note" style={{ margin: "0 0 10px" }}>
               {priced ? "Probabilità 1X2 (modello + quote Sisal)" : "Probabilità 1X2 (solo modello: nessuna quota Sisal recente)"}
             </h4>
+            {priced && (
+              <p className="note" style={{ margin: "-4px 0 10px" }}>
+                Nel cerchio la probabilità finale: il modello corretto verso il mercato, quella che usano le schedine. Sotto: la quota Sisal, la
+                sua quota equa, il modello da solo e il mercato (quote senza margine).
+              </p>
+            )}
             <div className="rings">
               <Ring value={h.value} label={f.home} sub={h.sub} top={<TeamBadge name={f.home} size="lg" />} />
               <Ring value={d.value} label="Pareggio" sub={d.sub} top={<span className="ring-x" aria-hidden="true">X</span>} />
@@ -135,7 +150,6 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
           <div>
             <h4 className="note" style={{ margin: "0 0 10px" }}>Mercati principali (con quota Sisal: probabilità combinata; senza: modello)</h4>
             {f.picks.map(([l, p]) => <HBar key={l} label={l} p={p} />)}
-            <div style={{ marginTop: 10 }}><Split1X2 h={h.value} d={d.value} a={a.value} /></div>
           </div>
         </div>
       )}
