@@ -78,15 +78,34 @@ def player_odds(payload: dict, markets: dict[int, dict], book: str) -> list[Play
 
 
 def save_player_quotes(store, fixture_id: str, book: str, quotes: list[PlayerQuote], observed_at: datetime) -> int:
-    """Replaces the fixture's rows of this bookmaker with the snapshot's (none: left as they are, a snapshot without player
-    markets is not proof that Sisal withdrew them) and drops rows older than KEEP_DAYS."""
+    """Brings the fixture's rows of this bookmaker to the snapshot's (none: left as they are, a snapshot without player markets
+    is not proof that Sisal withdrew them) and drops rows older than KEEP_DAYS. Reads are local (replica) and every write
+    statement is a round trip to the primary: only changed prices are written, many rows per statement. Returns the rows
+    written."""
     db = store.db
-    db.execute(SCHEMA)
-    db.execute("DELETE FROM player_quotes WHERE observed_at < ?", ((observed_at - timedelta(days=KEEP_DAYS)).isoformat(),))
-    if quotes:
-        db.execute("DELETE FROM player_quotes WHERE fixture_id = ? AND bookmaker = ?", (fixture_id, book))
-        db.executemany("INSERT OR REPLACE INTO player_quotes VALUES (?,?,?,?,?,?,?,?)",
-                       [(fixture_id, book, q.market, q.line_key, q.player_key, q.player_name, q.odds, observed_at.isoformat())
-                        for q in quotes])
+    if not getattr(store, "_player_quotes_ready", False):  # once per run: a CREATE is a write, a round trip to the primary
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'player_quotes'").fetchone():
+            db.execute(SCHEMA)
+        store._player_quotes_ready = True
+    at = observed_at.isoformat()
+    if db.execute("SELECT 1 FROM player_quotes WHERE observed_at < ? LIMIT 1", ((observed_at - timedelta(days=KEEP_DAYS)).isoformat(),)).fetchone():
+        db.execute("DELETE FROM player_quotes WHERE observed_at < ?", ((observed_at - timedelta(days=KEEP_DAYS)).isoformat(),))
+    if not quotes:
+        db.commit()
+        return 0
+    new = {(q.market, q.line_key, q.player_key): q for q in quotes}
+    old = {(m, l, k): o for m, l, k, o in db.execute(
+        "SELECT market, line_key, player_key, odds FROM player_quotes WHERE fixture_id = ? AND bookmaker = ?", (fixture_id, book)).fetchall()}
+    gone = [k for k in old if k not in new]
+    for i in range(0, len(gone), 100):
+        part = gone[i:i + 100]
+        db.execute("DELETE FROM player_quotes WHERE fixture_id = ? AND bookmaker = ? AND (" + " OR ".join(
+            ["(market = ? AND line_key = ? AND player_key = ?)"] * len(part)) + ")", [fixture_id, book, *[v for k in part for v in k]])
+    rows = [(fixture_id, book, q.market, q.line_key, q.player_key, q.player_name, q.odds, at)
+            for k, q in new.items() if old.get(k) != q.odds]
+    # unchanged prices keep their row; their time moves on with one statement, so KEEP_DAYS counts from the last snapshot
+    if len(rows) < len(new):
+        db.execute("UPDATE player_quotes SET observed_at = ? WHERE fixture_id = ? AND bookmaker = ?", (at, fixture_id, book))
+    store._bulk("INSERT OR REPLACE INTO player_quotes(fixture_id, bookmaker, market, line_key, player_key, player_name, odds, observed_at)", rows)
     db.commit()
-    return len(quotes)
+    return len(rows)

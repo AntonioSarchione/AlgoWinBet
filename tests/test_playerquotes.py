@@ -43,6 +43,7 @@ def test_save_replaces_the_fixture_and_drops_old_rows():
     m = OddsPapiMapper(markets=CATALOGUE)
     t = datetime(2026, 10, 10, 9, tzinfo=UTC)
     assert save_player_quotes(st, "f1", "sisal.it", player_odds(ROW, m.markets, "sisal.it"), t) == 3
+    assert save_player_quotes(st, "f1", "sisal.it", player_odds(ROW, m.markets, "sisal.it"), t + timedelta(hours=1)) == 0  # unchanged
     save_player_quotes(st, "old", "sisal.it", player_odds(ROW, m.markets, "sisal.it"), t - timedelta(days=5))
     save_player_quotes(st, "f1", "sisal.it", [], t)  # an empty snapshot leaves the rows
     assert st.db.execute("SELECT COUNT(*) FROM player_quotes WHERE fixture_id='f1'").fetchone()[0] == 3
@@ -50,4 +51,4 @@ def test_save_replaces_the_fixture_and_drops_old_rows():
     save_player_quotes(st, "f1", "sisal.it", later, t + timedelta(hours=2))
     assert st.db.execute("SELECT COUNT(*) FROM player_quotes WHERE fixture_id='f1'").fetchone()[0] == 1
     save_player_quotes(st, "f2", "sisal.it", later, t + timedelta(days=4))  # f1 now older than KEEP_DAYS
-    assert {r[0] for r in st.db.execute("SELECT fixture_id FROM player_quotes")} == {"f2"}
+    assert {r[0] for r in st.db.execute("SELECT fixture_id FROM player_quotes").fetchall()} == {"f2"}
