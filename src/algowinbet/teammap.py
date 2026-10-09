@@ -61,7 +61,7 @@ class TeamMap:
 
     def _pair(self, source: str, spelled: str | None, fid: str, side: int) -> None:
         m = self.matches.get(fid)
-        if not spelled or not m:
+        if not spelled or not m or not fid.startswith("goal:"):  # only a GOAL match tells the GOAL name
             return
         self.pairs[source][(spelled.strip(), m[side], m[0])] += 1
 
@@ -85,12 +85,14 @@ class TeamMap:
             r = self.store.db.execute("SELECT id FROM raw_requests WHERE source='oddspapi' AND endpoint=? AND status=200 ORDER BY id DESC LIMIT 1",
                                       (endpoint,)).fetchone()
             return _data(json.loads(self.store.raw_body(r[0]))) if r else None
-        parts = {str(p.get("participantId")): p.get("participantName") for p in (latest("/participants") or []) if isinstance(p, dict)}
+        from .providers.oddspapi import OddsPapiMapper
+        parts = OddsPapiMapper(TeamNames(), [], latest("/participants")).participants  # raw spellings, id -> name
         rows = []
         for (rid,) in self.store.db.execute("SELECT MAX(id) FROM raw_requests WHERE source='oddspapi' AND endpoint='/fixtures' AND status=200 "
                                             "GROUP BY params").fetchall():
             rows += _data(json.loads(self.store.raw_body(rid))) or []
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        until = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
         for (rid,) in self.store.db.execute("SELECT id FROM raw_requests WHERE source='oddspapi' AND endpoint='/odds-by-tournaments' AND status=200 "
                                             "AND fetched_at >= ?", (since,)).fetchall():
             body = _data(json.loads(self.store.raw_body(rid)))
@@ -107,7 +109,7 @@ class TeamMap:
             if ext in links:
                 self._pair("oddspapi", sides[0], links[ext], 1)
                 self._pair("oddspapi", sides[1], links[ext], 2)
-            elif (r.get("startTime") or "") >= since[:10]:
+            elif since[:10] <= (r.get("startTime") or "") <= until:  # a coming match is linked once Sisal or Pinnacle price it
                 for s in sides:
                     if s:
                         self.unlinked["oddspapi"][s] += 1
@@ -178,6 +180,18 @@ class TeamMap:
         return out
 
     # ------------------------------------------------------------------ verdicts
+    def goal_name(self, source: str, share: float = 0.9) -> dict[str, str]:
+        """Source spelling -> the GOAL name it was linked to, when (nearly) all its linked matches agree."""
+        votes: dict[str, Counter] = defaultdict(Counter)
+        for (spelled, goal, _), n in self.pairs.get(source, {}).items():
+            votes[spelled][goal] += n
+        out = {}
+        for spelled, c in votes.items():
+            goal, n = c.most_common(1)[0]
+            if n >= share * sum(c.values()):
+                out[spelled] = goal
+        return out
+
     def aliases_to_add(self) -> dict[str, set[str]]:
         """GOAL name -> source spellings TeamNames.canon does not already turn into it (each seen on a linked match)."""
         out: dict[str, set[str]] = defaultdict(set)

@@ -32,3 +32,29 @@ def test_team_map_pairs_source_spellings_with_goal_names_from_linked_matches():
     assert add["Borussia M'gladbach"] == {"Borussia Monchengladbach"} and "Leverkusen" not in add  # alias already there
     assert tm.unlinked["oddspapi"]["Stade Rennais FC"] == 1  # never on a linked match: no guess
     assert not tm.conflicts()
+
+
+def test_fotmob_rename_gives_fotmob_results_the_goal_names(tmp_path, capsys):
+    import argparse
+    from algowinbet.cli import cmd_fotmob_rename
+    from algowinbet.domain import MatchResult
+    db, aliases = str(tmp_path / "t.db"), tmp_path / "aliases.json"
+    aliases.write_text(json.dumps({"Arsenal FC": ["Arsenal"]}), encoding="utf-8")
+    store = SnapshotStore(db)
+    ko = datetime(2026, 9, 17, 19, tzinfo=timezone.utc)
+    store.save_results("fotmob", [MatchResult(fixture_id="fotmob:5", competition="UEFA Champions League", home="Arsenal", away="Slavia Praha",
+                                              kickoff=ko, home_goals=2, away_goals=0)], ko)
+    store.db.execute("CREATE TABLE IF NOT EXISTS fotmob_player_stats(fixture_id TEXT, team TEXT, player_id TEXT)")
+    store.db.execute("INSERT INTO fotmob_player_stats VALUES('fotmob:5', 'Arsenal', 'p1')")
+    store.db.commit()
+    store.close()
+    ns = dict(config="configs/collect.json", aliases=str(aliases), db=db)
+    cmd_fotmob_rename(argparse.Namespace(apply=False, **ns))
+    assert "Arsenal-Slavia Praha -> Arsenal FC-Slavia Praha" in capsys.readouterr().out
+    store = SnapshotStore(db)
+    assert store.db.execute("SELECT home FROM results").fetchone()[0] == "Arsenal"  # dry run
+    store.close()
+    cmd_fotmob_rename(argparse.Namespace(apply=True, **ns))
+    store = SnapshotStore(db)
+    assert store.db.execute("SELECT home FROM results").fetchone()[0] == "Arsenal FC"
+    assert store.db.execute("SELECT team FROM fotmob_player_stats").fetchone()[0] == "Arsenal FC"

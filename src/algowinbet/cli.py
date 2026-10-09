@@ -1076,6 +1076,60 @@ def cmd_results_holes(a) -> None:
             print(f"  {day}: {len(ms)} · " + " | ".join(ms[:a.show]) + (" ..." if len(ms) > a.show else ""))
 
 
+def _fotmob_goal_names(store: SnapshotStore, col, names: TeamNames) -> dict[str, str]:
+    """FotMob spelling -> GOAL name, read off the FotMob matches linked to a GOAL match (see teammap)."""
+    from .teammap import TeamMap
+    tm = TeamMap(store, names)
+    tm.load_goal()
+    tm.load_fotmob(col)
+    return tm.goal_name("fotmob")
+
+
+FOTMOB_RESULT_TEAM_TABLES = ("fotmob_player_stats", "fotmob_absences", "absence_history", "player_status")
+
+
+def cmd_fotmob_rename(a) -> None:
+    """Results made from FotMob pages (results-fotmob, fixture ids "fotmob:...") renamed to the GOAL names: FotMob's
+    spelling as linked on GOAL matches, else the alias. Same for the team column of the player rows of those matches.
+    Dry run unless --apply; the results that become a second copy of a GOAL result are only listed."""
+    from .autorun import AutoConfig
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    try:
+        names = TeamNames.load(a.aliases)
+        to_goal = _fotmob_goal_names(store, _fotmob_for(cfg, store, names), names)
+        def goal(n: str) -> str:
+            return to_goal.get(n) or names.canon(n)
+        rows = store.db.execute("SELECT fixture_id, competition, home, away, kickoff FROM results WHERE fixture_id LIKE 'fotmob:%' "
+                                "ORDER BY kickoff").fetchall()
+        tables = [x for x in FOTMOB_RESULT_TEAM_TABLES
+                  if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (x,)).fetchone()]
+        changed = dup = 0
+        for fid, comp, home, away, ko in rows:
+            h, w = goal(home), goal(away)
+            if (h, w) == (home, away):
+                continue
+            changed += 1
+            day = ko[:10]
+            twin = store.db.execute("SELECT fixture_id FROM results WHERE fixture_id NOT LIKE 'fotmob:%' AND home=? AND away=? "
+                                    "AND substr(kickoff, 1, 10) BETWEEN date(?, '-1 day') AND date(?, '+1 day')", (h, w, day, day)).fetchone()
+            dup += twin is not None
+            print(f"  {day} {comp}: {home}-{away} -> {h}-{w}" + (f"  (GOAL ha già {twin[0]})" if twin else ""))
+            if not a.apply:
+                continue
+            store.db.execute("UPDATE results SET home=?, away=? WHERE fixture_id=?", (h, w, fid))
+            for tbl in tables:
+                for old, new in ((home, h), (away, w)):
+                    if old != new:
+                        store.db.execute(f"UPDATE {tbl} SET team=? WHERE fixture_id=? AND team=?", (new, fid, old))
+        if a.apply:
+            store.db.commit()
+        print(f"risultati FotMob: {len(rows)}, da rinominare {changed}" + (f", di cui {dup} già presenti in GOAL" if dup else "")
+              + ("" if a.apply else " (prova: niente scritto, --apply per scrivere)"))
+    finally:
+        store.close()
+
+
 def cmd_results_fotmob(a) -> None:
     """Results our sources never had (finished FotMob matches GOAL knows nothing of, see results-holes), made from the
     FotMob season pages: the pages missing the score are read again (one FotMob page per season), then each match becomes
@@ -1112,6 +1166,7 @@ def cmd_results_fotmob(a) -> None:
             except FotMobError as e:
                 print(f"  {season}: {e}")
     holes = gaps()
+    to_goal = _fotmob_goal_names(store, col, names)
     now = datetime.now(timezone.utc)
     for comp, hs in sorted(holes.items()):
         made, links = [], []
@@ -1120,6 +1175,8 @@ def cmd_results_fotmob(a) -> None:
             if not sc:
                 continue
             fid = f"fotmob:{m['id']}"
+            # the GOAL name FotMob's spelling had on our linked matches ("Arsenal" is "Arsenal FC"), else the alias
+            home, away = (to_goal.get(str((m.get(k) or {}).get("name") or ""), x) for k, x in (("home", home), ("away", away)))
             made.append(MatchResult(fixture_id=fid, competition=comp, home=home, away=away, kickoff=_utc(m), home_goals=sc[0], away_goals=sc[1]))
             links.append(("fotmob", str(m["id"]), fid, now.isoformat()))
         if not hs:
@@ -2819,6 +2876,12 @@ def build_parser() -> argparse.ArgumentParser:
     rr.add_argument("--aliases", default="configs/team_aliases.json")
     rr.add_argument("--db", default="algowinbet.db")
     rr.set_defaults(fn=cmd_results_refill)
+    fr = sub.add_parser("fotmob-rename", help="risultati FotMob rinominati con i nomi GOAL (nessuna richiesta; --apply per scrivere)")
+    fr.add_argument("--apply", action="store_true")
+    fr.add_argument("--config", default="configs/collect.json")
+    fr.add_argument("--aliases", default="configs/team_aliases.json")
+    fr.add_argument("--db", default="algowinbet.db")
+    fr.set_defaults(fn=cmd_fotmob_rename)
     rf = sub.add_parser("results-fotmob", help="risultati che GOAL non ha mai avuto, dalle pagine stagione FotMob (nessuna richiesta API)")
     rf.add_argument("--dry-run", action="store_true")
     rf.add_argument("--leagues", action="store_true", help="anche i campionati, solo i buchi senza nostri risultati vicini")

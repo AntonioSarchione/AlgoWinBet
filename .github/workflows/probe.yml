@@ -13,7 +13,7 @@ on:
       command:
         description: "odds: account | tournaments | markets | probe   -   goal: leagues | probe"
         type: choice
-        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming, rawgrep, trends, fotmobcheck, resultholes, fotmobplayers, fotmobnext, resultsrefill, apiflink, xipreview, xinames, goalusage, xiplayer, fotmobkeys, fotmobref, playereval, pubcheck, fmresults, sliprules, teammap]
+        options: [account, tournaments, markets, leagues, probe, teams, inspect, remap, coverage, stats, stateval, remapstats, registry, rules, referees, preview, purgestats, quotes, snapshot, datasets, model, results, raw, status, test, bench, health, calibration, lineuphist, lineupfill, lineupeval, boosteval, boosttrain, scorers, scorereval, xieval, slipreview, lineuptiming, rawgrep, trends, fotmobcheck, resultholes, fotmobplayers, fotmobnext, resultsrefill, apiflink, xipreview, xinames, goalusage, xiplayer, fotmobkeys, fotmobref, playereval, pubcheck, fmresults, sliprules, teammap, fmrename]
         default: account
       arg:
         description: "testo da cercare (tournaments/leagues) oppure path (probe), es. /odds"
@@ -82,6 +82,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xiplayer" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-player "$ARG" ${PARAMS:+--team "$PARAMS"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-eval --since "${ARG:-2026-01-01}" $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmresults" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-fotmob $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmrename" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-rename $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "teammap" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet team-map ${PARAMS:+--all} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "sliprules" ]; then algowinbet slip-rules --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "pubcheck" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet pub-check --team "${ARG:-PSV}" --db "$DB"; exit $?; fi
