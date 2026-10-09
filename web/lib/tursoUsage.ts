@@ -19,12 +19,16 @@ async function fetchUsage(org: string): Promise<TursoUsage> {
     const why = r.status === 401 || r.status === 403 ? "token non valido o non della piattaforma" : r.status === 404 ? "organizzazione non trovata (TURSO_ORG)" : "";
     throw new UsageError(`Turso ha risposto ${r.status}${why ? `: ${why}` : ""}`);
   }
-  const j = (await r.json()) as { databases?: { total?: Totals }[] };
-  if (!Array.isArray(j.databases)) throw new UsageError("risposta di Turso in un formato inatteso");
-  // the cycle's consumption is the sum over the databases (organization.usage holds the plan's allowances)
+  const j = (await r.json()) as { organization?: { usage?: Totals; databases?: { total?: Totals }[] } };
+  const dbs = j.organization?.databases;
+  if (!Array.isArray(dbs)) {
+    console.error("tursoUsage: chiavi della risposta", Object.keys(j), Object.keys(j.organization ?? {}));
+    throw new UsageError("risposta di Turso in un formato inatteso");
+  }
+  // the cycle's consumption is the sum over the databases (organization.usage is documented as the plan's allowances)
   return {
-    bytesSynced: j.databases.reduce((a, d) => a + (d.total?.bytes_synced ?? 0), 0),
-    storageBytes: j.databases.reduce((a, d) => a + (d.total?.storage_bytes ?? 0), 0),
+    bytesSynced: dbs.reduce((a, d) => a + (d.total?.bytes_synced ?? 0), 0),
+    storageBytes: dbs.reduce((a, d) => a + (d.total?.storage_bytes ?? 0), 0),
   };
 }
 
