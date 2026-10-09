@@ -117,6 +117,8 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
             sm = {}
         bad = [f"{n} {lbl}" for k, lbl in (("aliases", "alias mancanti"), ("conflicts", "conflitti"), ("split", "storici divisi"),
                                           ("national", "nazionali senza Elo")) if (n := sm.get(k))]
+        if sm.get("error"):
+            bad.append(f"controllo non riuscito ({sm['error']})")
         old = now - (_ts(row[0]) or now) > timedelta(days=3)
         checks.append(Check("names", "Nomi delle squadre", "warn" if bad or old else "ok",
                             (", ".join(bad) + " (team-map): " + "; ".join(sm.get("examples", [])[:3]) if bad else

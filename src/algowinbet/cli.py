@@ -2516,6 +2516,10 @@ def _collect_auto(a) -> None:
                       f"nazionali senza Elo {sm['national']}", flush=True)
             except Exception as e:  # noqa: BLE001 - a check: never a reason to lose the morning run
                 print(f"nomi squadra: non riuscito ({type(e).__name__}: {e})")
+                try:  # the health report shows the failure instead of an old result
+                    store.mark_job(JOB, now, json.dumps({"error": f"{type(e).__name__}: {e}"[:200]}, ensure_ascii=False))
+                except Exception:  # noqa: BLE001
+                    pass
         failed: list[str] = []
         if daily or a.health:
             from .health import print_health, run_health, save_health

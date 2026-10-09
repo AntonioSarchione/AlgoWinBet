@@ -88,24 +88,36 @@ def save_player_quotes(store, fixture_id: str, book: str, quotes: list[PlayerQuo
             db.execute(SCHEMA)
         store._player_quotes_ready = True
     at = observed_at.isoformat()
-    if db.execute("SELECT 1 FROM player_quotes WHERE observed_at < ? LIMIT 1", ((observed_at - timedelta(days=KEEP_DAYS)).isoformat(),)).fetchone():
-        db.execute("DELETE FROM player_quotes WHERE observed_at < ?", ((observed_at - timedelta(days=KEEP_DAYS)).isoformat(),))
-    if not quotes:
+    cut = (observed_at - timedelta(days=KEEP_DAYS)).isoformat()
+    wrote = False
+    if db.execute("SELECT 1 FROM player_quotes WHERE observed_at < ? LIMIT 1", (cut,)).fetchone():
+        db.execute("DELETE FROM player_quotes WHERE observed_at < ?", (cut,))
+        wrote = True
+    rows: list[tuple] = []
+    if quotes:
+        new = {(q.market, q.line_key, q.player_key): q for q in quotes}
+        old = {(m, l, k): (o, t) for m, l, k, o, t in db.execute(
+            "SELECT market, line_key, player_key, odds, observed_at FROM player_quotes WHERE fixture_id = ? AND bookmaker = ?",
+            (fixture_id, book)).fetchall()}
+        gone = [k for k in old if k not in new]
+        for i in range(0, len(gone), 100):
+            part = gone[i:i + 100]
+            db.execute("DELETE FROM player_quotes WHERE fixture_id = ? AND bookmaker = ? AND (" + " OR ".join(
+                ["(market = ? AND line_key = ? AND player_key = ?)"] * len(part)) + ")", [fixture_id, book, *[v for k in part for v in k]])
+            wrote = True
+        rows = [(fixture_id, book, q.market, q.line_key, q.player_key, q.player_name, q.odds, at)
+                for k, q in new.items() if old.get(k, (None, ""))[0] != q.odds]
+        # unchanged prices keep their row; their time moves on (so KEEP_DAYS counts from the last snapshot) once a day at most,
+        # not at every snapshot: one statement per match and snapshot would add minutes to a run
+        day = (observed_at - timedelta(days=1)).isoformat()
+        if any(k in new and t < day for k, (_, t) in old.items()):
+            db.execute("UPDATE player_quotes SET observed_at = ? WHERE fixture_id = ? AND bookmaker = ? AND observed_at < ?",
+                       (at, fixture_id, book, day))
+            wrote = True
+        if rows:
+            store._bulk("INSERT OR REPLACE INTO player_quotes(fixture_id, bookmaker, market, line_key, player_key, player_name, odds, "
+                        "observed_at)", rows)  # commits
+            wrote = False
+    if wrote:
         db.commit()
-        return 0
-    new = {(q.market, q.line_key, q.player_key): q for q in quotes}
-    old = {(m, l, k): o for m, l, k, o in db.execute(
-        "SELECT market, line_key, player_key, odds FROM player_quotes WHERE fixture_id = ? AND bookmaker = ?", (fixture_id, book)).fetchall()}
-    gone = [k for k in old if k not in new]
-    for i in range(0, len(gone), 100):
-        part = gone[i:i + 100]
-        db.execute("DELETE FROM player_quotes WHERE fixture_id = ? AND bookmaker = ? AND (" + " OR ".join(
-            ["(market = ? AND line_key = ? AND player_key = ?)"] * len(part)) + ")", [fixture_id, book, *[v for k in part for v in k]])
-    rows = [(fixture_id, book, q.market, q.line_key, q.player_key, q.player_name, q.odds, at)
-            for k, q in new.items() if old.get(k) != q.odds]
-    # unchanged prices keep their row; their time moves on with one statement, so KEEP_DAYS counts from the last snapshot
-    if len(rows) < len(new):
-        db.execute("UPDATE player_quotes SET observed_at = ? WHERE fixture_id = ? AND bookmaker = ?", (at, fixture_id, book))
-    store._bulk("INSERT OR REPLACE INTO player_quotes(fixture_id, bookmaker, market, line_key, player_key, player_name, odds, observed_at)", rows)
-    db.commit()
     return len(rows)
