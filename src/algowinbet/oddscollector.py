@@ -10,6 +10,7 @@ from .collector import CollectStats
 from .domain import OddsQuote
 from .names import TeamNames
 from .providers.oddspapi import SOURCE, OddsPapiClient, OddsPapiError, OddsPapiMapper
+from .playerquotes import player_odds, save_player_quotes
 from .snapshots import BudgetExceeded, SnapshotProvider, SnapshotStore
 
 HIST_SOURCE = "oddspapi-hist"
@@ -126,6 +127,10 @@ class OddsCollector:
                             continue
                         self._link(str(row.get("fixtureId")), fx.id)
                         st.add("quotes", self.store.save_quotes(SOURCE, m.odds(row, fx, env["_fetched_at"]), raw_id))
+                        # Sisal's player prices ride in the same payload: kept (latest only) for the Giocatori tab
+                        for b in (row.get("bookmakerOdds") or {}):
+                            if b.startswith("sisal"):
+                                st.add("player_quotes", save_player_quotes(self.store, fx.id, b, player_odds(row, m.markets, b), env["_fetched_at"]))
         self._run(st, work)
         return st
 

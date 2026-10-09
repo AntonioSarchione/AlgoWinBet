@@ -1932,6 +1932,53 @@ def cmd_dataset_relink(a) -> None:
         store.close()
 
 
+def cmd_player_quotes(a) -> None:
+    """Sisal player prices filled from the OddsPapi snapshots already stored (no API request): the newest snapshot of every
+    match not started yet. Then, per market, how many matches and players have a price."""
+    from .oddscollector import LINKS_SCHEMA
+    from .playerquotes import player_odds, save_player_quotes
+    from .providers.oddspapi import OddsPapiMapper
+    store = SnapshotStore(a.db)
+    try:
+        markets = store.last_raw("oddspapi", "/markets")
+        if not markets:
+            sys.exit("catalogo /markets non presente nel database")
+        m = OddsPapiMapper(TeamNames.load(a.aliases), markets[1] if isinstance(markets[1], list) else [])
+        now = datetime.now(timezone.utc)
+        prov = SnapshotProvider(store)
+        fixtures = {f.id: f for f in prov.list_fixtures(None, now, now + timedelta(days=10))}
+        store.db.executescript(LINKS_SCHEMA)
+        links = dict(store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source='oddspapi'").fetchall())
+        done: set[tuple[str, str]] = set()
+        since = (now - timedelta(days=a.days)).isoformat()
+        raws = store.db.execute("SELECT id, fetched_at FROM raw_requests WHERE source='oddspapi' AND status=200 AND "
+                                "endpoint='/odds-by-tournaments' AND fetched_at >= ? ORDER BY id DESC", (since,)).fetchall()
+        for rid, fetched in raws:  # newest first: each match and bookmaker from its latest snapshot only
+            body = json.loads(store.raw_body(rid))
+            for row in body if isinstance(body, list) else [body]:
+                fx = fixtures.get(links.get(str(row.get("fixtureId")), ""))
+                if fx is None:
+                    continue
+                for b in row.get("bookmakerOdds") or {}:
+                    if b.startswith("sisal") and (fx.id, b) not in done:
+                        qs = player_odds(row, m.markets, b)
+                        if qs:
+                            done.add((fx.id, b))
+                            save_player_quotes(store, fx.id, b, qs, datetime.fromisoformat(fetched))
+        print(f"snapshot letti: {len(raws)}, partite con quote giocatore: {len(done)}")
+        for mk, nfx, npl, lo, hi in store.db.execute(
+                "SELECT market, COUNT(DISTINCT fixture_id), COUNT(DISTINCT fixture_id || player_key), MIN(odds), MAX(odds) "
+                "FROM player_quotes GROUP BY market ORDER BY market").fetchall():
+            print(f"  {mk}: {nfx} partite, {npl} giocatori, quote {lo:.2f}-{hi:.2f}")
+        by_comp: dict[str, int] = {}
+        for (fid,) in store.db.execute("SELECT DISTINCT fixture_id FROM player_quotes").fetchall():
+            if fid in fixtures:
+                by_comp[fixtures[fid].competition] = by_comp.get(fixtures[fid].competition, 0) + 1
+        print("per competizione: " + (", ".join(f"{k} {v}" for k, v in sorted(by_comp.items())) or "nessuna"))
+    finally:
+        store.close()
+
+
 def cmd_dataset_report(a) -> None:
     """Season CSV link report: per file the link rate, and for each unlinked row our matches of those clubs within 3 days."""
     store = SnapshotStore(a.db)
@@ -2805,6 +2852,11 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--db", default="turso")
     sc.add_argument("--all", action="store_true", help="tutte le statistiche, non solo corner e cartellini")
     sc.set_defaults(fn=cmd_stat_coverage)
+    pq = sub.add_parser("player-quotes", help="quote giocatore Sisal dagli snapshot OddsPapi già salvati (nessuna richiesta)")
+    pq.add_argument("--db", default="turso")
+    pq.add_argument("--aliases", default="configs/team_aliases.json")
+    pq.add_argument("--days", type=float, default=2.0, help="snapshot degli ultimi N giorni")
+    pq.set_defaults(fn=cmd_player_quotes)
     drl = sub.add_parser("dataset-relink", help="file football-data con righe non abbinate riletti dalla copia salvata (nessun download)")
     drl.add_argument("--config", default="configs/collect.json")
     drl.add_argument("--aliases", default="configs/team_aliases.json")
