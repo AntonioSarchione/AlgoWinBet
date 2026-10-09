@@ -1467,14 +1467,14 @@ def cmd_snapshot_check(a) -> None:
 
 
 def cmd_quotes_check(a) -> None:
-    """Upcoming matches (7 days, optionally of one competition / team): OddsPapi link, Sisal quotes by kind with the newest
-    observation, and the playable selections in the latest publication (no request)."""
+    """Upcoming matches (7 days, optionally of one competition / team; --past days of played ones too): OddsPapi link, Sisal
+    quotes by kind with the newest observation, and the playable selections in the latest publication (no request)."""
     store = SnapshotStore(a.db)
     try:
         now = datetime.now(timezone.utc)
         run = store.db.execute("SELECT MAX(id) FROM pub_runs").fetchone()[0]
         links = {fid for (fid,) in store.db.execute("SELECT fixture_id FROM fixture_links WHERE source = 'oddspapi'").fetchall()}
-        for f in SnapshotProvider(store).list_fixtures(None, now, now + timedelta(days=7)):
+        for f in SnapshotProvider(store).list_fixtures(None, now - timedelta(days=a.past), now + timedelta(days=7)):
             if a.text and a.text.lower() not in f"{f.competition} {f.home} {f.away}".lower():
                 continue
             kinds = store.db.execute("SELECT kind, COUNT(*), MAX(observed_at) FROM quotes WHERE fixture_id = ? AND bookmaker LIKE 'sisal%' "
@@ -2864,6 +2864,7 @@ def build_parser() -> argparse.ArgumentParser:
     sk.set_defaults(fn=cmd_snapshot_check)
     qk = sub.add_parser("quotes-check", help="quote Sisal delle prossime partite e collegamento OddsPapi (nessuna richiesta)")
     qk.add_argument("text", nargs="?", default="")
+    qk.add_argument("--past", type=float, default=0, help="giorni prima di adesso (partite già giocate)")
     qk.add_argument("--db", default="turso")
     qk.set_defaults(fn=cmd_quotes_check)
     rc = sub.add_parser("registry-check", help="diagnosi del registro: schedine per giorno, dettagli di una partita (nessuna richiesta API)")

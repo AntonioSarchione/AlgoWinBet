@@ -96,7 +96,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "referees" ]; then algowinbet referees-backfill --db "$DB" && algowinbet stat-eval --stats cards --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "preview" ]; then algowinbet analysis-preview --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "purgestats" ]; then algowinbet registry-purge-stats ${ARG:+--apply} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "quotes" ]; then algowinbet quotes-check "$ARG" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "quotes" ]; then algowinbet quotes-check "$ARG" ${PARAMS:+--past "$PARAMS"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "snapshot" ]; then algowinbet snapshot-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "stateval" ]; then algowinbet stat-eval --weeks "${ARG:-26}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "stats" ]; then algowinbet stat-coverage ${ARG:+--all} --db "$DB"; exit $?; fi
