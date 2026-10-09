@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, CheckCircle2, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma, Users } from "lucide-react";
-import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
+import { fixtureDetail, parseJSON, playerQuotes, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
+import { matchSisal, playerPool } from "@/lib/playermarkets";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
@@ -95,8 +96,8 @@ export default async function Partita({ params, searchParams }: Props) {
             <Lineups lineups={d.lineups} players={d.players} home={fx.home} away={fx.away} absences={d.absences}
               probable={parseJSON<ProbableData>(fx.probable, {})} analysedAt={d.run.created_at} cards={d.cards} />
           ) : tab === "giocatori" ? (
-            fx.scorers ? (
-              <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={parseJSON<ScorersData>(fx.scorers, {})} />
+            fx.scorers || Object.keys(d.cards).length ? (
+              <PlayersTab id={id} fx={fx} d={d} />
             ) : (
               <Empty icon={Users} title="Giocatori non disponibili">
                 Servono almeno 5 partite di storico con formazioni e gol per entrambe le squadre (le nazionali spesso non le hanno ancora),
@@ -116,6 +117,17 @@ export default async function Partita({ params, searchParams }: Props) {
     </>
   );
 }
+
+// Giocatori tab: goals from the published scorers table, the other markets from the published player cards, Sisal's player
+// prices (when its feed has them) matched to our names
+async function PlayersTab({ id, fx, d }: { id: string; fx: FixtureLike; d: NonNullable<Awaited<ReturnType<typeof fixtureDetail>>> }) {
+  const data = parseJSON<ScorersData>(fx.scorers, {});
+  const pm = playerPool([fx.home, fx.away], d.lineups, parseJSON(fx.probable, {}), d.players, d.cards);
+  const names = [...Object.values(data).flatMap((t) => t.players.map((p) => p.n)), ...Object.values(pm).flatMap((t) => t.players.map((p) => p.n))];
+  const sisal = matchSisal(names, await playerQuotes(id));
+  return <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={data} pm={pm} sisal={sisal} />;
+}
+type FixtureLike = { home: string; away: string; xg_home: number | null; xg_away: number | null; scorers?: string | null; probable?: string | null };
 
 function Probabilities({ fx, mk, opps }: { fx: { home: string; away: string; p_home: number | null; p_draw: number | null; p_away: number | null }; mk: ModelMarket[]; opps: OppRow[] }) {
   if (fx.p_home == null) {

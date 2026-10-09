@@ -271,6 +271,16 @@ export async function lineupsPending(from: Date, to: Date): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** Uncached: Sisal's latest player prices of one match (player_quotes, filled from the OddsPapi snapshots; the table may not
+ * exist yet on an older database). */
+export type PlayerQuoteRow = { market: string; line_key: string; player_key: string; player_name: string; odds: number; observed_at: string };
+export async function playerQuotes(id: string): Promise<PlayerQuoteRow[]> {
+  return all<PlayerQuoteRow>(
+    "SELECT market, line_key, player_key, player_name, odds, observed_at FROM player_quotes WHERE fixture_id = ? AND bookmaker LIKE 'sisal%'",
+    [id],
+  ).catch(() => []);
+}
+
 export async function manualRefreshesThisMonth(): Promise<number> {
   const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'manual-refresh' AND period = ?", [
     `M${new Date().toISOString().slice(0, 7)}`,
@@ -294,7 +304,7 @@ export type Absence = {
 export const REGULAR_SHEETS = 3;
 // what a player does in a match he starts (src/algowinbet/playercard.py); goalkeepers carry gk = 1
 export type PlayerCardData = {
-  xg?: number | null; sot?: number; sh?: number; fc?: number; fd?: number; cg: number; n: number; min?: number;
+  xg?: number | null; sot?: number; sh?: number; fc?: number; fd?: number; cg: number; as?: number; n: number; min?: number;
   gk?: 1; ts?: number | null; gc?: number | null; sv?: number | null; cs?: number | null;
 };
 
