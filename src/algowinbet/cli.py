@@ -838,19 +838,11 @@ def cmd_team_map(a) -> None:
     """Every source's spelling of every club next to its GOAL name, read off linked matches (no request): the aliases to
     add, the conflicts, the clubs whose history sits under two names, the national teams the international results miss."""
     from .autorun import AutoConfig
-    from .fdcollector import FootballDataCollector
-    from .teammap import TeamMap, print_team_map
+    from .teammap import build_team_map, print_team_map
     cfg = AutoConfig.load(a.config)
     store = SnapshotStore(a.db)
     try:
-        names = TeamNames.load(a.aliases)
-        tm = TeamMap(store, names)
-        tm.load_goal()
-        tm.load_oddspapi()
-        tm.load_fotmob(_fotmob_for(cfg, store, names))
-        tm.load_apif()
-        tm.load_football_data(FootballDataCollector(store, cfg.divisions, names))
-        print_team_map(tm, show_all=a.all)
+        print_team_map(build_team_map(store, cfg, TeamNames.load(a.aliases)), show_all=a.all)
     finally:
         store.close()
 
@@ -2381,6 +2373,16 @@ def _collect_auto(a) -> None:
                     print(f"quote sfoltite: {pr['matches']} partite finite, tolti {pr['deleted']} prezzi su {pr['before']}", flush=True)
             except Exception as e:  # noqa: BLE001 - housekeeping: never a reason to lose the morning run
                 print(f"sfoltimento quote: non riuscito ({type(e).__name__}: {e})")
+        if daily:
+            # team names of every source against GOAL's (team-map, no request): the health page warns on a new spelling
+            try:
+                from .teammap import JOB, build_team_map, summary
+                sm = summary(build_team_map(store, cfg, names))
+                store.mark_job(JOB, now, json.dumps(sm, ensure_ascii=False))
+                print(f"nomi squadra: alias mancanti {sm['aliases']}, conflitti {sm['conflicts']}, storici divisi {sm['split']}, "
+                      f"nazionali senza Elo {sm['national']}", flush=True)
+            except Exception as e:  # noqa: BLE001 - a check: never a reason to lose the morning run
+                print(f"nomi squadra: non riuscito ({type(e).__name__}: {e})")
         failed: list[str] = []
         if daily or a.health:
             from .health import print_health, run_health, save_health

@@ -108,6 +108,20 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
         checks.append(Check("src-api-football-blocked", "Account API-Football", "warn",
                             f"sospeso (ultima risposta {_age(now, blocked)}): richieste in pausa, una prova al giorno"))
 
+    # team names (team-map, saved by the morning run): a spelling of another source with no alias, or a club under two names
+    row = db.execute("SELECT done_at, detail FROM jobs WHERE name = 'team-map'").fetchone()
+    if row:
+        try:
+            sm = json.loads(row[1] or "{}")
+        except ValueError:
+            sm = {}
+        bad = [f"{n} {lbl}" for k, lbl in (("aliases", "alias mancanti"), ("conflicts", "conflitti"), ("split", "storici divisi"),
+                                          ("national", "nazionali senza Elo")) if (n := sm.get(k))]
+        old = now - (_ts(row[0]) or now) > timedelta(days=3)
+        checks.append(Check("names", "Nomi delle squadre", "warn" if bad or old else "ok",
+                            (", ".join(bad) + " (team-map): " + "; ".join(sm.get("examples", [])[:3]) if bad else
+                             "ogni nome delle altre fonti ha il suo alias") + (f" · controllo di {_age(now, _ts(row[0]))}" if old else "")))
+
     # 2. published analysis
     t = _ts(_one(db, "SELECT MAX(created_at) FROM pub_runs"))
     lvl = "error" if t is None or now - t > timedelta(hours=72) else "warn" if now - t > STALE else "ok"

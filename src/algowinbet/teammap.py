@@ -23,6 +23,9 @@ from .snapshots import SnapshotStore
 
 SOURCES = ("oddspapi", "fotmob", "api-football", "football-data")
 GOAL_SOURCES = ("goal-api",)
+# spellings left out of team_aliases.json on purpose (never reported as missing)
+NOT_ALIASES = {"Ireland": "API-Football's name for the Republic of Ireland, but also the pre-1921 team of the international results"}
+JOB = "team-map"  # jobs row: the morning run's summary, read by the health page
 
 
 def _data(x):
@@ -197,7 +200,7 @@ class TeamMap:
         out: dict[str, set[str]] = defaultdict(set)
         for src, pairs in self.pairs.items():
             for (spelled, goal, _), _ in pairs.items():
-                if spelled and self.names.canon(spelled) != goal:
+                if spelled and self.names.canon(spelled) != goal and spelled not in NOT_ALIASES:
                     out[goal].add(spelled)
         return out
 
@@ -273,3 +276,25 @@ def print_team_map(tm: TeamMap, show_all: bool = False) -> dict[str, list[str]]:
     print(f"\nalias da aggiungere: {sum(len(v) for v in out.values())} nomi per {len(out)} squadre")
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return out
+
+
+def build_team_map(store: SnapshotStore, cfg, names: TeamNames) -> TeamMap:
+    """Every source read (no request): what team-map prints and the morning run summarises."""
+    from .fdcollector import FootballDataCollector
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
+    tm = TeamMap(store, names)
+    tm.load_goal()
+    tm.load_oddspapi()
+    tm.load_fotmob(FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob], names))
+    tm.load_apif()
+    tm.load_football_data(FootballDataCollector(store, cfg.divisions, names))
+    return tm
+
+
+def summary(tm: TeamMap, examples: int = 5) -> dict:
+    """Counts and a few examples per problem, for the jobs row the health page reads."""
+    add = tm.aliases_to_add()
+    conf, split, nat = tm.conflicts(), tm.split_history(), tm.national_unknown()
+    return {"aliases": sum(len(v) for v in add.values()), "conflicts": len(conf), "split": len(split), "national": len(nat),
+            "examples": ([f"{s} -> {g}" for g, ss in sorted(add.items()) for s in sorted(ss)][:examples] + conf[:examples]
+                         + split[:examples] + nat[:examples])}

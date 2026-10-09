@@ -58,3 +58,18 @@ def test_fotmob_rename_gives_fotmob_results_the_goal_names(tmp_path, capsys):
     store = SnapshotStore(db)
     assert store.db.execute("SELECT home FROM results").fetchone()[0] == "Arsenal FC"
     assert store.db.execute("SELECT team FROM fotmob_player_stats").fetchone()[0] == "Arsenal FC"
+
+
+def test_summary_counts_and_skips_the_spellings_left_out_on_purpose():
+    from algowinbet.teammap import summary
+    store = SnapshotStore(":memory:")
+    store.db.executescript(APIF_SCHEMA)
+    now = datetime.now(timezone.utc)
+    store.save_fixtures("goal-api", [Fixture(id="goal:1", competition="UEFA Nations League", home="Republic of Ireland", away="Portugal",
+                                             kickoff=now + timedelta(days=1))], now)
+    store.db.execute("INSERT INTO apif_teams(team_id, name, apif_name) VALUES(1, 'Republic of Ireland', 'Ireland')")
+    tm = TeamMap(store, TeamNames())
+    tm.load_goal()
+    tm.load_apif()
+    sm = summary(tm)
+    assert sm["aliases"] == 0 and sm["conflicts"] == 0 and sm["examples"] == []

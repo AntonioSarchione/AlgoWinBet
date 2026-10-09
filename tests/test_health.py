@@ -82,3 +82,17 @@ def test_suspended_api_football_account_is_a_warning():
     assert "src-api-football-blocked" not in _levels(health.run_health(st, NOW)[0])
     st.mark_job("api-football-blocked", NOW - timedelta(hours=3), "suspended")
     assert _levels(health.run_health(st, NOW)[0])["src-api-football-blocked"] == "warn"
+
+
+def test_team_names_warn_on_a_spelling_without_alias_or_an_old_check():
+    import json
+    st = _store()
+    assert "names" not in _levels(health.run_health(st, NOW)[0])  # never run: no check
+    ok = {"aliases": 0, "conflicts": 0, "split": 0, "national": 0, "examples": []}
+    st.mark_job("team-map", NOW - timedelta(hours=1), json.dumps(ok))
+    assert _levels(health.run_health(st, NOW)[0])["names"] == "ok"
+    st.mark_job("team-map", NOW - timedelta(hours=1), json.dumps({**ok, "aliases": 2, "examples": ["FSV Mainz -> Mainz 05"]}))
+    c = next(c for c in health.run_health(st, NOW)[0] if c.key == "names")
+    assert c.level == "warn" and "2 alias mancanti" in c.detail and "FSV Mainz -> Mainz 05" in c.detail
+    st.mark_job("team-map", NOW - timedelta(days=4), json.dumps(ok))
+    assert _levels(health.run_health(st, NOW)[0])["names"] == "warn"  # the morning check stopped running
