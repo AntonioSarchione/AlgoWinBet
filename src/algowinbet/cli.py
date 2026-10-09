@@ -1627,6 +1627,13 @@ def cmd_slip_review(a) -> None:
     try:
         legs = {(f, k): (r, pm, cf, st) for f, k, r, pm, cf, st in store.db.execute(
             "SELECT fixture_id, sel_key, result, p_market, close_fair, status FROM paper_legs").fetchall()}
+        n_open, first_open, n_unsettled = store.db.execute(
+            "SELECT SUM(result IS NULL), MIN(CASE WHEN result IS NULL THEN created_at END), SUM(result IS NOT NULL AND settled_at IS NULL) "
+            "FROM paper_slips").fetchone()
+        print(f"schedine aperte: {n_open or 0} (la più vecchia registrata {first_open or '-'}); chiuse senza data di chiusura: {n_unsettled or 0}")
+        for day, n, op in store.db.execute("SELECT substr(created_at, 1, 10), COUNT(*), SUM(result IS NULL) FROM paper_slips "
+                                           "GROUP BY 1 ORDER BY 1 DESC LIMIT 7").fetchall():
+            print(f"  registrate il {day}: {n}, ancora aperte {op}")
         slips = store.db.execute("SELECT id, legs, joint, total_odds, result, profile FROM paper_slips WHERE result IN ('won', 'lost')").fetchall()
         if not slips:
             print("nessuna schedina chiusa")
