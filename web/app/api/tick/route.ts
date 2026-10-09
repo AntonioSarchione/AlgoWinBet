@@ -10,6 +10,9 @@ import {
 // CRON_SECRET and GITHUB_DISPATCH_TOKEN are Vercel env vars set by the owner; neither ever reaches the browser.
 export const dynamic = "force-dynamic";
 
+// Set back to false (and enable the workflows: gh workflow enable collect, fotmob...) when the Turso quota resets.
+const COLLECTION_PAUSED = true;
+
 function authorized(req: NextRequest, secret: string): boolean {
   const got = req.headers.get("authorization") ?? "";
   const want = `Bearer ${secret}`;
@@ -22,6 +25,8 @@ function authorized(req: NextRequest, secret: string): boolean {
 async function tick(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || !authorized(req, secret)) return NextResponse.json({ error: "non autorizzato" }, { status: 401 });
+  // collection suspended (Turso free plan over its monthly sync quota, 2026-10-09): no database read, no run, a 200 for the pinger
+  if (COLLECTION_PAUSED) return NextResponse.json({ skipped: "raccolta sospesa" });
   const now = new Date();
   const force = req.nextUrl.searchParams.get("force") === "1";
   // evening matches end after the collection hours: a run when their results are due settles the registry the same night
