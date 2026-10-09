@@ -599,7 +599,7 @@ const registryAt = persist(async (_version: string): Promise<Registry | null> =>
 // ---- Bankroll (Fase 9-bis): every recorded slip, oldest first, for the stake simulation (lib/bankroll.ts) ----
 export type BankSlip = {
   id: number; created_at: string; settled_at: string | null; first_kickoff: string; total_odds: number; bonus: number | null; joint: number;
-  ev: number; result: string | null; payout: number | null; profile: string | null; legs: string;
+  ev: number; result: string | null; payout: number | null; profile: string | null; legs: string; last_kickoff: string;
 };
 
 export const bankrollSlips = cache(async (): Promise<BankSlip[] | null> => {
@@ -617,8 +617,8 @@ export const bankrollSlips = cache(async (): Promise<BankSlip[] | null> => {
 const bankrollAt = persist(
   async (_version: string): Promise<BankSlip[]> =>
     all<BankSlip>(
-      "SELECT id, created_at, settled_at, first_kickoff, total_odds, bonus, joint, ev, result, payout, profile, legs FROM paper_slips ORDER BY created_at, id",
+      "SELECT id, created_at, settled_at, first_kickoff, last_kickoff, total_odds, bonus, joint, ev, result, payout, profile, legs FROM paper_slips ORDER BY created_at, id",
     ),
-  "bankrollSlips",
+  "bankrollSlips2", // 2: last_kickoff added (independent slips)
   6 * 3600, // the version in the key changes with every recorded / settled slip
 );

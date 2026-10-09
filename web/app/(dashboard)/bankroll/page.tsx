@@ -3,6 +3,7 @@ import { Coins, Gauge, Layers, Percent, PiggyBank, Scale, TrendingDown, Wallet }
 import { bankrollSlips, parseJSON } from "@/lib/db";
 import { DEFAULT_PLAN, effectiveOdds, simulate, type Method, type Plan } from "@/lib/bankroll";
 import { PROFILE_LABEL } from "@/lib/profiles";
+import { independentSlips } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
 import { Empty } from "@/app/_components/ui";
 import { OddsChart } from "@/app/_components/OddsChart";
@@ -18,7 +19,7 @@ const METHOD: Record<Method, { label: string; hint: string }> = {
 const RESULT_LABEL: Record<string, string> = { won: "Vinta", lost: "Persa", void: "Rimborsata", "non valutabile": "Rimborsata" };
 const RESULT_CLASS: Record<string, string> = { won: "status-STRONG", lost: "status-AVOID", void: "status-WATCH", "non valutabile": "status-WATCH" };
 
-type SP = { start?: string; m?: string; flat?: string; pct?: string; kelly?: string; cap?: string; p?: string };
+type SP = { start?: string; m?: string; flat?: string; pct?: string; kelly?: string; cap?: string; p?: string; o?: string };
 
 const eur = (x: number) => x.toLocaleString("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const eurSigned = (x: number) => `${x >= 0 ? "+" : "−"}${eur(Math.abs(x))}`;
@@ -43,8 +44,15 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
   const all = await bankrollSlips();
   const profiles = [...new Set((all ?? []).map((s) => s.profile ?? ""))].filter(Boolean).sort();
   const profile = sp.p && profiles.includes(sp.p) ? sp.p : "";
-  const slips = (all ?? []).filter((s) => !profile || s.profile === profile);
+  const inProfile = (all ?? []).filter((s) => !profile || s.profile === profile);
+  // default: only the slips a bettor would hold together (no selection shared with a slip still open), see criterion.ts
+  const overlap = sp.o === "tutte";
+  const slips = overlap ? inProfile : independentSlips(inProfile);
+  const kept = new Set(slips.map((s) => s.id));
   const r = simulate(slips, plan);
+  r.skipped.push(...inProfile.filter((s) => !kept.has(s.id)).map((slip) => ({ slip, reason: "condivide un evento con una schedina ancora aperta" })));
+  r.skippedWon = r.skipped.filter((x) => x.slip.result === "won").length;
+  r.skippedLost = r.skipped.filter((x) => x.slip.result === "lost").length;
   const growth = r.equity / plan.start - 1;
   // every recorded slip, newest first: the staked ones and those this plan leaves out (with the reason)
   const rows = [
@@ -120,13 +128,25 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
             </select>
           </div>
         </div>
+        <div className="field">
+          <label htmlFor="o">Schedine sovrapposte</label>
+          <div className="control">
+            <Layers size={17} aria-hidden="true" />
+            <select id="o" name="o" defaultValue={overlap ? "tutte" : ""}>
+              <option value="">Salta quelle con un evento già in gioco</option>
+              <option value="tutte">Punta tutte</option>
+            </select>
+          </div>
+        </div>
         <div className="field" style={{ alignSelf: "end" }}>
           <button type="submit" className="btn btn-primary">Simula</button>
         </div>
         <p className="note bank-hint">
           {(Object.keys(METHOD) as Method[]).map((k) => <span key={k} className={`h-${k}`}>{METHOD[k].label}: {METHOD[k].hint}. </span>)}
           Puntata minima Sisal 2 €: sotto, la schedina non si punta (resta in tabella
-          con il motivo). Il Registro conta 1 unità su ogni schedina; qui conta solo quello che il piano punta davvero.
+          con il motivo). Ogni analisi registra tre schedine, spesso sugli stessi eventi: di norma si salta quella che condivide un evento con una
+          schedina ancora aperta, come farebbe chi scommette davvero. Il Registro conta 1 unità su ogni schedina; qui conta solo quello che il
+          piano punta davvero.
         </p>
       </form>
 

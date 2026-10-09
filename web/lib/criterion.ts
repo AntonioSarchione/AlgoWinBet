@@ -7,7 +7,7 @@
 //  3. coverage .... Pinnacle close for >= 85% of the value bets
 //  4. stability ... mean EV at the Pinnacle close above 0 in the first half, in the second half and in the last 300 bets
 //  5. markets ..... no market type with >= 50 bets whose 95% upper bound is below 0 (a losing market is switched off)
-//  6. slips ....... mean EV of the settled slips at the Pinnacle close above 0, on >= 50 slips
+//  6. slips ....... mean EV of the settled slips at the Pinnacle close above 0, on >= 50 independent slips (independentSlips)
 //  7. calibration . on every recorded selection (>= 1000 decided): no probability band off by more than the family-wise 95%
 //                   threshold, mean predicted probability within 2 points of the hit rate, log loss not worse than the Sisal
 //                   closing prices without margin
@@ -114,6 +114,22 @@ export function logLossGap(legs: PaperLeg[]): Interval {
   return interval(d.map((l) => ll(l.p, l.result === "won") - ll(l.close_sisal_fair as number, l.result === "won")), d.map((l) => l.fixture_id));
 }
 
+// The slips a bettor would really hold: in recording order, a slip sharing a selection with one still open (recorded before,
+// its last match not played yet) is skipped. Every analysis records three slips, mostly on the same selections (2026-10-09:
+// 154 slips on 85 selections, one selection in 53 of them): counted all, check 6 would weigh a few bets many times over.
+type SlipLike = { id: number; created_at: string; legs: string; last_kickoff: string };
+export function independentSlips<T extends SlipLike>(slips: T[]): T[] {
+  const kept: { keys: Set<string>; until: string }[] = [];
+  const out: T[] = [];
+  for (const s of [...slips].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)) {
+    const keys = new Set(parseJSON<{ fixture_id: string; sel_key: string }[]>(s.legs, []).map((l) => `${l.fixture_id}|${l.sel_key}`));
+    if (kept.some((k) => s.created_at < k.until && [...keys].some((x) => k.keys.has(x)))) continue;
+    kept.push({ keys, until: s.last_kickoff });
+    out.push(s);
+  }
+  return out;
+}
+
 // EV of the settled slips at the Pinnacle close: the model's joint probability (which keeps the correlation of selections of
 // the same match) rescaled leg by leg from the model probability to the Pinnacle fair one, times the payout with the bonus.
 // Only slips whose selections all have the Pinnacle close.
@@ -207,12 +223,14 @@ export function evaluate(all: PaperLeg[], slips: PaperSlip[] = []) {
   };
 
   // 6. slips
-  const sl = slipCloseEv(slips, all);
+  const indep = independentSlips(slips);
+  const sl = slipCloseEv(indep, all);
   const slip: Check = {
     key: "slips",
-    label: `Schedine: valore medio sul prezzo Pinnacle sopra 0, su almeno ${CRITERION.slips}`,
+    label: `Schedine: valore medio sul prezzo Pinnacle sopra 0, su almeno ${CRITERION.slips} schedine indipendenti`,
     now: `${sg(sl.mean)} su ${sl.n}`,
-    detail: `${ci(sl)} · schedine chiuse con la chiusura Pinnacle di ogni evento; è quello che si gioca davvero`,
+    detail: `${ci(sl)} · schedine chiuse con la chiusura Pinnacle di ogni evento; contano solo quelle che non condividono un evento con una `
+      + `schedina ancora aperta (${indep.length} su ${slips.length} registrate), come le giocherebbe davvero chi scommette`,
     state: sl.n >= CRITERION.slips && pos(sl) ? "pass" : "open",
   };
 
