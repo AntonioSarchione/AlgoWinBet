@@ -38,15 +38,15 @@ export default async function Sistema() {
   const linked = datasets.reduce((n, d) => n + d.linked, 0);
 
   // Turso's count (Platform API): shown with or without the morning's size measure
-  const synced = turso ? (
+  const synced = turso.ok ? (
     <Meter
       label="Turso · byte sincronizzati nel mese (MB)"
-      used={Math.round(turso.bytesSynced / 1e6)}
+      used={Math.round(turso.usage.bytesSynced / 1e6)}
       limit={TURSO_SYNC_MB}
       hint="Copie locali del database nelle run di GitHub Actions: si azzera a inizio ciclo di fatturazione"
     />
   ) : (
-    <p className="note">Byte sincronizzati: servono le variabili TURSO_PLATFORM_TOKEN e TURSO_ORG su Vercel (token API della piattaforma Turso).</p>
+    <p className="note">Byte sincronizzati non disponibili: {turso.reason}.</p>
   );
   return (
     <>
