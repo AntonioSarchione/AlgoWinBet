@@ -158,8 +158,21 @@ function Probabilities({ fx, mk, opps }: { fx: { home: string; away: string; p_h
           <div style={{ marginTop: 12 }}>{group("Under/Over").filter((m) => m.l.startsWith("Over")).map((m) => <HBar key={m.l} label={m.l} p={m.p} />)}</div>
         </div>
         <div>
-          <h2 className="section">Gol/NoGol e gol squadra</h2>
-          <div style={{ marginTop: 12 }}>{[...group("Gol/NoGol"), ...group("Gol squadra")].map((m) => <HBar key={m.l} label={m.l} p={m.p} />)}</div>
+          <h2 className="section">Gol/NoGol</h2>
+          <div style={{ marginTop: 12 }}>{group("Gol/NoGol").map((m) => <HBar key={m.l} label={m.l} p={m.p} />)}</div>
+        </div>
+      </div>
+      <div>
+        <h2 className="section">Gol squadra</h2>
+        <div className="split" style={{ marginTop: 12 }}>
+          {([["casa", fx.home], ["ospite", fx.away]] as const).map(([side, team]) => (
+            <div key={side}>
+              <h3 className="team-sub"><TeamBadge name={team} /> {team}</h3>
+              {group("Gol squadra").filter((m) => m.l.endsWith(` ${side}`)).map((m) => (
+                <HBar key={m.l} label={m.l.replace(` ${side}`, "")} p={m.p} />
+              ))}
+            </div>
+          ))}
         </div>
       </div>
       {opps.length > 0 && (

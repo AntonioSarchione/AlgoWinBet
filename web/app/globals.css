@@ -963,3 +963,4 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .bank-form:has(#m option[value="flat"]:checked) .f-flat { display: flex; }
 .bank-form:has(#m option[value="kelly"]:checked) .h-kelly, .bank-form:has(#m option[value="pct"]:checked) .h-pct,
 .bank-form:has(#m option[value="flat"]:checked) .h-flat { display: inline; }
+.team-sub { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 14px; }
