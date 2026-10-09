@@ -66,6 +66,9 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
 
   if (!f) return null;
   const [h, d, a] = (["p_home", "p_draw", "p_away"] as Side[]).map((k) => side(f, k));
+  // Sisal's overround on the 1X2 (only with its three real prices): 1/o summed over the outcomes, minus 1
+  const odds1x2 = (["p_home", "p_draw", "p_away"] as Side[]).map((k) => f.book[k]);
+  const margin = odds1x2.every((b) => b && !isEstimated(b.book)) ? odds1x2.reduce((t, b) => t + 1 / b!.odds, 0) - 1 : null;
   const priced = Boolean(f.book.p_home || f.book.p_draw || f.book.p_away);
   const apart = (["p_home", "p_draw", "p_away"] as Side[]).some((k) => {
     const pm = f.book[k]?.pm;
@@ -127,7 +130,9 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
             {priced && (
               <p className="note" style={{ margin: "-4px 0 10px" }}>
                 Nel cerchio la probabilità finale: il modello corretto verso il mercato, quella che usano le schedine. Sotto: la quota Sisal, la
-                sua quota equa, il modello da solo e il mercato (quote senza margine).
+                quota equa della probabilità finale, il modello da solo e il mercato (le quote Pinnacle senza margine, o la media dei bookmaker
+                se Pinnacle manca).
+                {margin != null && <> Le tre quote Sisal sommano al {pct(1 + margin, 1)}: il {pct(margin, 1)} in più è il margine di Sisal.</>}
               </p>
             )}
             <div className="rings">
