@@ -157,11 +157,9 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
     checks.append(Check("quality", "Qualità settimanale", lvl,
                         f"ultima {_age(now, t)} · meta-modello per {model_version or '–'}: {'sì' if meta else 'no'}"))
 
-    # 7. GitHub Actions minutes
+    # 7. GitHub Actions minutes: counted for information (public repository, no limit)
     from . import actionsminutes as am
-    level, used = am.month_level(store, now)
-    checks.append(Check("minutes", "Minuti GitHub", "warn" if level else "ok",
-                        f"{used}/{am.BUDGET} nel mese" + (" · risparmio" if level == 1 else " · solo giro del mattino" if level == 2 else "")))
+    checks.append(Check("minutes", "Minuti GitHub", "ok", f"{am.month_used(store, now)} nel mese (repository pubblico: nessun limite)"))
 
     # 8. database size (Turso free plan)
     path = replica_path()

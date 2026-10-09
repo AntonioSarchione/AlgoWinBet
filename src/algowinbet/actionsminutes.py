@@ -1,15 +1,14 @@
-"""GitHub Actions minutes (private repo: 2,000 a month, every job billed in whole minutes).
+"""GitHub Actions minutes. The repository is public since 2026-10-06: minutes are free and nothing is throttled on them any
+more; the month's count is kept for information (dashboard Sistema page, health report).
 
   - free_seconds ...... seconds left in the minute this job is already paying for: spent on free price-path reads
   - record_run ........ adds this run's billed minutes to the month (api_usage 'actions-minutes')
   - sync_month ........ the daily run re-counts the month from GitHub's run list (probes and other workflows included)
-  - level ............. 0 normal, 1 economy (projection over ECONOMY_AT: no runs only to keep data fresh), 2 minimum (over
-                        MINIMUM_AT: only the morning run); read by the dashboard's tick route and by the job itself
+  - month_used ........ the month's count so far
 The job start comes from the workflow (JOB_T0, written by its first step).
 """
 from __future__ import annotations
 
-import calendar
 import json
 import math
 import os
@@ -18,9 +17,6 @@ import urllib.request
 from datetime import datetime, timezone
 
 SOURCE = "actions-minutes"
-BUDGET = 2000
-ECONOMY_AT = 1700  # projected month total
-MINIMUM_AT = 1900  # used so far
 SETUP_S = 3.0  # "Set up job" before the first step writes JOB_T0
 TAIL_S = 10.0  # replica save and post steps after collect-auto
 MARGIN_S = 6.0
@@ -81,30 +77,19 @@ def sync_month(store, now: datetime) -> int | None:
     return total
 
 
-def level(used: int, now: datetime) -> int:
-    days = calendar.monthrange(now.year, now.month)[1]
-    elapsed = (now.day - 1 + (now.hour + now.minute / 60) / 24) / days
-    projected = used / max(elapsed, 1.0 / days)
-    if used >= MINIMUM_AT:
-        return 2
-    return 1 if projected >= ECONOMY_AT else 0
-
-
-def month_level(store, now: datetime | None = None) -> tuple[int, int]:
+def month_used(store, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
-    used = store.usage(SOURCE, month_key(now))
-    return level(used, now), used
+    return store.usage(SOURCE, month_key(now))
 
 
 QUALITY_SOURCE = "quality-dispatch"  # api_usage period = model version: start attempts of its first quality replay
-QUALITY_MINUTES = 5  # a 60-week replay takes about 2 billed minutes; kept with a margin
 QUALITY_TRIES = 2
 
 
 def dispatch_quality(store, version: str, now: datetime, post=None) -> str | None:
     """The morning run starts the quality replay at once when the model version has no meta-model yet: a version change
     switches the calibration off until the replay has fitted it again on the new model's probabilities. At most
-    QUALITY_TRIES starts per version (one a morning), never when the replay would bring the month to the minimum level.
+    QUALITY_TRIES starts per version (one a morning).
     Needs GITHUB_TOKEN with actions: write (a workflow_dispatch event may be sent with it)."""
     from .meta import load_meta
     if not load_meta(store, version) and store.usage(QUALITY_SOURCE, version) < QUALITY_TRIES:
@@ -114,9 +99,6 @@ def dispatch_quality(store, version: str, now: datetime, post=None) -> str | Non
         key, why = f"W{now:%G-%V}", "settimanale"
     else:
         return None
-    used = store.usage(SOURCE, month_key(now))
-    if used + QUALITY_MINUTES >= MINIMUM_AT:
-        return f"verifica qualità {why} rinviata: minuti GitHub {used}/{BUDGET}"
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     if post is None:
         if not token or not repo:

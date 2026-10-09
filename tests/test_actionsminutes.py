@@ -16,16 +16,13 @@ def test_free_seconds_fill_the_minute_already_billed(monkeypatch):
     assert am.free_seconds() == 0  # outside Actions
 
 
-def test_record_run_and_levels(monkeypatch):
+def test_record_run_counts_the_month(monkeypatch):
     st = SnapshotStore(":memory:")
     now = datetime(2026, 10, 16, 12, tzinfo=UTC)  # half of October gone
     monkeypatch.setenv("JOB_T0", "1000")
     assert am.record_run(st, now, clock=lambda: 1090) == 2
     assert st.usage(am.SOURCE, "M2026-10") == 2
-    assert am.level(700, now) == 0  # on pace for ~1,400
-    assert am.level(900, now) == 1  # on pace for ~1,800: economy
-    assert am.level(1900, now) == 2
-    assert am.level(300, datetime(2026, 10, 1, 1, tzinfo=UTC)) == 1  # a heavy first day already projects high
+    assert am.month_used(st, now) == 2
 
 
 def test_freshness_due_orders_the_most_overdue_first():
@@ -59,9 +56,8 @@ def test_dispatch_quality_once_per_version_and_within_budget(monkeypatch):
     am.dispatch_quality(st, "v9", now, post=post)
     assert am.dispatch_quality(st, "v9", now, post=post) is None  # QUALITY_TRIES reached
     assert len(calls) == am.QUALITY_TRIES
-    st.add_usage(am.SOURCE, am.month_key(now), am.MINIMUM_AT - 2)
-    assert "rinviata" in am.dispatch_quality(st, "v10", now, post=post)  # would cross the minimum level
-    assert len(calls) == am.QUALITY_TRIES
+    st.add_usage(am.SOURCE, am.month_key(now), 5000)
+    assert "avviata" in am.dispatch_quality(st, "v10", now, post=post)  # no minutes limit any more (public repository)
 
 
 def test_dispatch_quality_skips_a_version_with_its_meta_model(monkeypatch):

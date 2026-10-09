@@ -2297,9 +2297,8 @@ def _collect_auto(a) -> None:
     if daily or not store.usage(am.SOURCE, am.month_key(started)):  # every morning, and at once when the month has no count
         try:
             print(f"minuti GitHub del mese (da GitHub): {am.sync_month(store, started)}")
-        except Exception as e:  # noqa: BLE001 - the count is a guard, never a reason to lose the morning run
+        except Exception as e:  # noqa: BLE001 - the count is information only, never a reason to lose the morning run
             print(f"minuti GitHub: conteggio non riuscito ({type(e).__name__}: {e})")
-    lvl, used = am.month_level(store, started)
     if daily:
         try:
             msg = am.dispatch_quality(store, Config.load(None).model.version, started)
@@ -2307,11 +2306,6 @@ def _collect_auto(a) -> None:
                 print(msg)
         except Exception as e:  # noqa: BLE001 - retried next morning, never a reason to lose this run
             print(f"verifica qualità: avvio non riuscito ({type(e).__name__}: {e})")
-    if lvl == 2 and not daily and not (a.manual or a.history or a.force_publish):
-        print(f"minuti GitHub: {used}/{am.BUDGET} usati, solo il giro del mattino fino a fine mese")
-        am.record_run(store, started)
-        store.close()
-        return
     goal = odds = None
     if cfg.goal_leagues and (os.environ.get("GOALAPI_KEY") or os.environ.get("GOAL_API_KEY")):
         gc = GoalApiClient(store=store, budget=BudgetGuard(store, "goal-api", daily=cfg.goal_daily_limit, reserve=cfg.goal_reserve))
@@ -2436,7 +2430,7 @@ def _collect_auto(a) -> None:
             failed = [f"{c.label}: {c.detail}" for c in checks if c.level == "error"]
         n = am.record_run(store, now)
         if n:
-            print(f"minuti GitHub: questo run {n}, mese {store.usage(am.SOURCE, am.month_key(now))}/{am.BUDGET}")
+            print(f"minuti GitHub: questo run {n}, mese {am.month_used(store, now)}")
     finally:
         store.close()
     if failed:  # all the work is done: failing now only sends GitHub's e-mail to the owner

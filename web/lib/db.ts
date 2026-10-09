@@ -271,14 +271,6 @@ export async function lineupsPending(from: Date, to: Date): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** Uncached: GitHub Actions minutes of this month (counted by the collect job), read by the tick route before a run. */
-export async function actionsMinutesThisMonth(): Promise<number> {
-  const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'actions-minutes' AND period = ?", [
-    `M${new Date().toISOString().slice(0, 7)}`,
-  ]);
-  return Number(rows[0]?.used ?? 0);
-}
-
 export async function manualRefreshesThisMonth(): Promise<number> {
   const rows = await all<{ used: number }>("SELECT used FROM api_usage WHERE source = 'manual-refresh' AND period = ?", [
     `M${new Date().toISOString().slice(0, 7)}`,

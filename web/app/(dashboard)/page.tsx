@@ -14,8 +14,6 @@ import { Empty, Meter, MatchCell, MiniRing, PBar, ProbGauge, TeamBadge } from "@
 import { LegAbsences } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
-import { RefreshButton } from "@/app/_components/RefreshButton";
-import { MANUAL_MONTHLY } from "@/lib/refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -581,7 +579,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 <span>Ultima raccolta</span>
                 <span>{ago(tick)}</span>
               </div>
-              <RefreshButton used={use.manualMonth} limit={MANUAL_MONTHLY} configured={Boolean(process.env.GITHUB_DISPATCH_TOKEN)} />
             </div>
           </section>
         </aside>
