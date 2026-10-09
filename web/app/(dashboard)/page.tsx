@@ -36,8 +36,8 @@ const MIN_EVENTS = [
   ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => ({ v: String(k), l: k === 5 ? "Almeno 5 (bonus Sisal)" : `Almeno ${k}` })),
 ];
 
-// the slips never take a selection under the published floor (45%, user's rule): "" = that floor
-const LEG_PROB = [{ v: "", l: "Regola (almeno 45%)" }, ...[50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
+// the slips never take a selection under the published floor (40%, user's rule): "" = that floor
+const LEG_PROB = [{ v: "", l: "Regola (almeno 40%)" }, ...[45, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 const EV_MIN = [
   { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" }, { v: "0", l: "Almeno 0% (pari)" },
   { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
@@ -176,7 +176,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           <label htmlFor="lmin">Quota singolo evento (min – max)</label>
           <div className="control">
             <Target size={17} aria-hidden="true" />
-            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1.2" placeholder="1.20" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
+            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1.25" placeholder="1.25" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
             <span className="dash">–</span>
             <input name="lmax" type="number" inputMode="decimal" step="0.05" min="1" placeholder="3.00" defaultValue={sp.lmax} aria-label="Quota massima del singolo evento" />
           </div>

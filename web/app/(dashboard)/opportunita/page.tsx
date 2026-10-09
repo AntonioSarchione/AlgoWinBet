@@ -59,7 +59,7 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
             <label htmlFor="lmin">Quota singolo evento (min – max)</label>
             <div className="control">
               <Target size={17} aria-hidden="true" />
-              <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1" placeholder="1.20" defaultValue={lmin} aria-label="Quota minima" />
+              <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1" placeholder="1.25" defaultValue={lmin} aria-label="Quota minima" />
               <span className="dash">–</span>
               <input name="lmax" type="number" inputMode="decimal" step="0.05" min="1" placeholder="3.00" defaultValue={lmax} aria-label="Quota massima" />
             </div>

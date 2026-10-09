@@ -112,13 +112,14 @@ class OptimizerCfg(BaseModel):
     national_competitions: list[str] = Field(default_factory=lambda: [
         "Nations League", "World Cup", "European Championship", "Euro 20", "Qualification", "Qualifiers", "Friendl",
         "Copa America", "Copa América", "Africa Cup", "Asian Cup", "Gold Cup"])
-    # user's choice (2026-10-05): no selection under 45% in a slip. The ones between min_probability (25%) and this stay
-    # visible as singles; in a multiple each of them was the leg that sank the slip (slip-review, 2-4 Oct)
-    min_leg_probability: float = 0.45
+    # user's rule: no selection under 40% in a slip (2026-10-09; 45% from 2026-10-05). The ones between min_probability
+    # (25%) and this stay visible as singles
+    min_leg_probability: float = 0.40
     # value selections (STRONG / CANDIDATE) of national-team competitions need more: the model is weakest there
     national_value_min_probability: float = 0.55
-    # no selection under these odds enters a slip (user's rule, 2026-10-03): it adds noise and almost nothing to the slip
-    min_leg_odds: float = 1.2
+    # no selection under these odds enters a slip (user's rule: 1.25 from 2026-10-09, 1.20 from 2026-10-03): it adds noise
+    # and almost nothing to the slip
+    min_leg_odds: float = 1.25
     beam_width: int = 200
     output_count: int = 3
     max_overlap: float = 0.5  # Jaccard overlap allowed between output slips

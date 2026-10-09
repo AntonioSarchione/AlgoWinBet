@@ -18,8 +18,8 @@ const EV_MIN = [
   { v: "", l: "Nessun limite" }, { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" },
   { v: "0", l: "Almeno 0% (pari)" }, { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
 ];
-// the slips never take a selection under the published floor (45%, user's rule): "" = that floor
-const LEG_PROB = [{ v: "", l: "Regola (almeno 45%)" }, ...[50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
+// the slips never take a selection under the published floor (40%, user's rule): "" = that floor
+const LEG_PROB = [{ v: "", l: "Regola (almeno 40%)" }, ...[45, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 
 const ALL_STATUSES = ["STRONG", "CANDIDATE", "FAIR", "WATCH", "NEUTRAL", "AVOID"];
 const PER_FIXTURE = 6; // kept per match and per criterion (value score, probability, EV) before the search
@@ -152,7 +152,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
           <label htmlFor="lmin">Quota singolo evento (min – max)</label>
           <div className="control">
             <Target size={17} aria-hidden="true" />
-            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1.2" placeholder="1.20" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
+            <input id="lmin" name="lmin" type="number" inputMode="decimal" step="0.05" min="1.25" placeholder="1.25" defaultValue={sp.lmin} aria-label="Quota minima del singolo evento" />
             <span className="dash">–</span>
             <input name="lmax" type="number" inputMode="decimal" step="0.05" min="1" placeholder="nessuna" defaultValue={sp.lmax} aria-label="Quota massima del singolo evento" />
           </div>

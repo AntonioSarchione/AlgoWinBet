@@ -23,7 +23,7 @@ export type OptOpp = {
 };
 
 // user's rule (2026-10-03): no selection under these odds in a slip, whatever the settings (noise, no value added)
-export const MIN_LEG_ODDS = 1.2;
+export const MIN_LEG_ODDS = 1.25;
 // same as config.py OptimizerCfg.national_competitions
 export const NATIONAL_COMPETITIONS = ["Nations League", "World Cup", "European Championship", "Euro 20", "Qualification", "Qualifiers",
   "Friendl", "Copa America", "Copa América", "Africa Cup", "Asian Cup", "Gold Cup"];
@@ -38,7 +38,7 @@ export type OptimizerCfg = {
   max_legs_per_competition: number;
   national_competitions?: string[]; // name keywords of national-team competitions (missing in older analyses: the default)
   min_leg_probability: number;
-  min_leg_odds?: number; // no selection under these odds enters a slip (missing in older analyses: 1.2)
+  min_leg_odds?: number; // no selection under these odds enters a slip (missing in older analyses: MIN_LEG_ODDS)
   national_value_min_probability?: number; // value selections of national-team competitions (missing in older analyses: none)
   beam_width: number;
   output_count: number;

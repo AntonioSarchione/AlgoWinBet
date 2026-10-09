@@ -848,29 +848,32 @@ def cmd_team_map(a) -> None:
 
 
 def cmd_slip_rules(a) -> None:
-    """Registered slips against the user's slip rules, each from the moment its code went in (no request): no leg under odds
-    1.20 (2026-10-03 14:20 UTC), no national/club mix (2026-10-04 10:06), no leg under 45% and no national value leg under
-    55% (2026-10-05 12:23). The latest offenders are shown."""
+    """Registered slips against the user's slip rules, each over the time it was in force (no request): no leg under odds
+    1.20 (from 2026-10-03 14:20 UTC) then 1.25 (from 2026-10-09 09:00), no national/club mix (2026-10-04 10:06), no leg under
+    45% (2026-10-05 12:23 to 2026-10-09 09:00) then 40%, no national value leg under 55% (2026-10-05 12:23). The latest
+    offenders are shown."""
     from .config import OptimizerCfg
     o = OptimizerCfg()
     store = SnapshotStore(a.db)
     comp = {(f, k): c for f, k, c in store.db.execute("SELECT fixture_id, sel_key, competition FROM paper_legs").fetchall()}
     national = lambda c: any(x in (c or "") for x in o.national_competitions)  # noqa: E731
-    rules = (("quota < 1.20", "2026-10-03T14:20", lambda legs: [l for l in legs if l["odds"] < o.min_leg_odds]),
+    rules = (("quota < 1.20", "2026-10-03T14:20", lambda legs: [l for l in legs if l["odds"] < 1.20]),
+             ("quota < 1.25", "2026-10-09T09:00", lambda legs: [l for l in legs if l["odds"] < o.min_leg_odds]),
              ("nazionali e club insieme", "2026-10-04T10:06",
               lambda legs: legs if len({national(comp.get((l["fixture_id"], l["sel_key"]))) for l in legs}) > 1 else []),
-             ("probabilità < 45%", "2026-10-05T12:23", lambda legs: [l for l in legs if l["p"] < o.min_leg_probability]),
+             ("probabilità < 45%", "2026-10-05T12:23", lambda legs: [l for l in legs if l["p"] < 0.45], "2026-10-09T09:00"),
+             ("probabilità < 40%", "2026-10-09T09:00", lambda legs: [l for l in legs if l["p"] < o.min_leg_probability]),
              ("nazionale di valore < 55%", "2026-10-05T12:23",
               lambda legs: [l for l in legs if l["status"] in ("STRONG", "CANDIDATE") and l["p"] < o.national_value_min_probability
                             and national(comp.get((l["fixture_id"], l["sel_key"])))]))
     rows = store.db.execute("SELECT id, created_at, run_id, profile, legs FROM paper_slips ORDER BY created_at").fetchall()
     print(f"schedine registrate: {len(rows)}")
-    for name, since, check in rules:
+    for name, since, check, *until in rules:  # until: when a later rule replaced it
         before = after = 0
         examples = []
         for sid, at, run, profile, legs_json in rows:
             bad = check(json.loads(legs_json))
-            if not bad:
+            if not bad or (until and at[:16] >= until[0]):
                 continue
             if at[:16] < since:
                 before += 1
@@ -879,7 +882,8 @@ def cmd_slip_rules(a) -> None:
                 l = bad[0]
                 examples.append(f"    schedina {sid} ({at[:16]}, run {run}, {profile or '-'}): {l['match']} {l['market']} quota {l['odds']} "
                                     f"prob. {l['p']:.0%} {l['status']}")
-        print(f"  {name} (regola dal {since}): {before} prima della regola, {after} dopo" + (" <- DA CORREGGERE" if after else ""))
+        print(f"  {name} (regola dal {since}{f' al {until[0]}' if until else ''}): {before} prima della regola, {after} dopo"
+              + (" <- DA CORREGGERE" if after else ""))
         for e in examples[-a.show:]:
             print(e)
 
