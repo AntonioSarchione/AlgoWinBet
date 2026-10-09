@@ -84,7 +84,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmresults" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-fotmob $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "legbands" ]; then algowinbet leg-bands --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "oddsrelink" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet odds-relink --days "${ARG:-1}" ${PARAMS:+--again} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playerquotes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-quotes --days "${ARG:-2}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playerquotes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-quotes --days "${ARG:-2}" ${PARAMS:+--name "$PARAMS"} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fdrelink" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet dataset-relink --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmrename" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-rename $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "teammap" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet team-map ${PARAMS:+--all} --db "$DB"; exit $?; fi

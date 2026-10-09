@@ -2021,6 +2021,14 @@ def cmd_player_quotes(a) -> None:
                             done.add((fx.id, b))
                             save_player_quotes(store, fx.id, b, qs, datetime.fromisoformat(fetched))
         print(f"snapshot letti: {len(raws)}, partite con quote giocatore: {len(done)}")
+        if a.name:  # one player's prices, or every scorer price of a match (a team name)
+            want = a.name.lower()
+            for fid, mk, ln, nm, od in store.db.execute(
+                    "SELECT fixture_id, market, line_key, player_name, odds FROM player_quotes ORDER BY fixture_id, market, odds").fetchall():
+                fx = fixtures.get(fid)
+                teams = f"{fx.home}-{fx.away}" if fx else fid
+                if want in nm.lower() or (want in teams.lower() and mk == "SCORER"):
+                    print(f"  {teams} {mk}{'@' + ln if ln else ''}: {nm} {od}")
         print("mercati giocatore Sisal nel feed (tipo, partite):")
         for k, v in sorted(census.items(), key=lambda x: -len(x[1])):
             print(f"  {k}: {len(v)}")
@@ -2933,6 +2941,7 @@ def build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--db", default="turso")
     pq.add_argument("--aliases", default="configs/team_aliases.json")
     pq.add_argument("--days", type=float, default=2.0, help="snapshot degli ultimi N giorni")
+    pq.add_argument("--name", default="", help="stampa le quote dei giocatori con questo pezzo di nome (o di squadra della partita)")
     pq.set_defaults(fn=cmd_player_quotes)
     drl = sub.add_parser("dataset-relink", help="file football-data con righe non abbinate riletti dalla copia salvata (nessun download)")
     drl.add_argument("--config", default="configs/collect.json")
