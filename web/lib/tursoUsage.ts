@@ -35,7 +35,7 @@ async function fetchUsage(org: string): Promise<TursoUsage> {
 }
 
 // one request every 30 minutes at most; a thrown error is not cached, so a fixed setting shows on the next visit
-const cached = unstable_cache(fetchUsage, ["tursoUsage"], { revalidate: 1800 });
+const cached = unstable_cache(fetchUsage, ["tursoUsage2"], { revalidate: 1800 });
 
 export async function tursoUsage(): Promise<TursoUsageResult> {
   const org = process.env.TURSO_ORG?.trim();
