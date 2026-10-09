@@ -936,6 +936,7 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .fm-score.L { background: var(--bad-soft); color: var(--bad); }
 .fm-score.A { background: color-mix(in srgb, var(--s1) 16%, transparent); color: var(--s1); }
 .fm-h2h { display: grid; gap: 10px; }
+.fm-h2h-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .fm-h2h-bar { display: flex; gap: 3px; height: 28px; border-radius: 8px; overflow: hidden; }
 .fm-h2h-bar i { display: grid; place-items: center; min-width: 28px; font-style: normal; }
 .fm-h2h-bar b { font-size: 13px; }

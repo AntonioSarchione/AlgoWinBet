@@ -509,13 +509,17 @@ function Form({ home, away, fh, fa, h2h }: { home: string; away: string; fh: Res
         {h2h.length ? (
           <>
             <div className="fm-h2h">
-              <div className="fm-h2h-bar" role="img" aria-label={`${home} ${hw} vittorie, ${dr} pareggi, ${away} ${aw} vittorie`}>
-                {([["W", hw, `${home}`], ["D", dr, "Pareggi"], ["A", aw, `${away}`]] as const).map(([k, v, l]) =>
-                  v > 0 && <i key={k} className={k} style={{ flex: v }} title={`${l}: ${v}`}><b className="num">{v}</b></i>)}
+              <div className="fm-h2h-row">
+                <TeamBadge name={home} size="lg" />
+                <div className="fm-h2h-bar" role="img" aria-label={`${home} ${hw} vittorie, ${dr} pareggi, ${away} ${aw} vittorie`}>
+                  {([["W", hw, `${home}`], ["D", dr, "Pareggi"], ["A", aw, `${away}`]] as const).map(([k, v, l]) =>
+                    v > 0 && <i key={k} className={k} style={{ flex: v }} title={`${l}: ${v}`}><b className="num">{v}</b></i>)}
+                </div>
+                <TeamBadge name={away} size="lg" />
               </div>
               <ul className="fm-h2h-legend">
-                {([["W", hw, `Vittorie ${home}`], ["D", dr, "Pareggi"], ["A", aw, `Vittorie ${away}`]] as const).map(([k, v, l]) => (
-                  <li key={k}><i className={k} aria-hidden="true" />{l}<b className="num">{v}</b><small>{share(v, h2h.length)}</small></li>
+                {([["W", hw, `Vittorie ${home}`, home], ["D", dr, "Pareggi", null], ["A", aw, `Vittorie ${away}`, away]] as const).map(([k, v, l, t]) => (
+                  <li key={k}><i className={k} aria-hidden="true" />{t && <TeamBadge name={t} />}{l}<b className="num">{v}</b><small>{share(v, h2h.length)}</small></li>
                 ))}
               </ul>
             </div>
