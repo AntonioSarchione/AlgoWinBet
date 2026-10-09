@@ -1,10 +1,10 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Layers, PieChart, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
 import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
-import { Empty } from "@/app/_components/ui";
+import { Empty, Fold } from "@/app/_components/ui";
+import { legResults, SlipLegs, type SlipLeg } from "@/app/_components/SlipLegs";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Registro" };
@@ -109,7 +109,7 @@ export default async function Registro() {
   const cal = crit.bands;
   const versions = byVersion(reg.legs);
   const V = STATE[crit.verdict];
-  const legResult = new Map(reg.legs.map((l) => [`${l.fixture_id}|${l.sel_key}`, l]));
+  const legResult = legResults(reg.legs);
   const settledSlips = reg.slips.filter((s) => s.result && s.result !== "non valutabile");
   const slipPnl = settledSlips.reduce((a, s) => a + (s.payout ?? 0) - 1, 0);
   const slipsWon = settledSlips.filter((s) => s.result === "won").length;
@@ -178,12 +178,8 @@ export default async function Registro() {
         </div>
       </section>
 
-      <section className="card" aria-labelledby="crit-title">
-        <div className="card-head">
-          <h2 id="crit-title">Criterio di passaggio</h2>
-          <span className="count">{crit.passed}/{crit.required} condizioni</span>
-          <span className={`status ${V.cls}`}><V.icon size={14} aria-hidden="true" /> {V.label}</span>
-        </div>
+      <Fold title="Criterio di passaggio" id="crit-title"
+        side={<><span className="count">{crit.passed}/{crit.required} condizioni</span><span className={`status ${V.cls}`}><V.icon size={14} aria-hidden="true" /> {V.label}</span></>}>
         <p className="card-pad" style={{ paddingBottom: 0 }}>
           {VERDICT[crit.verdict]}
           {crit.missing > 0 && (
@@ -213,11 +209,10 @@ export default async function Registro() {
           le proposte registrate alla prima comparsa: nessuna scelta a posteriori. Gli intervalli raggruppano le selezioni della stessa partita, che si
           muovono insieme. Dopo il passaggio le ultime 300 giocate restano sotto controllo: se il vantaggio sparisce si torna in prova.
         </p>
-      </section>
+      </Fold>
 
       <div className="split">
-        <section className="card">
-          <div className="card-head"><h2>Per versione del modello</h2><span className="count">giocate di valore</span></div>
+        <Fold title="Per versione del modello" side={<span className="count">giocate di valore</span>}>
           <div className="table-wrap">
             <table className="compact">
               <thead><tr><th>Versione</th><th className="num">Chiuse</th><th className="num">EV chiusura Pinnacle</th><th className="num">CLV Sisal</th><th className="num">Rendimento</th></tr></thead>
@@ -235,9 +230,8 @@ export default async function Registro() {
             </table>
           </div>
           <p className="note card-pad">Tra parentesi l&apos;intervallo al 95%. Ogni miglioramento del modello cambia la versione: i risultati restano separati.</p>
-        </section>
-        <section className="card">
-          <div className="card-head"><h2>Calibrazione reale</h2><span className="count">probabilità prevista contro esito</span></div>
+        </Fold>
+        <Fold title="Calibrazione reale" side={<span className="count">probabilità prevista contro esito</span>}>
           <div className="table-wrap">
             <table className="compact">
               <thead><tr><th>Fascia</th><th className="num">Selezioni</th><th className="num">Prevista</th><th className="num">Accaduta</th><th className="num">Errori standard</th></tr></thead>
@@ -258,11 +252,10 @@ export default async function Registro() {
             con {cal.tested} fasce controllate, un modello ben calibrato resta dentro 95 volte su 100. Fasce con meno di {CRITERION.minBand} selezioni non contano.
             Gli errori standard raggruppano le selezioni della stessa partita: un weekend con pochi goal fa vincere tutti gli under insieme.
           </p>
-        </section>
+        </Fold>
       </div>
 
-      <section className="card">
-        <div className="card-head"><h2>Per tipo di selezione</h2><span className="count">1 unità a giocata</span></div>
+      <Fold title="Per tipo di selezione" side={<span className="count">1 unità a giocata</span>}>
         <div className="table-wrap">
           <table className="compact">
             <thead>
@@ -284,7 +277,7 @@ export default async function Registro() {
           CLV Sisal: quota presa contro quota Sisal di chiusura. EV alla chiusura Pinnacle: quota presa per la probabilità equa di Pinnacle in chiusura, la misura più
           vicina al valore vero. Le selezioni eque servono nelle schedine: il loro rendimento atteso è circa zero.
         </p>
-      </section>
+      </Fold>
 
       <section className="card">
         <div className="card-head">
@@ -301,35 +294,12 @@ export default async function Registro() {
             </thead>
             <tbody>
               {reg.slips.slice(0, 50).map((s: PaperSlip) => {
-                const legs = parseJSON<{ fixture_id: string; sel_key: string; match: string; market: string; odds: number }[]>(s.legs, []);
+                const legs = parseJSON<SlipLeg[]>(s.legs, []);
                 return (
                   <tr key={s.id}>
                     <td className="muted">{dayTime(s.created_at)}</td>
                     <td className="wrap">
-                      {/* tap to open: the selections must be readable on a phone, where there is no hover */}
-                      <details className="slip-legs">
-                        <summary>
-                          {legs.length} {legs.length === 1 ? "evento" : "eventi"} · {legs.slice(0, 2).map((l) => l.match).join(", ")}{legs.length > 2 ? "…" : ""}
-                        </summary>
-                        <ul>
-                          {legs.map((l) => {
-                            const res = legResult.get(`${l.fixture_id}|${l.sel_key}`);
-                            return (
-                              <li key={`${l.fixture_id}|${l.sel_key}`}>
-                                <Link href={`/partita/${encodeURIComponent(l.fixture_id)}`}>{l.match}</Link>
-                                <span className="muted"> · {l.market} @{l.odds.toFixed(2)}</span>{" "}
-                                {res?.result ? (
-                                  <span className={`status ${RESULT_CLASS[res.result] ?? ""}`}>
-                                    {RESULT_LABEL[res.result] ?? res.result}{res.score ? ` ${res.score}` : ""}
-                                  </span>
-                                ) : (
-                                  <span className="muted">in attesa</span>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </details>
+                      <SlipLegs legs={legs} results={legResult} />
                     </td>
                     <td className="num">{s.total_odds.toFixed(2)}</td>
                     <td className="num">{s.bonus ? `+${pct(s.bonus)}` : "–"}</td>

@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { Coins, Gauge, Layers, Percent, PiggyBank, Scale, TrendingDown, Wallet } from "lucide-react";
-import { bankrollSlips, parseJSON } from "@/lib/db";
+import { bankrollSlips, paperRegistry, parseJSON } from "@/lib/db";
 import { DEFAULT_PLAN, effectiveOdds, simulate, type Method, type Plan } from "@/lib/bankroll";
 import { PROFILE_LABEL } from "@/lib/profiles";
 import { independentSlips } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
 import { Empty } from "@/app/_components/ui";
+import { legResults, SlipLegs, type SlipLeg } from "@/app/_components/SlipLegs";
 import { OddsChart } from "@/app/_components/OddsChart";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,8 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
     kelly: num(sp.kelly, 5, 100, DEFAULT_PLAN.kelly * 100) / 100,
     cap: num(sp.cap, 0.5, 20, DEFAULT_PLAN.cap * 100) / 100,
   };
-  const all = await bankrollSlips();
+  const [all, reg] = await Promise.all([bankrollSlips(), paperRegistry()]);
+  const legResult = legResults(reg?.legs ?? []);
   const profiles = [...new Set((all ?? []).map((s) => s.profile ?? ""))].filter(Boolean).sort();
   const profile = sp.p && profiles.includes(sp.p) ? sp.p : "";
   const inProfile = (all ?? []).filter((s) => !profile || s.profile === profile);
@@ -206,14 +208,11 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
                   </thead>
                   <tbody>
                     {rows.slice(0, 60).map((b) => {
-                      const legs = parseJSON<{ match: string; market: string }[]>(b.slip.legs, []);
+                      const legs = parseJSON<SlipLeg[]>(b.slip.legs, []);
                       return (
                         <tr key={b.slip.id} className={b.skip ? "muted" : undefined}>
                           <td className="num">{dayTime(b.at)}</td>
-                          <td className="wrap">
-                            {legs.length} eventi
-                            <span className="sub">{legs.map((l) => `${l.match}: ${l.market}`).join(" · ")}</span>
-                          </td>
+                          <td className="wrap"><SlipLegs legs={legs} results={legResult} /></td>
                           <td className="num">{effectiveOdds(b.slip).toFixed(2)}</td>
                           <td className="num">{pct(b.slip.joint, 1)}</td>
                           <td className="num">{b.skip ? <span title={b.skip}>non puntata</span> : eur(b.stake)}</td>

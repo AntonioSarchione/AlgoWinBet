@@ -2,6 +2,7 @@ import { Activity, AlertTriangle, CheckCircle2, Database, HeartPulse, XCircle } 
 import { lastTick, latestHealth, parseJSON, systemStatus, usage } from "@/lib/db";
 import { ago, dayTime, shortDate } from "@/app/_components/format";
 import { Empty, Meter } from "@/app/_components/ui";
+import { tursoUsage } from "@/lib/tursoUsage";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Stato del sistema" };
@@ -21,9 +22,10 @@ const LEVEL = {
   error: { label: "Errore", cls: "status-AVOID", icon: XCircle, state: "fail" },
 } as const;
 const TURSO_FREE_MB = 5000;
+const TURSO_SYNC_MB = 3000; // free plan: bytes synced to the embedded replicas per billing cycle
 
 export default async function Sistema() {
-  const [st, use, tick, health] = await Promise.all([systemStatus(), usage(), lastTick(), latestHealth()]);
+  const [st, use, tick, health, turso] = await Promise.all([systemStatus(), usage(), lastTick(), latestHealth(), tursoUsage()]);
   const worst = health?.checks.some((c) => c.level === "error") ? "error" : health?.checks.some((c) => c.level === "warn") ? "warn" : "ok";
   const W = LEVEL[worst];
   const backfill = st.jobs.filter((j) => j.name.startsWith("backfill:"));
@@ -35,6 +37,17 @@ export default async function Sistema() {
   const rows = datasets.reduce((n, d) => n + d.rows, 0);
   const linked = datasets.reduce((n, d) => n + d.linked, 0);
 
+  // Turso's count (Platform API): shown with or without the morning's size measure
+  const synced = turso ? (
+    <Meter
+      label="Turso · byte sincronizzati nel mese (MB)"
+      used={Math.round(turso.bytesSynced / 1e6)}
+      limit={TURSO_SYNC_MB}
+      hint="Copie locali del database nelle run di GitHub Actions: si azzera a inizio ciclo di fatturazione"
+    />
+  ) : (
+    <p className="note">Byte sincronizzati: servono le variabili TURSO_PLATFORM_TOKEN e TURSO_ORG su Vercel (token API della piattaforma Turso).</p>
+  );
   return (
     <>
       <header className="page-head">
@@ -78,7 +91,7 @@ export default async function Sistema() {
           )}
         </section>
         <section className="card" aria-labelledby="space-title">
-          <div className="card-head"><h2 id="space-title">Spazio del database</h2><span className="count">piano gratuito Turso</span></div>
+          <div className="card-head"><h2 id="space-title">Database</h2></div>
           {health?.dbBytes != null ? (
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <Meter
@@ -87,6 +100,7 @@ export default async function Sistema() {
                 limit={TURSO_FREE_MB}
                 hint={health.weekGrowth ? `Prezzi: circa +${Math.round(health.weekGrowth / 1e6)} MB a settimana` : undefined}
               />
+              {synced}
               <table className="compact">
                 <thead><tr><th>Tabella</th><th className="num">MB</th><th className="num">Quota</th></tr></thead>
                 <tbody>
@@ -102,7 +116,10 @@ export default async function Sistema() {
               <p className="note">Copia compatta di tutto il database ogni lunedì, tenuta 3 settimane tra gli artifact del workflow quality.</p>
             </div>
           ) : (
-            <Empty icon={Database} title="Misura in arrivo">Il giro del mattino misura lo spazio sulla copia locale del database.</Empty>
+            <>
+              <Empty icon={Database} title="Misura in arrivo">Il giro del mattino misura lo spazio sulla copia locale del database.</Empty>
+              <div className="card-pad" style={{ paddingTop: 0 }}>{synced}</div>
+            </>
           )}
         </section>
       </div>

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { CalendarDays, Search } from "lucide-react";
+import { CalendarDays, Filter, Search } from "lucide-react";
 import { latestRun, runFixtures, type FixtureRow } from "@/lib/db";
 import { compShort, dayKey, dayLong, fairOdds, hour, pct } from "@/app/_components/format";
-import { Empty, MatchCell, Split1X2 } from "@/app/_components/ui";
+import { Empty, Fold, MatchCell, Split1X2 } from "@/app/_components/ui";
 import { PickBar } from "@/app/_components/PickBar";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +45,8 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
         </div>
       </header>
 
-      <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Fold title="Filtri" icon={Filter} side={(q || comp) && <span className="count">attivi</span>}>
+      <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <form method="get" role="search" style={{ display: "flex", gap: 8 }}>
           {comp && <input type="hidden" name="comp" value={comp} />}
           <label htmlFor="q" className="sr-only">Cerca squadra o campionato</label>
@@ -64,6 +65,7 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
           ))}
         </nav>
       </div>
+      </Fold>
 
       {rows.length === 0 ? (
         <div className="card">

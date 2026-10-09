@@ -3,7 +3,7 @@ import { Activity, Gauge, LineChart, Scale, Target } from "lucide-react";
 import { latestQuality, type QualityFamily } from "@/lib/db";
 import { ago, pct, shortDate, signed } from "@/app/_components/format";
 import { EdgeShrink } from "@/app/_components/EdgeShrink";
-import { Empty } from "@/app/_components/ui";
+import { Empty, Fold } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Qualità del modello" };
@@ -98,7 +98,8 @@ function Monthly({ rows }: { rows: { month: string; n: number; ll_model: number;
 }
 
 export default async function Qualita({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
-  const { f = "1X2" } = await searchParams;
+  const sp = await searchParams;
+  const { f = "1X2" } = sp;
   const fam = FAMILIES.includes(f) ? f : "1X2";
   const run = await latestQuality();
   if (!run) {
@@ -161,8 +162,7 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
         Differenze di log loss sulle stesse partite: 0 = bravo quanto la quota di chiusura, valori positivi = ancora meno preciso del mercato.
       </p>
 
-      <section className="card">
-        <div className="card-head"><h2>Qualità delle probabilità</h2><span className="count">più basso = meglio</span></div>
+      <Fold title="Qualità delle probabilità" side={<span className="count">più basso = meglio</span>}>
         <div className="table-wrap">
           <table className="compact">
             <thead>
@@ -190,11 +190,10 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
           settimana è adattato solo sulle settimane precedenti, quindi il confronto è onesto. Ultima colonna: partite senza quote di riferimento, dove la
           calibrazione corregge il modello da solo.
         </p>
-      </section>
+      </Fold>
 
       {rep.calib_methods && Object.keys(rep.calib_methods).length > 0 && (
-        <section className="card">
-          <div className="card-head"><h2>Calibrazione senza quote</h2><span className="count">log loss fuori campione · più basso = meglio</span></div>
+        <Fold title="Calibrazione senza quote" side={<span className="count">log loss fuori campione · più basso = meglio</span>}>
           <div className="table-wrap">
             <table className="compact">
               <thead>
@@ -217,12 +216,11 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             Partite senza quota Pinnacle (coppe, Goal/NoGoal, nazionali): il modello va corretto da solo. Ogni settimana i tre metodi sono adattati solo sulle
             settimane precedenti; l&apos;analisi live usa quello che sbaglia meno.
           </p>
-        </section>
+        </Fold>
       )}
 
       {metas.length > 0 && (
-        <section className="card">
-          <div className="card-head"><h2>Meta-modello in uso</h2><span className="count">adattato su tutta la finestra · usato dall&apos;analisi live</span></div>
+        <Fold title="Meta-modello in uso" side={<span className="count">adattato su tutta la finestra · usato dall&apos;analisi live</span>}>
           <div className="table-wrap">
             <table className="compact">
               <thead>
@@ -243,19 +241,17 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             Le probabilità finali sono una media pesata (in scala logaritmica) di modello e prezzo Pinnacle senza margine, più una piccola correzione per esito.
             Pesi che sommano più di 1 rendono le previsioni più decise, meno di 1 più prudenti: è anche la calibrazione. Se un gruppo ha meno di 300 partite usa i pesi di tutti i gruppi.
           </p>
-        </section>
+        </Fold>
       )}
 
       <div className="split">
-        <section className="card">
-          <div className="card-head">
-            <h2>Calibrazione · {fam}</h2>
-            <nav className="chips" aria-label="Mercato">
-              {FAMILIES.map((x) => (
-                <Link key={x} href={x === "1X2" ? "/qualita" : `/qualita?f=${encodeURIComponent(x)}`} aria-current={x === fam ? "true" : undefined}>{x}</Link>
-              ))}
-            </nav>
-          </div>
+        <Fold title={`Calibrazione · ${fam}`} open={Boolean(sp.f)} side={
+              <nav className="chips" aria-label="Mercato">
+                {FAMILIES.map((x) => (
+                  <Link key={x} href={x === "1X2" ? "/qualita" : `/qualita?f=${encodeURIComponent(x)}`} aria-current={x === fam ? "true" : undefined}>{x}</Link>
+                ))}
+              </nav>
+        }>
           <div className="card-pad">
             {rep.calibration[fam] ? <Calibration data={rep.calibration[fam]} title={`Calibrazione ${fam}: probabilità prevista contro frequenza osservata`} /> : <p className="note">Nessun dato.</p>}
             <div className="legend" style={{ marginTop: 8 }}>
@@ -269,9 +265,8 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             </div>
             <p className="note">Punti sopra la diagonale: l&apos;esito accade più spesso di quanto previsto (probabilità sottostimata); sotto: sovrastimata.</p>
           </div>
-        </section>
-        <section className="card">
-          <div className="card-head"><h2>Test del valore</h2><span className="count">1 unità a giocata</span></div>
+        </Fold>
+        <Fold title="Test del valore" side={<span className="count">1 unità a giocata</span>}>
           <div className="table-wrap">
             <table className="compact">
               <thead>
@@ -296,12 +291,11 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             Sisal quando l&apos;abbiamo, altrimenti la media del mercato. Il CLV (quota presa contro chiusura) misura il valore vero; il ROI su pochi casi è soprattutto fortuna.
           </p>
           {es && es.n > 0 && <EdgeShrink es={es} />}
-        </section>
+        </Fold>
       </div>
 
       {rep.monthly.length > 1 && (
-        <section className="card">
-          <div className="card-head"><h2>Mese per mese · campionati 1X2</h2></div>
+        <Fold title="Mese per mese · campionati 1X2">
           <div className="card-pad">
             <Monthly rows={rep.monthly} />
             <div className="legend" style={{ marginTop: 8 }}>
@@ -309,7 +303,7 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
               <span><svg width="12" height="12" aria-hidden="true"><Marker shape="triangle" x={6} y={6} color="var(--s2)" /></svg>Quota di chiusura (tratteggio)</span>
             </div>
           </div>
-        </section>
+        </Fold>
       )}
     </>
   );

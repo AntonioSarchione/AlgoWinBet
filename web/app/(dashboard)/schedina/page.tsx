@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
-import { ArrowLeft, CircleSlash, Gauge, ListChecks, Percent, Sigma, Target } from "lucide-react";
+import { ArrowLeft, CircleSlash, Filter, Gauge, ListChecks, ListOrdered, Percent, Shapes, ShieldAlert, Sigma, Target, Unlock } from "lucide-react";
 import { absencesFor, DEPLOY, fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type Absence, type BookSel, type OppRow } from "@/lib/db";
 import { legMinOdds, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_LABEL, profileHint, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
-import { Empty, MatchCell } from "@/app/_components/ui";
+import { Empty, Fold, MatchCell } from "@/app/_components/ui";
+import { FreeCard } from "@/app/_components/FreeSlipCard";
+import { freeSlip, type FreeOpt } from "@/lib/freeslip";
+import { LEG_PROB, legCount, RISK } from "@/lib/slipfilters";
+import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { MAX_PICK } from "@/lib/pick";
 import { MyCombo } from "@/app/_components/MyCombo";
 import { isEstimated } from "@/lib/books";
@@ -18,13 +22,14 @@ const EV_MIN = [
   { v: "", l: "Nessun limite" }, { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" },
   { v: "0", l: "Almeno 0% (pari)" }, { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
 ];
-// the slips never take a selection under the published floor (40%, user's rule): "" = that floor
-const LEG_PROB = [{ v: "", l: "Regola (almeno 40%)" }, ...[45, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 
 const ALL_STATUSES = ["STRONG", "CANDIDATE", "FAIR", "WATCH", "NEUTRAL", "AVOID"];
 const PER_FIXTURE = 6; // kept per match and per criterion (value score, probability, EV) before the search
 
-type Limits = { evMin: number; legProb: number; qMin: number; qMax: number; lMin: number; lMax: number };
+type Limits = {
+  evMin: number; legProb: number; qMin: number; qMax: number; lMin: number; lMax: number; nMin: number; nMax: number; riskMin: number;
+  markets: string[];
+};
 
 // The candidates of the chosen matches: every playable Sisal selection (pub_book, any status) where the run has it, else
 // the published opportunities. Per match the best few by value score, by probability and by EV, so every profile finds
@@ -48,8 +53,10 @@ async function candidates(runId: number, ids: string[], now: string, k: Limits):
   const inBook = new Set(book.map((b) => b.fixture_id));
   const rest = ids.filter((id) => !inBook.has(id));
   if (rest.length) rows.push(...(await fixtureCandidates(runId, rest)));
+  const picked = new Set(k.markets);
   const legs = toLegs(rows).filter(
-    (o) => o.kickoff > now && o.p_final >= k.legProb && (!k.lMin || o.odds >= k.lMin) && (!k.lMax || o.odds <= k.lMax),
+    (o) => o.kickoff > now && o.p_final >= k.legProb && (!k.lMin || o.odds >= k.lMin) && (!k.lMax || o.odds <= k.lMax)
+      && (!picked.size || picked.has(marketGroup(o.sel_key))),
   );
   const out: Cand[] = [];
   for (const id of ids) {
@@ -63,14 +70,15 @@ async function candidates(runId: number, ids: string[], now: string, k: Limits):
   return out;
 }
 
-// Every chosen match enters the slip with exactly one selection; the only limits are the ones chosen on this page.
+// One selection per chosen match; by default every chosen match enters the slip. The only limits are the ones chosen on this page.
 const manualSlips = unstable_cache(
   async (runId: number, ids: string[], settings: OptSettings, k: Limits, now: string) => {
     const legs = await candidates(runId, ids, now, k);
     const n = new Set(legs.map((l) => l.fixture_id)).size;
     if (!n) return { n, results: null };
     const results = runProfiles(legs, settings, {
-      min_legs: n, max_legs: n, max_legs_per_competition: n, odds_min: k.qMin || 1, odds_max: k.qMax || 1e9, min_probability: 0,
+      min_legs: Math.min(k.nMin, n), max_legs: Math.min(k.nMax, n), max_legs_per_competition: n, odds_min: k.qMin || 1, odds_max: k.qMax || 1e9,
+      min_probability: k.riskMin,
       min_leg_probability: Math.max(k.legProb, settings.optimizer.min_leg_probability ?? 0), min_slip_ev: k.evMin, statuses: ALL_STATUSES,
       candidates_per_fixture: 3 * PER_FIXTURE, max_candidates: 3 * PER_FIXTURE * MAX_PICK,
     });
@@ -80,7 +88,26 @@ const manualSlips = unstable_cache(
   { revalidate: 6 * 3600 },
 );
 
-type SP = { fx?: string | string[]; p?: string; ev?: string; pmin?: string; min?: string; max?: string; lmin?: string; lmax?: string; combo?: string };
+type SP = {
+  fx?: string | string[]; p?: string; ev?: string; pmin?: string; min?: string; max?: string; lmin?: string; lmax?: string; combo?: string;
+  n?: string; nmin?: string; risk?: string; mk?: string | string[]; free?: string;
+};
+const KEPT = ["ev", "pmin", "min", "max", "lmin", "lmax", "n", "nmin", "risk", "free"] as const; // carried by the profile links
+
+// "Senza regole": every playable Sisal selection of the chosen matches
+async function freeOptions(runId: number, ids: string[]): Promise<FreeOpt[]> {
+  const [fixtures, book] = await Promise.all([runFixtures(runId), fixtureBook(runId, ids)]);
+  const now = Date.now();
+  const fx = new Map(fixtures.filter((f) => new Date(f.kickoff).getTime() > now).map((f) => [f.fixture_id, f]));
+  return book.flatMap((b) => {
+    const f = fx.get(b.fixture_id);
+    if (!f) return [];
+    return parseJSON<BookSel[]>(b.sels, []).map((x) => ({
+      fixture_id: f.fixture_id, competition: f.competition, kickoff: f.kickoff, match: `${f.home} - ${f.away}`, market: x.m, odds: x.o, p: x.p,
+      p_market: x.pm, bookmaker: x.b,
+    }));
+  });
+}
 
 export default async function Schedina({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -101,7 +128,20 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
   const evMin = EV_MIN.some((x) => x.v === sp.ev) && sp.ev ? Number(sp.ev) / 100 : -1; // -100% = no limit
   const legProb = LEG_PROB.some((x) => x.v === sp.pmin) ? Number(sp.pmin || 0) / 100 : 0;
   const num = (x?: string) => (Number(x) > 1 ? Number(x) : 0);
-  const limits: Limits = { evMin, legProb, qMin: num(sp.min), qMax: num(sp.max), lMin: num(sp.lmin), lMax: num(sp.lmax) };
+  // number of legs: by default every chosen match
+  const nMax = legCount(sp.n, ids.length);
+  const nMin = Math.min(legCount(sp.nmin, ids.length), nMax);
+  const riskMin = RISK.some((x) => x.v === sp.risk) ? Number(sp.risk || 0) / 100 : 0;
+  const pickedMk = [...new Set([sp.mk ?? []].flat().filter((m) => (MARKET_GROUPS as readonly string[]).includes(m)))].sort();
+  const allMk = !pickedMk.length || pickedMk.length === MARKET_GROUPS.length;
+  const free = sp.free === "1";
+  const limits: Limits = {
+    evMin, legProb, qMin: num(sp.min), qMax: num(sp.max), lMin: num(sp.lmin), lMax: num(sp.lmax), nMin, nMax, riskMin, markets: allMk ? [] : pickedMk,
+  };
+  const filtered = Boolean(sp.ev || sp.pmin || sp.min || sp.max || sp.lmin || sp.lmax || sp.n || sp.nmin || sp.risk || !allMk || free);
+  const freeRes = free
+    ? freeSlip(await freeOptions(run.id, ids), { qMin: limits.qMin, qMax: limits.qMax, lMin: limits.lMin, lMax: limits.lMax, nMin, nMax })
+    : null;
   const nowIso = new Date().toISOString().slice(0, 16); // minute precision: equal choices share the cache
   const [fixtures, computed] = await Promise.all([
     runFixtures(run.id),
@@ -113,12 +153,13 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
   const profile = sp.p && results[sp.p] ? sp.p : names[0];
   const result = profile ? results[profile] : null;
   const best = result?.slips[0];
-  const inSlip = new Set(best?.legs.map((l) => l.fixture_id) ?? []);
+  const inSlip = new Set((freeRes ? freeRes.slip?.legs : best?.legs)?.map((l) => l.fixture_id) ?? []);
   const left = ids.filter((id) => !inSlip.has(id));
   const absent = best ? await absencesFor(best.legs.map((l) => l.fixture_id)).catch(() => ({}) as Record<string, Absence[]>) : {};
   const href = (p: string) => {
     const q = new URLSearchParams(ids.map((id) => ["fx", id]));
-    for (const key of ["ev", "pmin", "min", "max", "lmin", "lmax"] as const) if (sp[key]) q.set(key, sp[key]!);
+    for (const key of KEPT) if (sp[key]) q.set(key, sp[key]!);
+    for (const m of pickedMk) q.append("mk", m);
     q.set("p", p);
     return `/schedina?${q}`;
   };
@@ -136,7 +177,8 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
         <Link href={back} className="btn"><ArrowLeft size={17} aria-hidden="true" /> Modifica la scelta</Link>
       </header>
 
-      <form key={JSON.stringify(sp)} className="card filters" method="get" aria-label="Limiti della schedina manuale">
+      <Fold title="Filtri" icon={Filter} side={filtered && <span className="count">attivi</span>}>
+      <form key={JSON.stringify(sp)} className="filters" method="get" aria-label="Limiti della schedina manuale">
         {ids.map((id) => <input key={id} type="hidden" name="fx" value={id} />)}
         {sp.p && <input type="hidden" name="p" value={sp.p} />}
         <div className="field">
@@ -158,15 +200,15 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
           </div>
         </div>
         <div className="field">
-          <label htmlFor="ev">EV minimo della schedina</label>
+          <label htmlFor="nmin">Numero di eventi (min – max)</label>
           <div className="control">
-            <Sigma size={17} aria-hidden="true" />
-            <select id="ev" name="ev" defaultValue={sp.ev ?? ""}>
-              {EV_MIN.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
-            </select>
+            <ListOrdered size={17} aria-hidden="true" />
+            <input id="nmin" name="nmin" type="number" inputMode="numeric" step="1" min="1" max={ids.length} placeholder={String(ids.length)} defaultValue={sp.nmin} aria-label="Numero minimo di eventi" />
+            <span className="dash">–</span>
+            <input name="n" type="number" inputMode="numeric" step="1" min="1" max={ids.length} placeholder={String(ids.length)} defaultValue={sp.n} aria-label="Numero massimo di eventi" />
           </div>
         </div>
-        <div className="field">
+        <div className="field rule-field">
           <label htmlFor="pmin">Probabilità minima per evento</label>
           <div className="control">
             <Percent size={17} aria-hidden="true" />
@@ -175,11 +217,56 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
             </select>
           </div>
         </div>
-        <div className="field" style={{ alignSelf: "end" }}>
-          <button type="submit" className="btn btn-primary">Applica</button>
+        <div className="field rule-field">
+          <label htmlFor="ev">EV minimo della schedina</label>
+          <div className="control">
+            <Sigma size={17} aria-hidden="true" />
+            <select id="ev" name="ev" defaultValue={sp.ev ?? ""}>
+              {EV_MIN.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field rule-field">
+          <label htmlFor="risk">Rischio massimo</label>
+          <div className="control">
+            <ShieldAlert size={17} aria-hidden="true" />
+            <select id="risk" name="risk" defaultValue={sp.risk ?? ""}>
+              {RISK.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field rule-field">
+          <span className="field-label" id="mk-label">Mercati</span>
+          <details className="multi">
+            <summary className="control" aria-labelledby="mk-label">
+              <Shapes size={17} aria-hidden="true" />
+              <span className="multi-value">{allMk ? "Tutti i mercati" : pickedMk.length === 1 ? pickedMk[0] : `${pickedMk.length} mercati`}</span>
+            </summary>
+            <fieldset className="multi-panel" aria-labelledby="mk-label">
+              {MARKET_GROUPS.map((m) => (
+                <label key={m} className="check">
+                  <input type="checkbox" name="mk" value={m} defaultChecked={allMk || pickedMk.includes(m)} />
+                  {m}
+                </label>
+              ))}
+              <button type="submit" className="btn btn-primary btn-sm" style={{ marginTop: 6 }}>
+                <Filter size={15} aria-hidden="true" /> Applica
+              </button>
+            </fieldset>
+          </details>
+        </div>
+        <label className="check free-check" title="Spegne le regole del modello: restano quota schedina, quota evento e numero di eventi">
+          <input type="checkbox" id="free" name="free" value="1" defaultChecked={free} />
+          <Unlock size={15} aria-hidden="true" /> Senza regole
+        </label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {filtered && <Link href={`/schedina?${new URLSearchParams(ids.map((id) => ["fx", id]))}`} className="btn btn-ghost">Azzera</Link>}
+          <button type="submit" className="btn btn-primary"><Filter size={17} aria-hidden="true" /> Applica</button>
         </div>
       </form>
+      </Fold>
 
+      {freeRes ? <FreeCard r={freeRes} scope="tra le partite scelte" /> : (<>
       {names.length > 1 && (
         <nav className="profiles" aria-label="Profili di schedina">
           {names.map((name) => {
@@ -274,10 +361,11 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
         ) : (
           <Empty icon={CircleSlash} title="Nessuna schedina">
             {(result?.reasons ?? []).join(" ") ||
-              (settings ? "Nessuna delle partite scelte ha giocate pubblicate." : "Analisi pubblicata con una versione precedente: riprova dopo la prossima pubblicazione.")}
+              (settings ? (allMk ? "Nessuna delle partite scelte ha giocate pubblicate." : "Nessuna quota Sisal delle partite scelte nei mercati scelti.") : "Analisi pubblicata con una versione precedente: riprova dopo la prossima pubblicazione.")}
           </Empty>
         )}
       </section>
+      </>)}
 
       {left.length > 0 && (
         <section className="card" aria-labelledby="left-title">
@@ -294,7 +382,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
                       ? "non è nell'ultima analisi pubblicata (già iniziata o fuori dai 7 giorni)."
                       : new Date(f.kickoff).getTime() <= Date.now()
                         ? "già iniziata."
-                        : "nessuna quota Sisal dentro i limiti scelti (quota del singolo evento, probabilità minima) o nessuna quota Sisal per questa partita."}
+                        : "fuori dalla schedina migliore con i filtri scelti (quota, probabilità, numero di eventi, mercati) o nessuna quota Sisal per questa partita."}
                   </span>
                 </li>
               );

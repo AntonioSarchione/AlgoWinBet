@@ -3,7 +3,7 @@ import { Filter, Percent, Target } from "lucide-react";
 import { latestRun, oppSummary, runCompetitions } from "@/lib/db";
 import { dayTime } from "@/app/_components/format";
 import { OppTable } from "@/app/_components/OppTable";
-import { Empty } from "@/app/_components/ui";
+import { Empty, Fold } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Opportunità" };
@@ -51,7 +51,8 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
           </p>
         </div>
       </header>
-      <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Fold title="Filtri" icon={Filter} side={(s || comp || lmin || lmax) && <span className="count">attivi</span>}>
+      <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <form key={`${s}|${comp}|${lmin}|${lmax}`} method="get" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }} aria-label="Filtra per quota">
           {s && <input type="hidden" name="s" value={s} />}
           {comp && <input type="hidden" name="comp" value={comp} />}
@@ -80,6 +81,7 @@ export default async function Opportunita({ searchParams }: { searchParams: Prom
           </nav>
         )}
       </div>
+      </Fold>
       <section className="card">
         {rows.length ? (
           <>

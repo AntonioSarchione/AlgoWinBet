@@ -12,8 +12,9 @@ import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, Fold, MatchCell, MiniRing, PBar, ProbGauge } from "@/app/_components/ui";
 import { QuickSearch } from "@/app/_components/QuickSearch";
-import { FREE_MAX_LEGS, freeSlip, type FreeOpt, type FreeResult } from "@/lib/freeslip";
-import { isEstimated } from "@/lib/books";
+import { FREE_MAX_LEGS, freeSlip, type FreeOpt } from "@/lib/freeslip";
+import { legCount, LEG_PROB, RISK } from "@/lib/slipfilters";
+import { FreeCard } from "@/app/_components/FreeSlipCard";
 import { LegAbsences } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
@@ -27,19 +28,9 @@ const PERIODS = [
   { v: "168", l: "Prossimi 7 giorni" },
 ];
 
-// the slips never take a selection under the published floor (40%, user's rule): "" = that floor
-const LEG_PROB = [{ v: "", l: "Regola (almeno 40%)" }, ...[45, 50, 60, 70, 80].map((k) => ({ v: String(k), l: `Almeno ${k}%` }))];
 const EV_MIN = [
   { v: "10", l: "Almeno +10%" }, { v: "5", l: "Almeno +5%" }, { v: "2", l: "Almeno +2%" }, { v: "0", l: "Almeno 0% (pari)" },
   { v: "-2", l: "Almeno −2%" }, { v: "-5", l: "Almeno −5%" }, { v: "-10", l: "Almeno −10%" },
-];
-// "maximum risk" = the lowest chance of winning the slip that is still accepted
-const RISK = [
-  { v: "", l: "Nessun limite" },
-  { v: "50", l: "Basso · vince ≥ 50%" },
-  { v: "30", l: "Medio · vince ≥ 30%" },
-  { v: "15", l: "Alto · vince ≥ 15%" },
-  { v: "5", l: "Molto alto · vince ≥ 5%" },
 ];
 // one icon per slip profile (cards above the slip)
 const PROFILE_ICON: Record<string, LucideIcon> = { probabilita: ShieldCheck, equilibrata: Scale, value: Gem };
@@ -66,11 +57,6 @@ type SP = {
   p?: string; pmin?: string; ev?: string; risk?: string; mk?: string | string[]; free?: string;
 };
 
-// number of legs from the URL: 1 to 20, else the default
-const legCount = (v: string | undefined, d: number) => {
-  const n = Math.round(Number(v));
-  return Number.isFinite(n) && n >= 1 ? Math.min(n, FREE_MAX_LEGS) : d;
-};
 
 // "Senza regole": every playable Sisal selection (pub_book) of the matches in the period
 async function freeOptions(runId: number, fixtures: FixtureRow[]): Promise<FreeOpt[]> {
@@ -312,7 +298,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
 
       <div className="layout">
         <div className="col">
-          {freeRes ? <FreeCard r={freeRes} /> : (<>
+          {freeRes ? <FreeCard r={freeRes} scope="periodo scelto" /> : (<>
           {/* ---------------- hero ---------------- */}
           <section className="card hero" aria-labelledby="hero-title">
             <div className="hero-copy">
@@ -545,65 +531,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   );
 }
 
-// "Senza regole": the slip of lib/freeslip.ts, shown instead of the profiles (never recorded: it skips the model's rules)
-function FreeCard({ r }: { r: FreeResult }) {
-  const s = r.slip;
-  return (
-    <section className="card ticket" aria-labelledby="free-title">
-      <div className="card-head">
-        <h2 id="free-title">
-          <Unlock size={17} aria-hidden="true" /> Schedina senza regole {s && <span className="count">{s.legs.length} {s.legs.length === 1 ? "evento" : "eventi"}</span>}
-        </h2>
-        {s && <span className="muted">Quota totale <b className="num pos">{s.odds.toFixed(2)}</b></span>}
-      </div>
-      {s ? (
-        <>
-          <div className="table-wrap">
-            <table className="compact">
-              <thead>
-                <tr><th>#</th><th>Evento / Mercato</th><th className="num">Quota</th><th className="num">Probabilità</th><th className="num">EV</th></tr>
-              </thead>
-              <tbody>
-                {s.legs.map((l, i) => {
-                  const [home, away] = l.match.split(" - ");
-                  const ev = l.p * l.odds - 1;
-                  return (
-                    <tr key={l.fixture_id}>
-                      <td className="muted num">{i + 1}</td>
-                      <td className="wrap">
-                        <MatchCell home={home} away={away ?? ""} sub={<>{l.market} · {compShort(l.competition)} · {hour(l.kickoff)}</>} href={`/partita/${encodeURIComponent(l.fixture_id)}`} />
-                      </td>
-                      <td className="num">
-                        <span className="odds-chip">{l.odds.toFixed(2)}</span>
-                        {isEstimated(l.bookmaker) && <span className="sub">Sisal stimata</span>}
-                      </td>
-                      <td className="num">{pct(l.p, 1)}<PBar p={l.p} mark={l.p_market} /></td>
-                      <td className="num"><span className={`ev-chip ${ev >= 0 ? "pos" : "neg"}`}>{signed(ev)}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="ticket-foot">
-            <Mini icon={Gauge} label="Quota totale" value={s.odds.toFixed(2)} />
-            <Mini icon={Percent} label="Probabilità complessiva" value={pct(s.p, 1)} />
-            <Mini icon={TrendingUp} label="EV stimato" value={signed(s.ev)} tone={s.ev >= 0 ? "pos" : "neg"} />
-            <Mini icon={Ticket} label="Eventi" value={String(s.legs.length)} />
-          </div>
-        </>
-      ) : (
-        <Empty icon={CircleSlash} title="Nessuna schedina">{r.reason}</Empty>
-      )}
-      <p className="note card-pad">
-        Senza regole: niente stato, valore atteso, soglia del 40%, rischio, mercati e campionati. Restano quota evento di almeno 1.25 e mai
-        nazionali con club. Per ogni partita conta la probabilità, con un piccolo peso alla quota; tra le combinazioni che rispettano quota
-        totale, quota per evento, periodo e numero di eventi esce la più probabile. Selezioni Sisal nel range: {r.options.toLocaleString("it-IT")} su{" "}
-        {r.matches} partite. Non entra nel registro. Solo paper trading.
-      </p>
-    </section>
-  );
-}
 
 // one step of the analysis funnel: matches -> markets -> candidates -> eligible -> combinations -> slips
 function Step({ icon: Icon, label, value, last, children }: { icon: LucideIcon; label: string; value: number; last?: boolean; children?: React.ReactNode }) {
