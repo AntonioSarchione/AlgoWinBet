@@ -1663,6 +1663,19 @@ def cmd_slip_review(a) -> None:
         print("selezioni delle schedine per tipo: n, prob. finale media, Pinnacle media, quota media, chiuse, vinte")
         for k, (n, sp, spm, nm, ns, nw, so) in sorted(fam.items(), key=lambda x: -x[1][0]):
             print(f"  {k:<14}{n:>5}  {sp / n:6.1%}  {(spm / nm) if nm else float('nan'):6.1%}  {so / n:5.2f}  {ns:>4}  {nw / ns if ns else float('nan'):6.1%}")
+        # overlap of the recorded slips: how many would be placed if a slip sharing a selection with a still open one were skipped
+        rows = store.db.execute("SELECT id, created_at, last_kickoff, legs, result FROM paper_slips ORDER BY created_at, id").fetchall()
+        kept, uses = [], _dd(int)
+        for sid, cat, lko, lg, res in rows:
+            keys = {f"{x['fixture_id']}|{x['sel_key']}" for x in json.loads(lg or "[]")}
+            for k in keys:
+                uses[k] += 1
+            if not any(k & keys and cat < l2 for k, l2, _ in kept):
+                kept.append((keys, lko, res))
+        sett = [r for r in rows if r[4] in ("won", "lost")]
+        print(f"sovrapposizione: {len(rows)} schedine registrate, {len(uses)} selezioni diverse, ogni selezione in {sum(uses.values()) / max(len(uses), 1):.1f} "
+              f"schedine in media (al massimo {max(uses.values(), default=0)}); senza sovrapposizioni con una schedina ancora aperta se ne "
+              f"punterebbero {len(kept)}, di cui chiuse {sum(r in ('won', 'lost') for _, _, r in kept)} su {len(sett)} chiuse")
         slips = store.db.execute("SELECT id, legs, joint, total_odds, result, profile FROM paper_slips WHERE result IN ('won', 'lost')").fetchall()
         if not slips:
             print("nessuna schedina chiusa")
