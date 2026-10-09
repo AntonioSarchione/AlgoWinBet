@@ -116,9 +116,9 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
               {priced ? "Probabilità 1X2 (modello + quote Sisal)" : "Probabilità 1X2 (solo modello: nessuna quota Sisal recente)"}
             </h4>
             <div className="rings">
-              <Ring value={h.value} label={f.home} sub={h.sub} color="var(--s1)" top={<TeamBadge name={f.home} size="lg" />} />
-              <Ring value={d.value} label="Pareggio" sub={d.sub} color="var(--s2)" top={<span className="ring-x" aria-hidden="true">X</span>} />
-              <Ring value={a.value} label={f.away} sub={a.sub} color="var(--s3)" top={<TeamBadge name={f.away} size="lg" />} />
+              <Ring value={h.value} label={f.home} sub={h.sub} top={<TeamBadge name={f.home} size="lg" />} />
+              <Ring value={d.value} label="Pareggio" sub={d.sub} top={<span className="ring-x" aria-hidden="true">X</span>} />
+              <Ring value={a.value} label={f.away} sub={a.sub} top={<TeamBadge name={f.away} size="lg" />} />
             </div>
             {apart && (
               <p className="note warn-note">

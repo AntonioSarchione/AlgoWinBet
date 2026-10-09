@@ -2,7 +2,7 @@
 // how often a streak this long happens with the average rates of the competition. The model's probability for the next match
 // stands next to it: a streak alone does not make the event more likely.
 import { Flame, Hourglass, Repeat, Sparkles, Swords, Target, ShieldAlert, type LucideIcon } from "lucide-react";
-import { Empty, TeamBadge } from "@/app/_components/ui";
+import { Empty, probColor, TeamBadge } from "@/app/_components/ui";
 
 export type Trend = { t: string; r: number; m: number | null; k: "serie" | "digiuno" | "frequenza"; x: string | null };
 export type TrendsData = { home: Trend[]; away: Trend[]; h2h: Trend[]; n_h2h: number; scorers: Trend[]; discipline: Trend[] };
@@ -33,7 +33,7 @@ function Row({ s }: { s: Trend }) {
         <span className={`tr-rare ${tier(s.r)}`}>1 su {s.r.toLocaleString("it-IT")}</span>
         {s.m != null && (
           <span className="tr-model" title="probabilità del modello per la prossima partita">
-            <span className="tr-dial" style={{ "--p": s.m } as React.CSSProperties}><b className="num">{Math.round(s.m * 100)}%</b></span>
+            <span className="tr-dial" style={{ "--p": s.m, "--pc": probColor(s.m) } as React.CSSProperties}><b className="num">{Math.round(s.m * 100)}%</b></span>
             <small>{K.next}</small>
           </span>
         )}

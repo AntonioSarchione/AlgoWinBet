@@ -27,6 +27,8 @@
   --s4: #a77be8;
   --seq: #3987e5;
   --track: #1a2830;
+  /* probability bands (rings and bars): 0-20 red, 20-40 orange, 40-60 yellow, 60-80 light green, 80-100 vivid green */
+  --pr-0: #f06a6a; --pr-1: #f5923e; --pr-2: #f2c94c; --pr-3: #9ad66b; --pr-4: #22d67f;
   --focus: #7dd3fc;
   --radius: 14px;
   --radius-sm: 9px;
@@ -66,6 +68,7 @@
   --s4: #7f4fd0;
   --seq: #2a78d6;
   --track: #e3eaee;
+  --pr-0: #d33a3a; --pr-1: #e0731d; --pr-2: #c79a00; --pr-3: #5fa83a; --pr-4: #0e8f45;
   --focus: #0369a1;
   --shadow: 0 1px 2px rgba(11, 26, 33, 0.06), 0 10px 24px -18px rgba(11, 26, 33, 0.25);
 }
@@ -730,7 +733,7 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .hero-fig b { display: block; font-family: var(--font-display); font-size: 30px; line-height: 1.1; margin: 2px 0 6px; }
 .gauge { position: relative; width: 168px; flex: none; }
 .gauge svg { display: block; width: 100%; height: auto; }
-.gauge-value { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 55%, transparent)); animation: gauge-in 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.gauge-value { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--pc, var(--accent)) 55%, transparent)); animation: gauge-in 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 @keyframes gauge-in { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
 .gauge-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-top: 4px; }
 .gauge-text b { font-family: var(--font-display); font-size: 32px; line-height: 1; }
@@ -781,7 +784,7 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .ev-chip.pos { background: var(--good-soft); color: var(--good); }
 .ev-chip.neg { background: var(--bad-soft); color: var(--bad); }
 .pbar { position: relative; display: block; width: 72px; height: 5px; margin: 5px 0 2px auto; border-radius: 999px; background: var(--track); }
-.pbar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 50%, transparent), var(--accent)); }
+.pbar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, color-mix(in srgb, var(--pc, var(--accent)) 50%, transparent), var(--pc, var(--accent))); }
 .pbar-mark { position: absolute; top: -3px; width: 2px; height: 11px; margin-left: -1px; border-radius: 1px; background: var(--text); box-shadow: 0 0 0 1px var(--card); }
 
 /* match page, Quote tab: the picker (period, market, selection, line) and the latest price per bookmaker */
@@ -901,7 +904,7 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .tr-model { width: 64px; flex: none; display: grid; justify-items: center; gap: 3px; }
 .tr-model small { font-size: 10.5px; line-height: 1.15; color: var(--muted); text-align: center; }
 .tr-dial { --p: 0; width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-content: center;
-  background: radial-gradient(closest-side, var(--card-2) 76%, transparent 78% 100%), conic-gradient(var(--kind) calc(var(--p) * 1turn), var(--track) 0); }
+  background: radial-gradient(closest-side, var(--card-2) 76%, transparent 78% 100%), conic-gradient(var(--pc, var(--kind)) calc(var(--p) * 1turn), var(--track) 0); }
 .tr-dial b { font-size: 12.5px; line-height: 1; }
 .tr-nomodel .tr-dial b { color: var(--muted); }
 .tr-empty { padding: 14px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }

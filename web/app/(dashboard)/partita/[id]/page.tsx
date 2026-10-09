@@ -6,7 +6,7 @@ import { matchSisal, playerPool } from "@/lib/playermarkets";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
-import { Empty, HBar, PBar, Ring, TeamBadge } from "@/app/_components/ui";
+import { Empty, HBar, PBar, probColor, Ring, TeamBadge } from "@/app/_components/ui";
 import { ChipRow } from "@/app/_components/ChipRow";
 import { Lineups, type ProbableData } from "@/app/_components/Lineups";
 import { Scorers, type ScorersData } from "@/app/_components/Scorers";
@@ -142,9 +142,9 @@ function Probabilities({ fx, mk, opps }: { fx: { home: string; away: string; p_h
         <div>
           <h2 className="section">Probabilità 1X2</h2>
           <div className="rings" style={{ marginTop: 12 }}>
-            <Ring value={fx.p_home} label={fx.home} sub={`quota equa ${fairOdds(fx.p_home)}`} color="var(--s1)" />
-            <Ring value={fx.p_draw} label="Pareggio" sub={`quota equa ${fairOdds(fx.p_draw)}`} color="var(--s2)" />
-            <Ring value={fx.p_away} label={fx.away} sub={`quota equa ${fairOdds(fx.p_away)}`} color="var(--s3)" />
+            <Ring value={fx.p_home} label={fx.home} sub={`quota equa ${fairOdds(fx.p_home)}`} />
+            <Ring value={fx.p_draw} label="Pareggio" sub={`quota equa ${fairOdds(fx.p_draw)}`} />
+            <Ring value={fx.p_away} label={fx.away} sub={`quota equa ${fairOdds(fx.p_away)}`} />
           </div>
         </div>
         <div>
@@ -263,7 +263,7 @@ function Markets({ mk, opps }: { mk: ModelMarket[]; opps: OppRow[] }) {
                     {rows.map((m) => (
                       <li key={m.l} className={m.p === top ? "top" : undefined}>
                         <span className="mkt-sel" title={m.l}>{m.l}</span>
-                        <span className="mkt-bar"><i style={{ width: `${Math.min(m.p, 1) * 100}%` }} /></span>
+                        <span className="mkt-bar"><i style={{ width: `${Math.min(m.p, 1) * 100}%`, background: probColor(m.p) }} /></span>
                         <b className="num">{pct(m.p, 1)}</b>
                         <span className="num muted">{fairOdds(m.p)}</span>
                       </li>

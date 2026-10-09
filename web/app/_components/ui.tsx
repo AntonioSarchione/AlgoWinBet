@@ -72,7 +72,10 @@ export function Split1X2({ h, d, a }: { h: number | null; d: number | null; a: n
   );
 }
 
-export function Ring({ value, label, sub, color, top }: { value: number | null; label: string; sub?: string; color: string; top?: React.ReactNode }) {
+// Colour of a probability on rings and bars: the band (globals.css --pr-0..4), never the only cue (the figure is printed).
+export const probColor = (p: number) => `var(--pr-${p < 0.2 ? 0 : p < 0.4 ? 1 : p < 0.6 ? 2 : p < 0.8 ? 3 : 4})`;
+
+export function Ring({ value, label, sub, top }: { value: number | null; label: string; sub?: string; top?: React.ReactNode }) {
   const r = 42;
   const c = 2 * Math.PI * r;
   const v = value ?? 0;
@@ -82,7 +85,7 @@ export function Ring({ value, label, sub, color, top }: { value: number | null; 
       <svg viewBox="0 0 100 100" role="img" aria-label={`${label}: ${pct(value, 1)}`}>
         <circle cx="50" cy="50" r={r} fill="none" stroke="var(--track)" strokeWidth="9" />
         <circle
-          cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="9" strokeLinecap="round"
+          cx="50" cy="50" r={r} fill="none" stroke={probColor(v)} strokeWidth="9" strokeLinecap="round"
           strokeDasharray={`${Math.max(v * c - 2, 0)} ${c}`} transform="rotate(-90 50 50)"
         />
         <text x="50" y="55" textAnchor="middle" fontSize="17" fontWeight="700" fill="var(--text)" style={{ fontFamily: "var(--font-mono)" }}>
@@ -119,7 +122,7 @@ export function HBar({ label, p, max = 1 }: { label: string; p: number; max?: nu
     <div className="hbar">
       <span className="text-2">{label}</span>
       <span className="bar">
-        <span style={{ width: `${Math.min(p / max, 1) * 100}%` }} />
+        <span style={{ width: `${Math.min(p / max, 1) * 100}%`, background: probColor(p) }} />
       </span>
       <span className="num">{pct(p, 1)}</span>
     </div>
@@ -137,8 +140,8 @@ export function ProbGauge({ value, label, sub }: { value: number; label: string;
       <svg viewBox="0 0 120 120" aria-hidden="true">
         <circle cx="60" cy="60" r={r} fill="none" stroke="var(--track)" strokeWidth="10" strokeLinecap="round"
           strokeDasharray={`${arc} ${c}`} transform="rotate(135 60 60)" />
-        <circle className="gauge-value" cx="60" cy="60" r={r} fill="none" stroke="var(--accent)" strokeWidth="10" strokeLinecap="round"
-          strokeDasharray={`${Math.max(v * arc, 0.01)} ${c}`} transform="rotate(135 60 60)" style={{ "--len": v * arc } as React.CSSProperties} />
+        <circle className="gauge-value" cx="60" cy="60" r={r} fill="none" stroke={probColor(v)} strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${Math.max(v * arc, 0.01)} ${c}`} transform="rotate(135 60 60)" style={{ "--len": v * arc, "--pc": probColor(v) } as React.CSSProperties} />
       </svg>
       <span className="gauge-text">
         <b className="num">{pct(value, 1)}</b>
@@ -156,7 +159,7 @@ export function MiniRing({ value, label }: { value: number; label: string }) {
   return (
     <svg className="mini-ring" viewBox="0 0 100 100" role="img" aria-label={`${label}: ${pct(value, 1)}`}>
       <circle cx="50" cy="50" r={r} fill="none" stroke="var(--track)" strokeWidth="11" />
-      <circle cx="50" cy="50" r={r} fill="none" stroke="var(--accent)" strokeWidth="11" strokeLinecap="round"
+      <circle cx="50" cy="50" r={r} fill="none" stroke={probColor(value)} strokeWidth="11" strokeLinecap="round"
         strokeDasharray={`${Math.max(value * c - 2, 0)} ${c}`} transform="rotate(-90 50 50)" />
       <text x="50" y="59" textAnchor="middle" fontSize="27" fontWeight="700" fill="var(--text)" style={{ fontFamily: "var(--font-mono)" }}>
         {pct(value, 0)}
@@ -171,7 +174,7 @@ export function PBar({ p, mark }: { p: number; mark?: number | null }) {
   const title = `Modello ${pct(p, 1)}${mark != null ? ` · tacca: mercato ${pct(mark, 1)}` : ""}`;
   return (
     <span className="pbar" title={title} aria-hidden="true">
-      <i className="pbar-fill" style={{ width: `${Math.min(p, 1) * 100}%` }} />
+      <i className="pbar-fill" style={{ width: `${Math.min(p, 1) * 100}%`, "--pc": probColor(p) } as React.CSSProperties} />
       {mark != null && <i className="pbar-mark" style={{ left: `${Math.min(mark, 1) * 100}%` }} />}
     </span>
   );
