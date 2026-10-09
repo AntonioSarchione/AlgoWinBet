@@ -149,7 +149,7 @@ function Probabilities({ fx, mk, opps }: { fx: { home: string; away: string; p_h
         </div>
         <div>
           <h2 className="section">Risultati esatti più probabili</h2>
-          <div style={{ marginTop: 12 }}>{scores.map((s) => <HBar key={s.l} label={s.l} p={s.p} max={top} />)}</div>
+          <div style={{ marginTop: 12 }}>{scores.map((s) => <HBar key={s.l} label={s.l} p={s.p} max={top} scale="score" />)}</div>
         </div>
       </div>
       <div className="split">
@@ -276,7 +276,7 @@ function Markets({ mk, opps }: { mk: ModelMarket[]; opps: OppRow[] }) {
                     {rows.map((m) => (
                       <li key={m.l} className={m.p === top ? "top" : undefined}>
                         <span className="mkt-sel" title={m.l}>{m.l}</span>
-                        <span className="mkt-bar"><i style={{ width: `${Math.min(m.p, 1) * 100}%`, background: probColor(m.p) }} /></span>
+                        <span className="mkt-bar"><i style={{ width: `${Math.min(m.p, 1) * 100}%`, background: probColor(m.p, g === "Risultato esatto" ? "score" : "prob") }} /></span>
                         <b className="num">{pct(m.p, 1)}</b>
                         <span className="num muted">{fairOdds(m.p)}</span>
                       </li>

@@ -73,7 +73,11 @@ export function Split1X2({ h, d, a }: { h: number | null; d: number | null; a: n
 }
 
 // Colour of a probability on rings and bars: the band (globals.css --pr-0..4), never the only cue (the figure is printed).
-export const probColor = (p: number) => `var(--pr-${p < 0.2 ? 0 : p < 0.4 ? 1 : p < 0.6 ? 2 : p < 0.8 ? 3 : 4})`;
+// "score": exact scores, whose probabilities are small (bands at 5, 10, 15, 20%)
+export const probColor = (p: number, scale: "prob" | "score" = "prob") => {
+  const s = scale === "score" ? 0.05 : 0.2;
+  return `var(--pr-${p < s ? 0 : p < 2 * s ? 1 : p < 3 * s ? 2 : p < 4 * s ? 3 : 4})`;
+};
 
 export function Ring({ value, label, sub, top }: { value: number | null; label: string; sub?: React.ReactNode; top?: React.ReactNode }) {
   const r = 42;
@@ -117,12 +121,12 @@ export function Meter({ used, limit, label, hint }: { used: number; limit: numbe
   );
 }
 
-export function HBar({ label, p, max = 1 }: { label: string; p: number; max?: number }) {
+export function HBar({ label, p, max = 1, scale = "prob" }: { label: string; p: number; max?: number; scale?: "prob" | "score" }) {
   return (
     <div className="hbar">
       <span className="text-2">{label}</span>
       <span className="bar">
-        <span style={{ width: `${Math.min(p / max, 1) * 100}%`, background: probColor(p) }} />
+        <span style={{ width: `${Math.min(p / max, 1) * 100}%`, background: probColor(p, scale) }} />
       </span>
       <span className="num">{pct(p, 1)}</span>
     </div>
