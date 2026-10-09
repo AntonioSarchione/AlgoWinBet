@@ -172,6 +172,23 @@ class HybridConnection:
     def __init__(self, replica, open_remote):
         self.replica, self.open_remote, self.dirty, self.replica_ok = replica, open_remote, False, True
         self.remote = open_remote()
+        self.in_tx = False  # writes sent to the primary since the last commit
+
+    def _write(self, fn, *args):
+        """A write on the primary. The first write of a transaction is sent again on a new connection when the old one was
+        dropped (seen 2026-10-09: the first write after some seconds without a statement, Turso had closed the connection);
+        later writes are not, since the dropped connection took the transaction's earlier writes with it."""
+        self.dirty = True
+        try:
+            out = fn(self.remote)(*args)
+        except ValueError as e:
+            m = str(e)
+            if self.in_tx or "Hrana" not in m or not any(k in m for k in ("http error", "connection", "stream", "timed out")):
+                raise
+            self.reset()
+            out = fn(self.remote)(*args)
+        self.in_tx = True
+        return out
 
     def reset(self) -> None:
         """A new connection to the primary after a dropped one (its open transaction is gone with it)."""
@@ -180,6 +197,7 @@ class HybridConnection:
         except Exception:  # noqa: BLE001 - the old connection is already broken
             pass
         self.remote = self.open_remote()
+        self.in_tx = False
         self.dirty = True  # the replica pulls whatever was committed before the next read
 
     def execute(self, sql: str, *args):
@@ -187,19 +205,17 @@ class HybridConnection:
             if self.dirty:
                 self.sync()
             return (self.replica if self.replica_ok else self.remote).execute(sql, *args)
-        self.dirty = True
-        return self.remote.execute(sql, *args)
+        return self._write(lambda c: c.execute, sql, *args)
 
     def executemany(self, sql: str, seq):
-        self.dirty = True
-        return self.remote.executemany(sql, seq)
+        return self._write(lambda c: c.executemany, sql, seq)
 
     def executescript(self, script: str):
-        self.dirty = True
-        return self.remote.executescript(script)
+        return self._write(lambda c: c.executescript, script)
 
     def commit(self) -> None:
         self.remote.commit()
+        self.in_tx = False
 
     def sync(self) -> None:
         """Retried: a dropped HTTP connection must not end the run. If the replica cannot catch up, reads go to the primary
