@@ -137,11 +137,13 @@ class Engine:
         return self._models[key]
 
     def match_xg(self) -> dict[str, tuple[float, float]]:
-        """Full-time (home, away) xG per result, read once."""
+        """Full-time (home, away) xG per result, read once: the team statistics, else the sum of the players' FotMob xG."""
         if "expected_goals" not in self._stat_rows:
+            pl = getattr(self.provider, "player_xg_totals", None)
+            out = dict(pl() if pl else {})
             fn = getattr(self.provider, "match_stat_values", None)
-            self._stat_rows["expected_goals"] = {k: v["expected_goals"] for k, v in (fn(("expected_goals",)) if fn else {}).items()
-                                                 if "expected_goals" in v}
+            out.update({k: v["expected_goals"] for k, v in (fn(("expected_goals",)) if fn else {}).items() if "expected_goals" in v})
+            self._stat_rows["expected_goals"] = out
         return self._stat_rows["expected_goals"]
 
     def count_model(self, stat: str, cutoff: datetime) -> CountModel | None:

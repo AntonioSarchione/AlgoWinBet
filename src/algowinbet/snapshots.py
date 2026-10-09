@@ -605,6 +605,25 @@ class SnapshotProvider:
                 out.setdefault(canon.get(fid, fid), {})[name] = (float(h), float(a))
         return out
 
+    def player_xg_totals(self, min_players: int = 9) -> dict[str, tuple[float, float]]:
+        """Team xG per match as the sum of its players' FotMob xG (fotmob_player_stats), under the canonical result id: the
+        match pages read for the player cards cover far more of the history than the team statistics. Only matches where
+        both sides list at least `min_players` players with an xG value."""
+        try:
+            rows = self.store.db.execute(
+                "SELECT s.fixture_id, s.team = r.home, SUM(s.xg), COUNT(s.xg) FROM fotmob_player_stats s JOIN results r ON r.fixture_id = s.fixture_id "
+                "WHERE s.team IN (r.home, r.away) GROUP BY s.fixture_id, s.team = r.home").fetchall()
+        except Exception as e:  # noqa: BLE001 - no FotMob table in this database
+            if "no such table" in str(e):
+                return {}
+            raise
+        canon = self._unique_results()[1]
+        got: dict[str, dict[int, float]] = {}
+        for fid, is_home, xg, n in rows:
+            if xg is not None and n >= min_players:
+                got.setdefault(canon.get(fid, fid), {})[int(is_home)] = float(xg)
+        return {fid: (d[1], d[0]) for fid, d in got.items() if 0 in d and 1 in d}
+
     def stat_counts(self, stat: str) -> dict[str, tuple[float, float]]:
         """Full-time (home, away) counts of 'corners' or 'cards' per match, under the canonical result id. Cards are Sisal's
         bookings (1X2 ammonizioni: second yellow = two, straight red = none) from the FotMob player rows where read; otherwise

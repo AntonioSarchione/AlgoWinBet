@@ -2306,12 +2306,12 @@ def cmd_model_eval(a) -> None:
         chosen = {k: v for k, v in VARIANTS.items() if not a.variants or k in a.variants}
         prov = SnapshotProvider(store)
         if any(v.get("xg_weight") for v in chosen.values()):  # how much of the history the xG variants can use
-            xg = prov.match_stat_values(("expected_goals",))
+            xg = {k for k, v in prov.match_stat_values(("expected_goals",)).items() if "expected_goals" in v} | set(prov.player_xg_totals())
             seen: dict[str, list[int]] = {}
             for r in prov.list_history(None, end):
                 c = seen.setdefault(r.competition, [0, 0])
                 c[0] += 1
-                c[1] += int("expected_goals" in xg.get(r.fixture_id, {}))
+                c[1] += int(r.fixture_id in xg)
             print("risultati con xG per competizione: " + ", ".join(f"{k} {v[1]}/{v[0]}" for k, v in sorted(seen.items(), key=lambda x: -x[1][0])[:14]))
         rep = evaluate(prov, _cfg(a), start, end, chosen)
         print_report(rep)
