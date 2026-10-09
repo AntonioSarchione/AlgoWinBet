@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { absencesFor, DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type Absence, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
 import { explainSlip, legMinOdds, legReason, type OptSettings } from "@/lib/optimizer";
-import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
+import { PROFILE_LABEL, profileHint, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
 import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
@@ -368,7 +368,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 return (
                   <Link key={name} href={profileHref(name)} className={`card profile ${name === profile ? "active" : ""}`} aria-current={name === profile ? "true" : undefined}>
                     <span className="profile-name">{PROFILE_LABEL[name] ?? name}</span>
-                    <span className="note">{PROFILE_HINT[name] ?? ""}</span>
+                    <span className="note">{profileHint(name, evMin)}</span>
                     {s0 ? (
                       <span className="profile-stats">
                         <span><small>Quota</small><b className="num">{s0.total_odds.toFixed(2)}</b></span>

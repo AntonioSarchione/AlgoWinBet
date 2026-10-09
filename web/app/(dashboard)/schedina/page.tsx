@@ -3,7 +3,7 @@ import { unstable_cache } from "next/cache";
 import { ArrowLeft, CircleSlash, Gauge, ListChecks, Percent, Sigma, Target } from "lucide-react";
 import { absencesFor, DEPLOY, fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type Absence, type BookSel, type OppRow } from "@/lib/db";
 import { legMinOdds, type OptSettings } from "@/lib/optimizer";
-import { PROFILE_HINT, PROFILE_LABEL, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
+import { PROFILE_LABEL, profileHint, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
 import { Empty, MatchCell } from "@/app/_components/ui";
 import { MAX_PICK } from "@/lib/pick";
@@ -188,7 +188,7 @@ export default async function Schedina({ searchParams }: { searchParams: Promise
             return (
               <Link key={name} href={href(name)} className={`card profile ${name === profile ? "active" : ""}`} aria-current={name === profile ? "true" : undefined}>
                 <span className="profile-name">{PROFILE_LABEL[name] ?? name}</span>
-                <span className="note">{PROFILE_HINT[name] ?? ""}</span>
+                <span className="note">{profileHint(name, evMin)}</span>
                 {s0 ? (
                   <span className="profile-stats">
                     <span><small>Quota</small><b className="num">{s0.total_odds.toFixed(2)}</b></span>

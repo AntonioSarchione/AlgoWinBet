@@ -10,6 +10,14 @@ export const PROFILE_HINT: Record<string, string> = {
   value: "il valore atteso più alto, anche se meno probabile",
 };
 
+/** The card's one-line description: "tra quelle con valore" only when the EV filter keeps the slips at EV >= 0; with a
+ * negative minimum (Home filter, manual slip: no limit) it says what the filter actually lets through. */
+export function profileHint(name: string, evMin: number): string {
+  if (name !== "probabilita" || evMin >= 0) return PROFILE_HINT[name] ?? "";
+  return evMin <= -1 ? "la schedina più probabile, qualunque sia l'EV (filtro)"
+    : `la schedina più probabile con EV ≥ ${Math.round(evMin * 100)}% (filtro)`;
+}
+
 export type Cand = OptOpp & OppRow;
 export type ProfileResult = OptResult<Cand> & { sameAs?: string }; // sameAs: its only slips are those of an earlier profile
 
