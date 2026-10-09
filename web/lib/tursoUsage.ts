@@ -25,6 +25,8 @@ async function fetchUsage(org: string): Promise<TursoUsage> {
     console.error("tursoUsage: chiavi della risposta", Object.keys(j), Object.keys(j.organization ?? {}));
     throw new UsageError("risposta di Turso in un formato inatteso");
   }
+  // TEMPORARY (2026-10-09): which counter holds the cycle's bytes synced. Counters only, no token or name.
+  console.log("tursoUsage org", JSON.stringify(j.organization?.usage), "dbs", JSON.stringify(dbs.map((d) => d.total)));
   // the cycle's consumption is the sum over the databases (organization.usage is documented as the plan's allowances)
   return {
     bytesSynced: dbs.reduce((a, d) => a + (d.total?.bytes_synced ?? 0), 0),
