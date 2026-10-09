@@ -436,19 +436,20 @@ class FotMobCollector:
             stats, absences, kept = self.parse_match(pp, fid, r.home if r else None, r.away if r else None)
             self.client.keep(f"/match/{ext}", None, kept)
             ref = referee_of(pp)
-            if ref:
-                st.add("arbitri FotMob", self.store.save_referees(SOURCE, [(fid, ref)], self.now()))
-            if stats:
-                st.add("statistiche giocatori FotMob", self.store._bulk(
-                    "INSERT OR REPLACE INTO fotmob_player_stats(fixture_id,team,player_id,name,position,starter,minutes,rating,goals,assists,"
-                    "xg,npxg,xgot,xa,shots,shots_on,key_passes,touches_box,fouls_committed,fouls_drawn,yellow,red,tackles,interceptions,"
-                    "observed_at,saves,goals_conceded,xgot_faced,shots_on_faced)", stats))
-                if absences:
-                    st.add("assenti FotMob", self.store._bulk(
-                        "INSERT OR REPLACE INTO fotmob_absences(fixture_id,team,player_id,name,kind,expected_return,market_value,observed_at)",
-                        absences))
-            elif r is not None and self.now() - r.kickoff > GIVE_UP_AFTER:
-                self.store.mark_job(f"fotmob-none:{fid}", self.now(), "FotMob senza statistiche giocatori")
+            with self.store.one_commit():  # referee, player stats and absences of the match: one commit
+                if ref:
+                    st.add("arbitri FotMob", self.store.save_referees(SOURCE, [(fid, ref)], self.now()))
+                if stats:
+                    st.add("statistiche giocatori FotMob", self.store._bulk(
+                        "INSERT OR REPLACE INTO fotmob_player_stats(fixture_id,team,player_id,name,position,starter,minutes,rating,goals,assists,"
+                        "xg,npxg,xgot,xa,shots,shots_on,key_passes,touches_box,fouls_committed,fouls_drawn,yellow,red,tackles,interceptions,"
+                        "observed_at,saves,goals_conceded,xgot_faced,shots_on_faced)", stats))
+                    if absences:
+                        st.add("assenti FotMob", self.store._bulk(
+                            "INSERT OR REPLACE INTO fotmob_absences(fixture_id,team,player_id,name,kind,expected_return,market_value,observed_at)",
+                            absences))
+                elif r is not None and self.now() - r.kickoff > GIVE_UP_AFTER:
+                    self.store.mark_job(f"fotmob-none:{fid}", self.now(), "FotMob senza statistiche giocatori")
         self.store.db.commit()
 
     def parse_match(self, pp: dict, fid: str, home: str | None, away: str | None) -> tuple[list[tuple], list[tuple], dict]:

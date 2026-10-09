@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
@@ -219,6 +220,8 @@ class HybridConnection:
 
     def commit(self) -> None:
         self.remote.commit()
+        if self.in_tx:
+            self.dirty = True  # a read between the writes may have synced before they were committed: sync again
         self.in_tx = False
 
     def sync(self) -> None:
@@ -249,6 +252,7 @@ class BudgetExceeded(RuntimeError):
 class SnapshotStore:
     def __init__(self, path: str | Path):
         self.db, self.remote = connect(path)
+        self._defer = False  # inside one_commit(): _bulk leaves the commit to it
         self.db.executescript(SCHEMA)
         self.db.commit()
 
@@ -297,8 +301,25 @@ class SnapshotStore:
             values = ",".join(["(" + ",".join(["?"] * width) + ")"] * len(chunk))
             cur = self.db.execute(f"{head} VALUES {values}", [v for r in chunk for v in r])
             n += max(cur.rowcount or 0, 0)
-        self.db.commit()
+        if not self._defer:
+            self.db.commit()
         return n
+
+    @contextmanager
+    def one_commit(self):
+        """The _bulk writes inside the block share one commit. Turso's embedded replicas sync every page a commit touches,
+        and writes to related tables touch the same index pages: one commit sends each page once instead of once per write.
+        On an error nothing is committed here (the caller's retry or the next run writes the rows again)."""
+        if self._defer:  # nested: the outer block commits
+            yield
+            return
+        self._defer = True
+        try:
+            yield
+            self._defer = False
+            self.db.commit()
+        finally:
+            self._defer = False
 
     def _latest_fixture_state(self) -> dict[str, tuple[str, str]]:
         rows = self.db.execute("SELECT f.fixture_id, f.kickoff, f.status FROM fixtures f "

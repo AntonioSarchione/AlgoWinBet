@@ -54,6 +54,21 @@ def test_link_players_by_match_and_from_absences_and_reports_coverage():
     assert hist == [("g2", "goal:2", "SUSPENDED", ko2), ("g2", "goal:9", "OUT", ko2)]  # the unlinked kid is left out
 
 
+def test_second_pass_writes_only_what_changed():
+    s = _store()
+    link_players(s, KO)
+    s.db.execute("UPDATE fotmob_player_links SET linked_at = 'old'")
+    s.db.commit()
+    link_players(s, KO + timedelta(days=1))  # nothing changed: no link rewritten, so the old date stays
+    assert {r[0] for r in s.db.execute("SELECT linked_at FROM fotmob_player_links")} == {"old"}
+    s.db.execute("DELETE FROM fotmob_absences WHERE player_id = 'fotmob:22'")  # an absence gone: its history row goes too
+    s.db.execute("INSERT INTO fotmob_player_links VALUES('fotmob:5', 'goal:5', 'Gone', 1, 1, 'partite', 'old')")  # a stale link
+    s.db.commit()
+    link_players(s, KO)
+    assert s.db.execute("SELECT COUNT(*) FROM fotmob_player_links WHERE fotmob_id = 'fotmob:5'").fetchone()[0] == 0
+    assert [r[0] for r in s.db.execute("SELECT player_id FROM absence_history")] == ["goal:9"]
+
+
 def test_absent_players_found_in_the_official_xi_are_counted_and_the_switch_feeds_the_xi_model():
     from algowinbet.probable import _status, load_xi_data
     from algowinbet.snapshots import SnapshotProvider

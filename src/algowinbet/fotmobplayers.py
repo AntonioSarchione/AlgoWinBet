@@ -174,9 +174,13 @@ def link_players(store: SnapshotStore, now: datetime | None = None) -> LinkRepor
 
     rep.fotmob_players = len(fm_name)
     rep.linked = len(links)
-    store.db.execute("DELETE FROM fotmob_player_links")
+    # only the links that changed are written (a link kept as it was keeps its date): a full rewrite every day made Turso
+    # sync the whole table to every replica
+    old = {r[0]: tuple(r[1:]) for r in store.db.execute("SELECT fotmob_id, goal_id, name, votes, agree, how FROM fotmob_player_links").fetchall()}
+    _delete_keys(store, "fotmob_player_links", ("fotmob_id",), [(f,) for f in old if f not in links])
     store._bulk("INSERT OR REPLACE INTO fotmob_player_links(fotmob_id, goal_id, name, votes, agree, how, linked_at)",
-                [(f, g, fm_name.get(f), v, k, how, now.isoformat()) for f, (g, v, k, how) in links.items()])
+                [(f, g, fm_name.get(f), v, k, how, now.isoformat()) for f, (g, v, k, how) in links.items()
+                 if old.get(f) != (g, fm_name.get(f), v, k, how)])
 
     # check: a linked FotMob starter should be a GOAL starter of the same match
     for key, fs in fm_start.items():
@@ -207,6 +211,22 @@ def link_players(store: SnapshotStore, now: datetime | None = None) -> LinkRepor
             pl[1] += int(started)
             pl[2] += int(g in xi[(fid, team)] and not started)
             rep.played_kind[kind] += int(started)
-    store.db.execute("DELETE FROM absence_history WHERE source = 'fotmob'")
-    store._bulk("INSERT OR REPLACE INTO absence_history(fixture_id, team, player_id, status, kind, source, observed_at)", hist)
+    old_hist = set(store.db.execute("SELECT fixture_id, team, player_id, status, kind, source, observed_at FROM absence_history "
+                                    "WHERE source = 'fotmob'").fetchall())
+    new_keys = {(h[0], h[2]) for h in hist}
+    _delete_keys(store, "absence_history", ("fixture_id", "player_id", "source"),
+                 [(h[0], h[2], "fotmob") for h in old_hist if (h[0], h[2]) not in new_keys])
+    store._bulk("INSERT OR REPLACE INTO absence_history(fixture_id, team, player_id, status, kind, source, observed_at)",
+                [h for h in hist if h not in old_hist])
     return rep
+
+
+def _delete_keys(store: SnapshotStore, table: str, cols: tuple[str, ...], keys: list[tuple]) -> None:
+    """DELETE of the rows with these keys, a few hundred per statement."""
+    per = max(1, 900 // len(cols))
+    for i in range(0, len(keys), per):
+        part = keys[i:i + per]
+        cond = " OR ".join(["(" + " AND ".join(f"{c} = ?" for c in cols) + ")"] * len(part))
+        store.db.execute(f"DELETE FROM {table} WHERE {cond}", [v for k in part for v in k])
+    if keys:
+        store.db.commit()

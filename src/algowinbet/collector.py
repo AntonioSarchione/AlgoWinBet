@@ -267,35 +267,37 @@ class GoalCollector:
                 if guard is not None and sent:
                     guard.add(sent)
                 lus, players, empty, keys, unplaced = [], [], [], {}, []
-                for fid, comp, home, away, ko, need_xi, _need_ev, _goals in chunk:
-                    if not need_xi or (fid, "lineups") not in got:
-                        continue
-                    data = got[(fid, "lineups")]
-                    kickoff = datetime.fromisoformat(ko)
-                    seen = kickoff - self.XI_BEFORE_KICKOFF
-                    fx = Fixture(id=fid, competition=comp, home=home, away=away, kickoff=kickoff, status=FixtureStatus.FINISHED)
-                    # a finished match: the XI listed is the one that played, whatever flag the payload carries
-                    xi = [l.model_copy(update={"status": "confirmed", "published_at": seen, "observed_at": seen})
-                          for l in self.mapper.lineups(data, fx, seen) if len(l.starters) >= 7]
-                    keys.update(lineup_keys(data))
-                    if xi:
-                        lus += xi
-                        players += [(p, kickoff) for p in self._lineup_players(data, home, away)]
-                        unplaced += [(p, seen) for p in self._lineup_players(data, home, away, default=Position.MID)]
-                    else:
-                        empty.append(fid)
-                st.add("lineups", self.store.save_lineups(SOURCE, lus) if lus else 0)
-                st.add("players", self._save_newest_players(players))
-                if unplaced:  # players GOAL lists without a role: saved by name all the same (a known player keeps its row)
-                    self.store._bulk("INSERT OR IGNORE INTO players(id,name,team,position,importance,start_rate,source,updated_at)",
-                                     [(p.id, p.name, p.team, p.position.value, 1.0, None, self.LINEUP_PLAYERS, at.isoformat()) for p, at in unplaced])
-                if keys:
-                    all_keys.update(keys)
-                    self.store._bulk("INSERT OR REPLACE INTO player_keys(source, key, player_id)", [(SOURCE, k, v) for k, v in keys.items()])
-                if empty:  # nothing published for these matches: remembered, never asked again
-                    self.store._bulk("INSERT OR REPLACE INTO jobs(name, done_at, detail)",
-                                     [(f"no-lineup:{f}", now.isoformat(), "GOAL senza formazione") for f in empty])
-                    st.add("senza formazione", len(empty))
+                # two commits per batch (XI side, then events side) instead of one per table: fewer pages synced to the replicas
+                with self.store.one_commit():
+                    for fid, comp, home, away, ko, need_xi, _need_ev, _goals in chunk:
+                        if not need_xi or (fid, "lineups") not in got:
+                            continue
+                        data = got[(fid, "lineups")]
+                        kickoff = datetime.fromisoformat(ko)
+                        seen = kickoff - self.XI_BEFORE_KICKOFF
+                        fx = Fixture(id=fid, competition=comp, home=home, away=away, kickoff=kickoff, status=FixtureStatus.FINISHED)
+                        # a finished match: the XI listed is the one that played, whatever flag the payload carries
+                        xi = [l.model_copy(update={"status": "confirmed", "published_at": seen, "observed_at": seen})
+                              for l in self.mapper.lineups(data, fx, seen) if len(l.starters) >= 7]
+                        keys.update(lineup_keys(data))
+                        if xi:
+                            lus += xi
+                            players += [(p, kickoff) for p in self._lineup_players(data, home, away)]
+                            unplaced += [(p, seen) for p in self._lineup_players(data, home, away, default=Position.MID)]
+                        else:
+                            empty.append(fid)
+                    st.add("lineups", self.store.save_lineups(SOURCE, lus) if lus else 0)
+                    st.add("players", self._save_newest_players(players))
+                    if unplaced:  # players GOAL lists without a role: saved by name all the same (a known player keeps its row)
+                        self.store._bulk("INSERT OR IGNORE INTO players(id,name,team,position,importance,start_rate,source,updated_at)",
+                                         [(p.id, p.name, p.team, p.position.value, 1.0, None, self.LINEUP_PLAYERS, at.isoformat()) for p, at in unplaced])
+                    if keys:
+                        all_keys.update(keys)
+                        self.store._bulk("INSERT OR REPLACE INTO player_keys(source, key, player_id)", [(SOURCE, k, v) for k, v in keys.items()])
+                    if empty:  # nothing published for these matches: remembered, never asked again
+                        self.store._bulk("INSERT OR REPLACE INTO jobs(name, done_at, detail)",
+                                         [(f"no-lineup:{f}", now.isoformat(), "GOAL senza formazione") for f in empty])
+                        st.add("senza formazione", len(empty))
                 ev_rows, reads, late = [], [], 0
                 squads = self._squads([r for r in chunk if r[6] and (r[0], "events") in got])
                 for fid, comp, home, away, ko, _need_xi, need_ev, goals in chunk:
@@ -309,11 +311,12 @@ class GoalCollector:
                     resolve(evs, all_keys, squads.get(fid, {}))
                     ev_rows += event_rows(fid, evs)
                     reads.append(read_row(fid, data, goals_of(evs), now))
-                if ev_rows:
-                    self.store._bulk("INSERT OR REPLACE INTO match_events(fixture_id, seq, minute, team, kind, detail, player_id, player_key, "
-                                     "player_name, assist_id, assist_key, assist_name, source)", ev_rows)
-                if reads:
-                    self.store._bulk("INSERT OR REPLACE INTO event_reads(fixture_id, source, n, observed_at, payload)", reads)
+                with self.store.one_commit():
+                    if ev_rows:
+                        self.store._bulk("INSERT OR REPLACE INTO match_events(fixture_id, seq, minute, team, kind, detail, player_id, player_key, "
+                                         "player_name, assist_id, assist_key, assist_name, source)", ev_rows)
+                    if reads:
+                        self.store._bulk("INSERT OR REPLACE INTO event_reads(fixture_id, source, n, observed_at, payload)", reads)
                 st.add("eventi", len(reads))
                 if late:
                     st.add("eventi in ritardo", late)

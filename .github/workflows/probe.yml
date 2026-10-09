@@ -38,7 +38,10 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
+      # Local replica only for the commands that read a lot (evaluations, backfills): Turso's free plan counts every synced byte
+      # (3 GB a month) and a probe pulls everything written since the last saved replica. The others read the primary directly.
       - name: restore database replica
+        if: ${{ inputs.source == 'db' && contains(fromJSON('["lineupeval","lineupfill","boosttrain","boosteval","playereval","scorereval","xieval","fmresults","resultsrefill","fdrelink","teammap","xinames","oddsrelink","resultholes","health"]'), inputs.command) }}
         uses: actions/cache/restore@v6
         with:
           path: data/turso-replica.db*
@@ -60,42 +63,45 @@ jobs:
           # inputs arrive as environment variables, never interpolated into the script (no shell injection)
           DB=data/probe.db
           if [ -n "$TURSO_DATABASE_URL" ]; then DB=turso; fi   # raw payloads and budget counters persist on Turso
+          case "$COMMAND" in  # the commands with a replica (same list as the restore step's condition)
+            lineupeval|lineupfill|boosttrain|boosteval|playereval|scorereval|xieval|fmresults|resultsrefill|fdrelink|teammap|xinames|oddsrelink|resultholes|health) export TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db ;;
+          esac
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remap" ]; then algowinbet remap-odds --db "$DB" && algowinbet inspect Denmark --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "coverage" ]; then algowinbet market-coverage --db "$DB" --book "${ARG:-sisal}"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "model" ]; then algowinbet model-check "$ARG" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remapstats" ]; then algowinbet remap-odds --only-stats --db "$DB" && algowinbet stat-coverage --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "rules" ]; then pip install -q pypdf && python scripts/sisal_rules.py $ARG; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupeval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineup-eval --weeks "${ARG:-10}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosttrain" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-train ${ARG:+--force} --db "$DB" && algowinbet boost-shadow --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosteval" ]; then pip install -q "lightgbm>=4.3" && TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet boost-eval --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupeval" ]; then algowinbet lineup-eval --weeks "${ARG:-10}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineupfill" ]; then algowinbet lineups-backfill ${ARG:+--max "$ARG"} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosttrain" ]; then pip install -q "lightgbm>=4.3" && algowinbet boost-train ${ARG:+--force} --db "$DB" && algowinbet boost-shadow --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "boosteval" ]; then pip install -q "lightgbm>=4.3" && algowinbet boost-eval --weeks "${ARG:-52}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuptiming" ]; then algowinbet lineup-timing --days "${ARG:-7}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobcheck" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-check --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultholes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-holes ${ARG:+--show "$ARG"} ${PARAMS:+--near} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobplayers" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-players --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobcheck" ]; then algowinbet fotmob-check --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultholes" ]; then algowinbet results-holes ${ARG:+--show "$ARG"} ${PARAMS:+--near} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobplayers" ]; then algowinbet fotmob-players --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobnext" ]; then read -ra lg <<< "${ARG:-55}"; algowinbet fotmob-next "${lg[@]}" ${PARAMS:+--n "$PARAMS"}; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultsrefill" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-refill "${dr[@]}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "apiflink" ]; then read -ra dd <<< "$ARG"; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet apif-link "${dd[@]}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xipreview" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-preview --days "${ARG:-4}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xinames" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-names --max "${ARG:-40}" "${dr[@]}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "goalusage" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet goal-usage --days "${ARG:-3}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xiplayer" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-player "$ARG" ${PARAMS:+--team "$PARAMS"} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-eval --since "${ARG:-2026-01-01}" $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmresults" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet results-fotmob $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "resultsrefill" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; algowinbet results-refill "${dr[@]}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "apiflink" ]; then read -ra dd <<< "$ARG"; algowinbet apif-link "${dd[@]}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xipreview" ]; then algowinbet xi-preview --days "${ARG:-4}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xinames" ]; then dr=(); if [ "$PARAMS" = "dry" ]; then dr=(--dry-run); fi; algowinbet xi-names --max "${ARG:-40}" "${dr[@]}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "goalusage" ]; then algowinbet goal-usage --days "${ARG:-3}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xiplayer" ]; then algowinbet xi-player "$ARG" ${PARAMS:+--team "$PARAMS"} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playereval" ]; then algowinbet player-eval --since "${ARG:-2026-01-01}" $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmresults" ]; then algowinbet results-fotmob $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "legbands" ]; then algowinbet leg-bands --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "oddsrelink" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet odds-relink --days "${ARG:-1}" ${PARAMS:+--again} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playerquotes" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet player-quotes --days "${ARG:-2}" ${PARAMS:+--name "$PARAMS"} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fdrelink" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet dataset-relink --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmrename" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-rename $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "teammap" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet team-map ${PARAMS:+--all} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "oddsrelink" ]; then algowinbet odds-relink --days "${ARG:-1}" ${PARAMS:+--again} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "playerquotes" ]; then algowinbet player-quotes --days "${ARG:-2}" ${PARAMS:+--name "$PARAMS"} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fdrelink" ]; then algowinbet dataset-relink --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fmrename" ]; then algowinbet fotmob-rename $(for x in $PARAMS; do echo "--$x"; done) --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "teammap" ]; then algowinbet team-map ${PARAMS:+--all} --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "sliprules" ]; then algowinbet slip-rules --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "pubcheck" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet pub-check --team "${ARG:-PSV}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobref" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-referee --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobkeys" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet fotmob-keys --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "pubcheck" ]; then algowinbet pub-check --team "${ARG:-PSV}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobref" ]; then algowinbet fotmob-referee --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "fotmobkeys" ]; then algowinbet fotmob-keys --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "slipreview" ]; then algowinbet slip-review --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then fm=(); if [ "$PARAMS" = "fotmob" ]; then fm=(--fotmob-absences); fi; TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet xi-eval --since "${ARG:-2026-07-01}" "${fm[@]}" --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorereval" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-eval --since "${ARG:-2025-07-01}" ${PARAMS:+--tune} --db "$DB"; exit $?; fi
-          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorers" ]; then TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet scorer-check --days "${ARG:-14}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "xieval" ]; then fm=(); if [ "$PARAMS" = "fotmob" ]; then fm=(--fotmob-absences); fi; algowinbet xi-eval --since "${ARG:-2026-07-01}" "${fm[@]}" --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorereval" ]; then algowinbet scorer-eval --since "${ARG:-2025-07-01}" ${PARAMS:+--tune} --db "$DB"; exit $?; fi
+          if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "scorers" ]; then algowinbet scorer-check --days "${ARG:-14}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "lineuphist" ]; then algowinbet lineup-history-check --comp "${ARG:-Serie A}" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "calibration" ]; then algowinbet registry-calibration --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "registry" ]; then algowinbet registry-check "$ARG" --db "$DB"; exit $?; fi
@@ -127,3 +133,10 @@ jobs:
           if [ "$COMMAND" != "account" ]; then args+=("$ARG"); fi
           if [ "$COMMAND" = "probe" ]; then for kv in $PARAMS; do args+=(--param "$kv"); done; fi
           algowinbet "${args[@]}" --db "$DB"
+
+      - name: save database replica
+        if: ${{ always() && hashFiles('data/turso-replica.db') != '' && inputs.source == 'db' && contains(fromJSON('["lineupeval","lineupfill","boosttrain","boosteval","playereval","scorereval","xieval","fmresults","resultsrefill","fdrelink","teammap","xinames","oddsrelink","resultholes","health"]'), inputs.command) }}
+        uses: actions/cache/save@v6
+        with:
+          path: data/turso-replica.db*
+          key: turso-replica-${{ github.run_id }}
