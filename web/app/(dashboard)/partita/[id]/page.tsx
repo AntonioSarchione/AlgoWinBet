@@ -518,7 +518,7 @@ function Form({ home, away, fh, fa, h2h }: { home: string; away: string; fh: Res
                 <TeamBadge name={away} size="lg" />
               </div>
               <ul className="fm-h2h-legend">
-                {([["W", hw, `Vittorie ${home}`, home], ["D", dr, "Pareggi", null], ["A", aw, `Vittorie ${away}`, away]] as const).map(([k, v, l, t]) => (
+                {([["W", hw, home, home], ["D", dr, "Pareggi", null], ["A", aw, away, away]] as const).map(([k, v, l, t]) => (
                   <li key={k}><i className={k} aria-hidden="true" />{t && <TeamBadge name={t} />}{l}<b className="num">{v}</b><small>{share(v, h2h.length)}</small></li>
                 ))}
               </ul>
