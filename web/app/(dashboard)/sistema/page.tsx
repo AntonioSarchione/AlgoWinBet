@@ -1,5 +1,5 @@
 import { Activity, AlertTriangle, CheckCircle2, Database, HeartPulse, XCircle } from "lucide-react";
-import { lastTick, latestHealth, parseJSON, systemStatus, usage } from "@/lib/db";
+import { lastTick, latestHealth, parseJSON, systemStatus, usage, type HealthCheck } from "@/lib/db";
 import { ago, dayTime, shortDate } from "@/app/_components/format";
 import { Empty, Meter } from "@/app/_components/ui";
 import { tursoUsage } from "@/lib/tursoUsage";
@@ -29,7 +29,27 @@ const TURSO_WRITES_M = 10;
 
 export default async function Sistema() {
   const [st, use, tick, health, turso] = await Promise.all([systemStatus(), usage(), lastTick(), latestHealth(), tursoUsage()]);
-  const worst = health?.checks.some((c) => c.level === "error") ? "error" : health?.checks.some((c) => c.level === "warn") ? "warn" : "ok";
+  // live check of the Turso quotas (Platform API), first in the list: the morning's checks come from the collector
+  const fmt = (n: number) => n.toLocaleString("it-IT", { maximumFractionDigits: 1 });
+  const quotas = turso.ok
+    ? [
+        { l: "sincronizzati", used: turso.usage.bytesSynced / 1e6, limit: TURSO_SYNC_MB, u: "MB" },
+        { l: "righe lette", used: turso.usage.rowsRead / 1e6, limit: TURSO_READS_M, u: "milioni" },
+        { l: "righe scritte", used: turso.usage.rowsWritten / 1e6, limit: TURSO_WRITES_M, u: "milioni" },
+      ]
+    : [];
+  const over = quotas.filter((q) => q.used >= q.limit);
+  const dbCheck: HealthCheck = {
+    key: "turso-quota",
+    label: "Database · quote Turso del mese",
+    level: !turso.ok || quotas.some((q) => q.used >= 0.7 * q.limit) ? "warn" : "ok",
+    detail: turso.ok
+      ? quotas.map((q) => `${q.l} ${fmt(q.used)} su ${fmt(q.limit)} ${q.u} (${Math.round((100 * q.used) / q.limit)}%)`).join(" · ")
+        + (over.length ? `. Oltre il limite (${over.map((q) => q.l).join(", ")}): raccolta sospesa fino al 1° del mese, quando le quote si azzerano.` : ".")
+      : `Consumi non disponibili: ${turso.reason}.`,
+  };
+  const checks: HealthCheck[] = [dbCheck, ...(health?.checks ?? [])];
+  const worst = checks.some((c) => c.level === "error") ? "error" : checks.some((c) => c.level === "warn") ? "warn" : "ok";
   const W = LEVEL[worst];
   const backfill = st.jobs.filter((j) => j.name.startsWith("backfill:"));
   type Report = { season: string; competition: string; rows: number; linked: number; unmatched: string[] };
@@ -69,32 +89,32 @@ export default async function Sistema() {
           <div className="card-head">
             <h2 id="health-title">Controllo di salute</h2>
             {health && <span className="count">{dayTime(health.at)}</span>}
-            {health && <span className={`status ${W.cls}`}><W.icon size={14} aria-hidden="true" /> {W.label}</span>}
+            <span className={`status ${W.cls}`}><W.icon size={14} aria-hidden="true" /> {W.label}</span>
           </div>
+          <ul className="crit-list">
+            {checks.map((c) => {
+              const L = LEVEL[c.level];
+              return (
+                <li key={c.key}>
+                  <L.icon size={18} aria-hidden="true" className={`crit-${L.state}`} />
+                  <div>
+                    <div className="crit-head"><b>{c.label}</b></div>
+                    <div className="note">{c.detail}</div>
+                  </div>
+                  <span className={`status ${L.cls}`}>{L.label}</span>
+                </li>
+              );
+            })}
+          </ul>
           {health ? (
             <>
-              <ul className="crit-list">
-                {health.checks.map((c) => {
-                  const L = LEVEL[c.level];
-                  return (
-                    <li key={c.key}>
-                      <L.icon size={18} aria-hidden="true" className={`crit-${L.state}`} />
-                      <div>
-                        <div className="crit-head"><b>{c.label}</b></div>
-                        <div className="note">{c.detail}</div>
-                      </div>
-                      <span className={`status ${L.cls}`}>{L.label}</span>
-                    </li>
-                  );
-                })}
-              </ul>
               <p className="note card-pad">
                 Ogni mattina il giro delle 06:05 controlla tutta la catena. Un errore fa fallire quel giro dopo aver finito il lavoro: arriva una sola
-                email da GitHub. Le attenzioni restano solo qui.
+                email da GitHub. Le attenzioni restano solo qui. Le quote Turso sono lette dal vivo (al massimo ogni 30 minuti).
               </p>
             </>
           ) : (
-            <Empty icon={HeartPulse} title="Nessun controllo ancora">Il primo arriva con il giro del mattino.</Empty>
+            <Empty icon={HeartPulse} title="Nessun controllo del mattino ancora">Il primo arriva con il giro del mattino.</Empty>
           )}
         </section>
         <section className="card" aria-labelledby="space-title">
