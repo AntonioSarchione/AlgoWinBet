@@ -1998,6 +1998,7 @@ def cmd_player_quotes(a) -> None:
         store.db.executescript(LINKS_SCHEMA)
         links = dict(store.db.execute("SELECT ext_id, fixture_id FROM fixture_links WHERE source='oddspapi'").fetchall())
         done: set[tuple[str, str]] = set()
+        census: dict[str, set[str]] = {}
         since = (now - timedelta(days=a.days)).isoformat()
         raws = store.db.execute("SELECT id, fetched_at FROM raw_requests WHERE source='oddspapi' AND status=200 AND "
                                 "endpoint='/odds-by-tournaments' AND fetched_at >= ? ORDER BY id DESC", (since,)).fetchall()
@@ -2007,13 +2008,20 @@ def cmd_player_quotes(a) -> None:
                 fx = fixtures.get(links.get(str(row.get("fixtureId")), ""))
                 if fx is None:
                     continue
-                for b in row.get("bookmakerOdds") or {}:
+                for b, bdata in (row.get("bookmakerOdds") or {}).items():
+                    for mid in ((bdata or {}).get("markets") or {}) if b.startswith("sisal") else ():
+                        mm = m.markets.get(int(mid)) if str(mid).isdigit() else None
+                        if mm and mm.get("playerProp"):  # every player market type Sisal offers, ours or not
+                            census.setdefault(f"{mm.get('marketType')} ({mm.get('marketName')})", set()).add(fx.id)
                     if b.startswith("sisal") and (fx.id, b) not in done:
                         qs = player_odds(row, m.markets, b)
                         if qs:
                             done.add((fx.id, b))
                             save_player_quotes(store, fx.id, b, qs, datetime.fromisoformat(fetched))
         print(f"snapshot letti: {len(raws)}, partite con quote giocatore: {len(done)}")
+        print("mercati giocatore Sisal nel feed (tipo, partite):")
+        for k, v in sorted(census.items(), key=lambda x: -len(x[1])):
+            print(f"  {k}: {len(v)}")
         for mk, nfx, npl, lo, hi in store.db.execute(
                 "SELECT market, COUNT(DISTINCT fixture_id), COUNT(DISTINCT fixture_id || player_key), MIN(odds), MAX(odds) "
                 "FROM player_quotes GROUP BY market ORDER BY market").fetchall():
