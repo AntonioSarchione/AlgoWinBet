@@ -2012,7 +2012,9 @@ def cmd_player_quotes(a) -> None:
                     for mid in ((bdata or {}).get("markets") or {}) if b.startswith("sisal") else ():
                         mm = m.markets.get(int(mid)) if str(mid).isdigit() else None
                         if mm and mm.get("playerProp"):  # every player market type Sisal offers, ours or not
-                            census.setdefault(f"{mm.get('marketType')} ({mm.get('marketName')})", set()).add(fx.id)
+                            outs = "/".join(sorted(set(mm.get("_out", {}).values())))
+                            census.setdefault(f"{mm.get('marketType')} ({mm.get('marketName')}) linea {mm.get('handicap')} esiti {outs}",
+                                              set()).add(fx.id)
                     if b.startswith("sisal") and (fx.id, b) not in done:
                         qs = player_odds(row, m.markets, b)
                         if qs:
