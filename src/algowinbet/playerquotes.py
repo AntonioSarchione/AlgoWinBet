@@ -1,5 +1,5 @@
 """Sisal player prices from the OddsPapi snapshots we already download (no extra request): goalscorer, first goalscorer, two
-or more goals, shots and shots on target over/under. The dashboard's Giocatori tab shows them next to our probability.
+or more goals, assist, shots, shots on target and fouls committed over/under (no booking market in Sisal's feed, 2026-10-09). The dashboard's Giocatori tab shows them next to our probability.
 
 Only the latest price is kept (no price path): each snapshot of a fixture replaces that bookmaker's rows of the fixture, and
 rows not refreshed for KEEP_DAYS days (matches played, players dropped from the list) are deleted. OddsPapi names players
@@ -21,7 +21,10 @@ PLAYER_TYPES = {
     "players-goals": ("TWO_PLUS", "2+"),
     "playertotals-shots": ("SHOTS", "over"),
     "playertotals-shotsongoal": ("SHOTS_ON", "over"),
+    "players-assists": ("ASSIST", "1+"),
+    "playertotals-foulscommitted": ("FOULS", "over"),
 }
+LINED = ("SHOTS", "SHOTS_ON", "FOULS")  # over/under markets: one row per line
 
 
 @dataclass(frozen=True)
@@ -59,7 +62,7 @@ def player_odds(payload: dict, markets: dict[int, dict], book: str) -> list[Play
         if kind is None:
             continue
         code, want = kind
-        line = _line_key(m.get("handicap")) if code in ("SHOTS", "SHOTS_ON") else ""
+        line = _line_key(m.get("handicap")) if code in LINED else ""
         for oid_s, odata in (mdata.get("outcomes") or {}).items():
             try:
                 name = m["_out"].get(int(oid_s), "").strip().lower()

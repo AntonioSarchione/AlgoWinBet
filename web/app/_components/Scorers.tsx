@@ -25,11 +25,11 @@ const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" })[] = [
 type CardMarket = Market & { p: (c: PmPlayer["c"]) => number; outfield?: boolean };
 const LIKELY_STARTER = 0.5;
 const CARD_MARKETS: Record<string, CardMarket[]> = {
-  assist: [{ k: "as", l: "Fa un assist", hint: "almeno un assist (dagli assist e dagli xA del giocatore)", p: (c) => c.as ?? 0, outfield: true }],
+  assist: [{ k: "as", l: "Fa un assist", hint: "almeno un assist (dagli assist e dagli xA del giocatore)", p: (c) => c.as ?? 0, outfield: true, sisal: "ASSIST" }],
   cartellini: [{ k: "cg", l: "Ammonito", hint: "almeno un cartellino (giallo o rosso)", p: (c) => c.cg }],
   falli: [
-    { k: "fc1", l: "Falli fatti 1+", hint: "almeno un fallo commesso", p: (c) => pAtLeast(c.fc, 1), outfield: true },
-    { k: "fc2", l: "Falli fatti 2+", hint: "almeno due falli commessi", p: (c) => pAtLeast(c.fc, 2), outfield: true },
+    { k: "fc1", l: "Falli fatti 1+", hint: "almeno un fallo commesso", p: (c) => pAtLeast(c.fc, 1), outfield: true, sisal: "FOULS@0.5" },
+    { k: "fc2", l: "Falli fatti 2+", hint: "almeno due falli commessi", p: (c) => pAtLeast(c.fc, 2), outfield: true, sisal: "FOULS@1.5" },
     { k: "fd1", l: "Falli subiti 1+", hint: "almeno un fallo subito", p: (c) => pAtLeast(c.fd, 1), outfield: true },
     { k: "fd2", l: "Falli subiti 2+", hint: "almeno due falli subiti", p: (c) => pAtLeast(c.fd, 2), outfield: true },
   ],
@@ -211,7 +211,7 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
         La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Sono
         elencati solo i titolari (formazione ufficiale) o, prima, i titolari probabili (almeno 50%).{" "}
         {nSisal > 0
-          ? "La quota Sisal compare da sola quando la fotografia delle quote la contiene (marcatori e tiri); altrimenti scrivila tu per leggere l'EV."
+          ? "La quota Sisal compare da sola quando la fotografia delle quote la contiene (marcatori, assist, tiri e falli: cartellini non offerti nel feed); altrimenti scrivila tu per leggere l'EV."
           : "Scrivi la quota che vedi su Sisal per leggere l'EV."}{" "}
         La quota equa è quella sotto cui la giocata non ha valore. Nessun prezzo Pinnacle di confronto sui giocatori: un EV piccolo non basta.
         Solo paper trading.

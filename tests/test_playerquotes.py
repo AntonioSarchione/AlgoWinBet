@@ -52,3 +52,19 @@ def test_save_replaces_the_fixture_and_drops_old_rows():
     assert st.db.execute("SELECT COUNT(*) FROM player_quotes WHERE fixture_id='f1'").fetchone()[0] == 1
     save_player_quotes(st, "f2", "sisal.it", later, t + timedelta(days=4))  # f1 now older than KEEP_DAYS
     assert {r[0] for r in st.db.execute("SELECT fixture_id FROM player_quotes").fetchall()} == {"f2"}
+
+
+def test_assist_and_fouls_committed():
+    cat = CATALOGUE + [
+        {"marketId": 10750, "marketName": "Player Assists", "marketType": "players-assists", "playerProp": True, "period": "result",
+         "sportId": 10, "outcomes": [{"outcomeId": 10751, "outcomeName": "1+"}, {"outcomeId": 10752, "outcomeName": "2+"}]},
+        {"marketId": 103000, "marketName": "Over Under Player Fouls Committed", "marketType": "playertotals-foulscommitted",
+         "playerProp": True, "handicap": 0.5, "period": "result", "sportId": 10,
+         "outcomes": [{"outcomeId": 103000, "outcomeName": "Over"}, {"outcomeId": 103001, "outcomeName": "Under"}]},
+    ]
+    row = {"fixtureId": "x2", "bookmakerOdds": {"sisal.it": {"markets": {
+        "10750": {"outcomes": {"10751": {"players": {"11": pl("Kane, Harry", 3.1)}}, "10752": {"players": {"11": pl("Kane, Harry", 12.0)}}}},
+        "103000": {"outcomes": {"103000": {"players": {"11": pl("Kane, Harry", 1.6)}}, "103001": {"players": {"11": pl("Kane, Harry", 2.2)}}}},
+    }}}}
+    got = sorted((q.market, q.line_key, q.odds) for q in player_odds(row, OddsPapiMapper(markets=cat).markets, "sisal.it"))
+    assert got == [("ASSIST", "", 3.1), ("FOULS", "0.5", 1.6)]
