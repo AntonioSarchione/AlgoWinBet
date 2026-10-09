@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, CheckCircle2, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma, Users } from "lucide-react";
-import { fixtureDetail, parseJSON, playerQuotes, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
+import { AlertTriangle, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, CheckCircle2, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma, Sparkles, Users } from "lucide-react";
+import { fixtureBook, fixtureDetail, parseJSON, playerQuotes, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
 import { matchSisal, playerPool } from "@/lib/playermarkets";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
@@ -11,10 +11,13 @@ import { ChipRow } from "@/app/_components/ChipRow";
 import { Lineups, type ProbableData } from "@/app/_components/Lineups";
 import { Scorers, type ScorersData } from "@/app/_components/Scorers";
 import { Trends, type TrendsData } from "@/app/_components/Trends";
+import { parseBook, Proposal } from "@/app/_components/Proposal";
+import type { OptSettings } from "@/lib/optimizer";
 
 export const dynamic = "force-dynamic";
 
 const TABS = [
+  { v: "proposta", l: "Proposta", icon: Sparkles },
   { v: "probabilita", l: "Probabilità", icon: Percent },
   { v: "mercati", l: "Mercati", icon: ListChecks },
   { v: "quote", l: "Quote", icon: LineChart },
@@ -35,7 +38,7 @@ export async function generateMetadata({ params }: Props) {
 export default async function Partita({ params, searchParams }: Props) {
   const id = decodeURIComponent((await params).id);
   const sp = await searchParams;
-  const tab = sp.tab === "marcatori" ? "giocatori" : (sp.tab ?? "probabilita"); // old links to the scorers tab
+  const tab = sp.tab === "marcatori" ? "giocatori" : (sp.tab ?? "proposta"); // old links to the scorers tab
   const d = await fixtureDetail(id);
   if (!d) notFound();
   const { fx } = d;
@@ -82,13 +85,15 @@ export default async function Partita({ params, searchParams }: Props) {
       <section className="card">
         <nav className="tabs" aria-label="Sezioni dell'analisi">
           {TABS.map(({ v, l, icon: Icon }) => (
-            <Link key={v} href={v === "probabilita" ? base : `${base}?tab=${v}`} scroll={false} aria-current={tab === v ? "page" : undefined}>
+            <Link key={v} href={v === "proposta" ? base : `${base}?tab=${v}`} scroll={false} aria-current={tab === v ? "page" : undefined}>
               <Icon size={16} aria-hidden="true" /> {l}
             </Link>
           ))}
         </nav>
         <div className="card-pad fade-in" key={tab}>
-          {tab === "mercati" ? (
+          {tab === "proposta" ? (
+            <ProposalTab id={id} d={d} />
+          ) : tab === "mercati" ? (
             <Markets mk={mk} opps={d.opps} />
           ) : tab === "quote" ? (
             <Quotes id={id} home={fx.home} away={fx.away} q={sp} />
@@ -127,6 +132,16 @@ async function PlayersTab({ id, fx, d }: { id: string; fx: FixtureLike; d: NonNu
   const sisal = matchSisal(names, await playerQuotes(id));
   return <Scorers home={fx.home} away={fx.away} xgHome={fx.xg_home} xgAway={fx.xg_away} data={data} pm={pm} sisal={sisal} />;
 }
+// Proposta tab: the playable selections of the match (pub_book) and the published optimizer settings of the run
+async function ProposalTab({ id, d }: { id: string; d: NonNullable<Awaited<ReturnType<typeof fixtureDetail>>> }) {
+  const sels = parseBook(await fixtureBook(d.run.id, [id]), id);
+  const factors = Object.fromEntries(d.opps.map((o) => [o.market, parseJSON<{ positive_factors?: string[]; negative_factors?: string[] }>(o.factors, {})]));
+  return (
+    <Proposal fx={d.fx} sels={sels} settings={parseJSON<OptSettings | null>(d.run.optimizer, null)} fh={d.formHome} fa={d.formAway} h2h={d.h2h}
+      trends={parseJSON<TrendsData | null>(d.fx.trends, null)} factors={factors} />
+  );
+}
+
 type FixtureLike = { home: string; away: string; xg_home: number | null; xg_away: number | null; scorers?: string | null; probable?: string | null };
 
 function Probabilities({ fx, mk, opps }: { fx: { home: string; away: string; p_home: number | null; p_draw: number | null; p_away: number | null }; mk: ModelMarket[]; opps: OppRow[] }) {
