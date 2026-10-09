@@ -104,7 +104,7 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
                       {[f.p_home, f.p_draw, f.p_away].map((p, i) => (
                         <td key={i} className="num" title={p == null ? undefined : `quota equa ${fairOdds(p)}`}>{pct(p)}</td>
                       ))}
-                      <td><Split1X2 h={f.p_home} d={f.p_draw} a={f.p_away} /></td>
+                      <td><Split1X2 h={f.p_home} d={f.p_draw} a={f.p_away} labeled /></td>
                       <td className="num" title={f.p_over25 == null ? undefined : `quota equa ${fairOdds(f.p_over25)}`}>{pct(f.p_over25)}</td>
                       <td className="num" title={f.p_btts == null ? undefined : `quota equa ${fairOdds(f.p_btts)}`}>{pct(f.p_btts)}</td>
                       <td className="num muted">{f.xg_home != null && f.xg_away != null ? `${f.xg_home.toFixed(1)} – ${f.xg_away.toFixed(1)}` : "–"}</td>

@@ -65,7 +65,7 @@ function story(fx: Fx, fh: ResultRow[], fa: ResultRow[], h2h: ResultRow[], trend
   if (fx.xg_home != null && fx.xg_away != null) {
     const tot = fx.xg_home + fx.xg_away;
     out.push(`Goal attesi ${fx.xg_home.toFixed(2)} – ${fx.xg_away.toFixed(2)}: ${tot >= 3 ? "partita da goal" : tot <= 2.2 ? "partita chiusa, pochi goal attesi" : "goal nella media"}`
-      + (fx.p_over25 != null ? ` (Over 2.5 ${pct(fx.p_over25)}` + (fx.p_btts != null ? `, Goal ${pct(fx.p_btts)})` : ")") : "") + ".");
+      + (fx.p_over25 != null ? ` (per il modello Over 2.5 ${pct(fx.p_over25)}` + (fx.p_btts != null ? `, Goal ${pct(fx.p_btts)})` : ")") : "") + ".");
   }
   const h = form(fh, fx.home);
   const a = form(fa, fx.away);
@@ -73,7 +73,10 @@ function story(fx: Fx, fh: ResultRow[], fa: ResultRow[], h2h: ResultRow[], trend
   if (h2h.length) {
     const hw = h2h.filter((r) => (r.home === fx.home ? r.home_goals > r.away_goals : r.away_goals > r.home_goals)).length;
     const dr = h2h.filter((r) => r.home_goals === r.away_goals).length;
-    out.push(`Precedenti: ${hw} vittorie ${fx.home}, ${dr} pareggi, ${h2h.length - hw - dr} vittorie ${fx.away} negli ultimi ${h2h.length}.`);
+    const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+    const aw = h2h.length - hw - dr;
+    out.push(`Precedenti, ${h2h.length === 1 ? "l'ultimo" : `gli ultimi ${h2h.length}`}: ${fx.home} ${n(hw, "vittoria", "vittorie")}, `
+      + `${n(dr, "pareggio", "pareggi")}, ${fx.away} ${n(aw, "vittoria", "vittorie")}.`);
   }
   const all = trends ? [...trends.home, ...trends.away, ...trends.h2h] : [];
   const rare = all.sort((x, y) => y.r - x.r)[0];
