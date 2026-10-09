@@ -215,12 +215,15 @@ class GoalCollector:
         clock = clock or _time.monotonic
         st = CollectStats("history")
         t0 = clock()
-        # first rows of the backfill were dated at kickoff: moved to the usual publication time (idempotent)
-        self.store.db.execute(
-            "UPDATE lineups SET observed_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes'), "
-            "published_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes') WHERE source = ? AND status = 'confirmed' "
-            "AND observed_at = (SELECT kickoff FROM results WHERE results.fixture_id = lineups.fixture_id)", (SOURCE,))
-        self.store.db.commit()
+        # first rows of the backfill were dated at kickoff: moved to the usual publication time (idempotent). Looked up first
+        # (a read is local on the replica): the UPDATE scans every lineup on the primary, and once the table grew Turso closed
+        # the connection before it ended (2026-10-09), which cost the morning's history
+        stale = "FROM lineups WHERE source = ? AND status = 'confirmed' AND observed_at = (SELECT kickoff FROM results WHERE results.fixture_id = lineups.fixture_id)"
+        if self.store.db.execute(f"SELECT 1 {stale} LIMIT 1", (SOURCE,)).fetchone():
+            self.store.db.execute(
+                "UPDATE lineups SET observed_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes'), "
+                f"published_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', observed_at, '-60 minutes') WHERE rowid IN (SELECT rowid {stale})", (SOURCE,))
+            self.store.db.commit()
         todo, n_req = [], 0
         for row in self.pending_history(competitions, since):
             cost = int(bool(row[5])) + int(bool(row[6]))
