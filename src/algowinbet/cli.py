@@ -1634,6 +1634,15 @@ def cmd_slip_review(a) -> None:
         for day, n, op in store.db.execute("SELECT substr(created_at, 1, 10), COUNT(*), SUM(result IS NULL) FROM paper_slips "
                                            "GROUP BY 1 ORDER BY 1 DESC LIMIT 7").fetchall():
             print(f"  registrate il {day}: {n}, ancora aperte {op}")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        print("aperte per ultima partita: data dell'ultimo calcio d'inizio, schedine")
+        for day, n in store.db.execute("SELECT substr(last_kickoff, 1, 10), COUNT(*) FROM paper_slips WHERE result IS NULL GROUP BY 1 ORDER BY 1").fetchall():
+            print(f"  {day}: {n}")
+        late = store.db.execute("SELECT match, kickoff, sel_key, status FROM paper_legs WHERE result IS NULL AND kickoff < ? ORDER BY kickoff",
+                                ((datetime.now(timezone.utc) - timedelta(hours=4)).isoformat(),)).fetchall()
+        print(f"selezioni senza esito con la partita finita da oltre 4 ore: {len(late)}" + (f" (adesso {now_iso[:16]})" if late else ""))
+        for m_, ko, sk, stt in late[:20]:
+            print(f"  {ko[:16]} {m_} {sk} [{stt}]")
         slips = store.db.execute("SELECT id, legs, joint, total_odds, result, profile FROM paper_slips WHERE result IN ('won', 'lost')").fetchall()
         if not slips:
             print("nessuna schedina chiusa")
