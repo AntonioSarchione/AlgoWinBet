@@ -62,7 +62,7 @@ export const COMBO_SELECTIONS: ComboSel[] = [
     sel(`TEAM_TOTAL_AWAY|OVER|${l}`, "Gol squadra ospite", `Over ${l}`, (_h, a) => a > l),
     sel(`TEAM_TOTAL_AWAY|UNDER|${l}`, "Gol squadra ospite", `Under ${l}`, (_h, a) => a < l),
   ]),
-  ...([[1, 2], [1, 3], [2, 3], [2, 4], [3, 5], [4, 6]] as const).map(([lo, hi]) =>
+  ...([[1, 2], [1, 3], [2, 3], [2, 4], [2, 5], [2, 6], [3, 5], [4, 5], [4, 6]] as const).map(([lo, hi]) =>
     sel(`MULTIGOL|${lo}-${hi}|`, "Multigol", `${lo}-${hi}`, (h, a) => h + a >= lo && h + a <= hi)),
   sel("WIN_TO_NIL_HOME|YES|", "Vince a zero", "Casa", (h, a) => h > a && a === 0),
   sel("WIN_TO_NIL_AWAY|YES|", "Vince a zero", "Ospite", (h, a) => a > h && h === 0),

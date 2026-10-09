@@ -64,14 +64,8 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
         </div>
       </header>
 
+      {/* the fields of the chosen method only: shown by CSS from the selected option (no client code), see .bank-form */}
       <form key={JSON.stringify(sp)} className="card filters bank-form" method="get" aria-label="Piano di puntate">
-        <div className="field">
-          <label htmlFor="start">Capitale iniziale (€)</label>
-          <div className="control">
-            <PiggyBank size={17} aria-hidden="true" />
-            <input id="start" name="start" type="number" inputMode="decimal" min="10" step="10" defaultValue={sp.start ?? plan.start} />
-          </div>
-        </div>
         <div className="field">
           <label htmlFor="m">Metodo</label>
           <div className="control">
@@ -82,20 +76,27 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
           </div>
         </div>
         <div className="field">
+          <label htmlFor="start">Capitale iniziale (€)</label>
+          <div className="control">
+            <PiggyBank size={17} aria-hidden="true" />
+            <input id="start" name="start" type="number" inputMode="decimal" min="10" step="10" defaultValue={sp.start ?? plan.start} />
+          </div>
+        </div>
+        <div className="field f-kelly">
           <label htmlFor="kelly">Frazione di Kelly (%)</label>
           <div className="control">
             <Gauge size={17} aria-hidden="true" />
             <input id="kelly" name="kelly" type="number" inputMode="decimal" min="5" max="100" step="5" defaultValue={sp.kelly ?? plan.kelly * 100} />
           </div>
         </div>
-        <div className="field">
+        <div className="field f-pct">
           <label htmlFor="pct">Percentuale del saldo (%)</label>
           <div className="control">
             <Percent size={17} aria-hidden="true" />
             <input id="pct" name="pct" type="number" inputMode="decimal" min="0.1" max="20" step="0.1" defaultValue={sp.pct ?? plan.pct * 100} />
           </div>
         </div>
-        <div className="field">
+        <div className="field f-flat">
           <label htmlFor="flat">Puntata fissa (€)</label>
           <div className="control">
             <Coins size={17} aria-hidden="true" />
@@ -123,7 +124,8 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
           <button type="submit" className="btn btn-primary">Simula</button>
         </div>
         <p className="note bank-hint">
-          {METHOD[plan.method].label}: {METHOD[plan.method].hint}. Puntata minima Sisal 2 €: sotto, la schedina non si punta (resta in tabella
+          {(Object.keys(METHOD) as Method[]).map((k) => <span key={k} className={`h-${k}`}>{METHOD[k].label}: {METHOD[k].hint}. </span>)}
+          Puntata minima Sisal 2 €: sotto, la schedina non si punta (resta in tabella
           con il motivo). Il Registro conta 1 unità su ogni schedina; qui conta solo quello che il piano punta davvero.
         </p>
       </form>

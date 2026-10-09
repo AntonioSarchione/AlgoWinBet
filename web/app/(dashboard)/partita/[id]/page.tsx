@@ -259,6 +259,7 @@ function Markets({ mk, opps }: { mk: ModelMarket[]; opps: OppRow[] }) {
                 <section key={g} className="mkt-group">
                   <h3>{g} <span className="count">{rows.length}</span></h3>
                   <ul>
+                    <li className="mkt-hd" aria-hidden="true"><span>Esito</span><span /><span>Prob.</span><span>Equa</span></li>
                     {rows.map((m) => (
                       <li key={m.l} className={m.p === top ? "top" : undefined}>
                         <span className="mkt-sel" title={m.l}>{m.l}</span>
@@ -420,63 +421,120 @@ function outcome(r: ResultRow, team: string) {
   return { gf, ga, res: gf > ga ? "W" : gf === ga ? "D" : "L" };
 }
 
+const RES_LABEL: Record<string, string> = { W: "V", D: "N", L: "P" };
+const share = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "–");
+
+// goal-line facts of a list of matches (from one team's side when `team` is given)
+function goalFacts(rows: ResultRow[]) {
+  const tot = rows.map((r) => r.home_goals + r.away_goals);
+  return {
+    avg: rows.length ? (tot.reduce((s, x) => s + x, 0) / rows.length).toFixed(1) : "–",
+    over: share(tot.filter((x) => x > 2.5).length, rows.length),
+    btts: share(rows.filter((r) => r.home_goals > 0 && r.away_goals > 0).length, rows.length),
+  };
+}
+
 function Form({ home, away, fh, fa, h2h }: { home: string; away: string; fh: ResultRow[]; fa: ResultRow[]; h2h: ResultRow[] }) {
-  const LBL: Record<string, string> = { W: "V", D: "N", L: "P" };
   const block = (team: string, rows: ResultRow[]) => {
     const o = rows.map((r) => outcome(r, team));
+    const n = (k: string) => o.filter((x) => x.res === k).length;
     const avg = (k: "gf" | "ga") => (o.length ? (o.reduce((s, x) => s + x[k], 0) / o.length).toFixed(1) : "–");
+    const g = goalFacts(rows);
+    const big = Math.max(1, ...o.map((x) => Math.abs(x.gf - x.ga)));
     return (
-      <div className="card" style={{ boxShadow: "none" }}>
-        <div className="card-head">
-          <h3><TeamBadge name={team} /> {team}</h3>
-          <span className="form" aria-label={`Ultime partite: ${o.map((x) => LBL[x.res]).join(" ")}`}>
-            {o.map((x, i) => <span key={i} className={x.res}>{LBL[x.res]}</span>)}
+      <section className="fm-card">
+        <header className="fm-head">
+          <TeamBadge name={team} />
+          <h3>{team}</h3>
+          <span className="form" aria-label={`Ultime partite: ${o.map((x) => RES_LABEL[x.res]).join(" ")}`}>
+            {o.map((x, i) => <span key={i} className={x.res}>{RES_LABEL[x.res]}</span>)}
           </span>
-        </div>
-        <div className="card-pad">
-          {!rows.length && <p className="muted">Nessuna partita di questa squadra nello storico raccolto.</p>}
-          {rows.length > 0 && <div className="kv"><span>Gol fatti / subiti (media)</span><span className="num">{avg("gf")} / {avg("ga")}</span></div>}
-          <table style={{ marginTop: 6 }}>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.fixture_id}>
-                  <td className="muted num">{shortDate(r.kickoff)}</td>
-                  <td>{r.home} - {r.away}<span className="sub">{compShort(r.competition)}</span></td>
-                  <td className="num"><b>{r.home_goals}-{r.away_goals}</b></td>
-                </tr>
+        </header>
+        {!rows.length ? (
+          <p className="muted">Nessuna partita di questa squadra nello storico raccolto.</p>
+        ) : (
+          <>
+            <div className="fm-wdl" aria-label={`${n("W")} vinte, ${n("D")} pareggiate, ${n("L")} perse`}>
+              {(["W", "D", "L"] as const).map((k) => n(k) > 0 && <i key={k} className={k} style={{ flex: n(k) }}><b>{n(k)}</b></i>)}
+            </div>
+            <div className="fm-tiles">
+              <span><small>Gol fatti</small><b className="num">{avg("gf")}</b></span>
+              <span><small>Gol subiti</small><b className="num">{avg("ga")}</b></span>
+              <span><small>Over 2.5</small><b className="num">{g.over}</b></span>
+              <span><small>Gol/Gol</small><b className="num">{g.btts}</b></span>
+              <span><small>Porta inviolata</small><b className="num">{share(o.filter((x) => x.ga === 0).length, o.length)}</b></span>
+            </div>
+            <div className="fm-diff" aria-hidden="true" title="differenza reti partita per partita (dalla più recente)">
+              {o.map((x, i) => (
+                <span key={i} className={x.res}><i style={{ height: `${Math.max(12, (Math.abs(x.gf - x.ga) / big) * 100)}%` }} /></span>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </div>
+            <ul className="fm-list">
+              {rows.map((r, i) => {
+                const at = r.home === team;
+                return (
+                  <li key={r.fixture_id}>
+                    <span className="muted num">{shortDate(r.kickoff)}</span>
+                    <span className="fm-opp">
+                      <span className="fm-venue">{at ? "C" : "T"}</span>
+                      {at ? r.away : r.home}
+                      <small>{compShort(r.competition)}</small>
+                    </span>
+                    <b className={`fm-score ${o[i].res}`}>{r.home_goals}-{r.away_goals}</b>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </section>
     );
   };
+  const hw = h2h.filter((r) => outcome(r, home).res === "W").length;
+  const dr = h2h.filter((r) => r.home_goals === r.away_goals).length;
+  const aw = h2h.length - hw - dr;
+  const g = goalFacts(h2h);
   return (
     <div className="col">
-      <div className="split" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+      <div className="split" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
         {block(home, fh)}
         {block(away, fa)}
       </div>
-      <div>
-        <h2 className="section">Precedenti diretti</h2>
+      <section className="fm-card">
+        <header className="fm-head">
+          <span className="tr-ico"><History size={16} aria-hidden="true" /></span>
+          <h3>Precedenti diretti</h3>
+          {h2h.length > 0 && <span className="count">{h2h.length}</span>}
+        </header>
         {h2h.length ? (
-          <div className="table-wrap" style={{ marginTop: 10 }}>
-            <table>
-              <tbody>
-                {h2h.map((r) => (
-                  <tr key={r.fixture_id}>
-                    <td className="muted num">{shortDate(r.kickoff)}</td>
-                    <td>{r.home} - {r.away}<span className="sub">{compShort(r.competition)}</span></td>
-                    <td className="num"><b>{r.home_goals}-{r.away_goals}</b></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="fm-h2h">
+              <span className="fm-side"><TeamBadge name={home} /><b className="num">{hw}</b><small>vittorie</small></span>
+              <div className="fm-h2h-bar" aria-label={`${home} ${hw}, pareggi ${dr}, ${away} ${aw}`}>
+                {hw > 0 && <i className="W" style={{ flex: hw }} />}
+                {dr > 0 && <i className="D" style={{ flex: dr }} />}
+                {aw > 0 && <i className="A" style={{ flex: aw }} />}
+              </div>
+              <span className="fm-side"><b className="num">{aw}</b><small>vittorie</small><TeamBadge name={away} /></span>
+            </div>
+            <p className="note fm-h2h-note">{dr} pareggi · {g.avg} gol a partita · Over 2.5 {g.over} · Gol/Gol {g.btts}</p>
+            <ul className="fm-list">
+              {h2h.map((r) => {
+                const res = outcome(r, home).res;
+                return (
+                  <li key={r.fixture_id}>
+                    <span className="muted num">{shortDate(r.kickoff)}</span>
+                    <span className="fm-opp">{r.home} - {r.away}<small>{compShort(r.competition)}</small></span>
+                    <b className={`fm-score ${res === "W" ? "W" : res === "D" ? "D" : "A"}`}>{r.home_goals}-{r.away_goals}</b>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         ) : (
           <p className="muted">Nessun precedente nelle ultime due stagioni.</p>
         )}
-      </div>
+      </section>
     </div>
   );
 }

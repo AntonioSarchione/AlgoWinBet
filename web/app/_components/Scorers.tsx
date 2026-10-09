@@ -14,10 +14,12 @@ export type TeamScorers = { state: "ufficiale" | "probabile"; sheets: number; pl
 export type ScorersData = Record<string, TeamScorers>;
 
 type Market = { k: string; l: string; hint: string; sisal?: string };
-const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" })[] = [
+const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" | "ga" })[] = [
   { k: "a", l: "Segna", hint: "almeno un gol nella partita (rigori inclusi, autogol esclusi)", sisal: "SCORER" },
   { k: "f", l: "Primo marcatore", hint: "il primo gol della partita è suo", sisal: "FIRST_SCORER" },
   { k: "d", l: "Doppietta", hint: "almeno due gol", sisal: "TWO_PLUS" },
+  // no Sisal price in the OddsPapi feed (2026-10-09): written by hand
+  { k: "ga", l: "Gol o assist", hint: "segna o fa un assist (gol dal modello marcatori, assist dalla scheda del giocatore, presi come indipendenti: la probabilità può essere un po' alta)" },
 ];
 // every player market: probability given that he starts, not times the chance of starting: Sisal voids a player bet when
 // the player does not take part, so its price is a price given that he plays. Only the starters (official XI) or the likely
@@ -139,12 +141,21 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
   const market = markets.find((x) => x.k === mk[group]) ?? markets[0];
   const nSisal = Object.keys(sisal).length;
 
-  const goalRows = (t: TeamScorers): Row[] => {
-    const k = market.k as "a" | "f" | "d";
-    const given = (p: ScorerPlayer) => (p.s >= 1 ? p[k] : p[`${k}s`] ?? p[k] / Math.max(p.s, 0.01));
+  const goalRows = (t: TeamScorers, team: string): Row[] => {
+    const given = (p: ScorerPlayer, k: "a" | "f" | "d") => (p.s >= 1 ? p[k] : p[`${k}s`] ?? p[k] / Math.max(p.s, 0.01));
+    const key = (n: string) => n.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    const assist = new Map((pm[team]?.players ?? []).map((p) => [key(p.n), p.c.as] as const));
+    const prob = (p: ScorerPlayer): number | undefined => {
+      if (market.k !== "ga") return given(p, market.k as "a" | "f" | "d");
+      const a = assist.get(key(p.n));
+      return a == null ? undefined : 1 - (1 - given(p, "a")) * (1 - a);
+    };
     return t.players
       .filter((p) => p.s >= LIKELY_STARTER)
-      .map((p) => ({ n: p.n, sub: `${ROLE[p.r] ?? p.r} · ${starter(p.s, t.state)}`, p: Math.min(given(p), 0.99) }))
+      .flatMap((p) => {
+        const v = prob(p);
+        return v == null ? [] : [{ n: p.n, sub: `${ROLE[p.r] ?? p.r} · ${starter(p.s, t.state)}`, p: Math.min(v, 0.99) }];
+      })
       .sort((a, b) => b.p - a.p);
   };
   const cardRows = (t: PmTeam): Row[] => {
@@ -160,7 +171,7 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
     if (group === "gol") {
       const t = data[team];
       return t ? (
-        <TeamTable key={team} team={team} state={t.state} rows={goalRows(t)} market={market} sisal={sisal} prices={prices} setPrice={setPrice}
+        <TeamTable key={team} team={team} state={t.state} rows={goalRows(t, team)} market={market} sisal={sisal} prices={prices} setPrice={setPrice}
           head={`${xg != null ? `${xg.toFixed(2)} gol attesi · ` : ""}${t.sheets} partite di storico`} />
       ) : null;
     }

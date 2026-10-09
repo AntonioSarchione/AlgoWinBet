@@ -844,6 +844,8 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .mkt-group h3 { margin: 0 0 8px; display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .mkt-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .mkt-group li { display: grid; grid-template-columns: minmax(0, 1fr) 64px 52px 44px; align-items: center; gap: 10px; min-height: 30px; padding: 2px 6px; border-radius: 8px; font-size: 13.5px; }
+.mkt-group li.mkt-hd { min-height: 22px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 2px; }
+.mkt-group li.mkt-hd span:nth-child(n+3) { text-align: right; }
 .mkt-group li.top { background: var(--accent-soft); }
 .mkt-group li.top .mkt-sel { color: var(--text); font-weight: 600; }
 .mkt-group li > b, .mkt-group li > .num { text-align: right; }
@@ -868,3 +870,86 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
   .qpick { padding: 10px; }
   .mkt-grid, .mkt-groups { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Ritardi + Forma (2026-10-09): cards with icon chips, rarity meters, model dials, form strips */
+.tr-ico { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+.tr-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 2.2fr); gap: 10px; }
+.tr-stat { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--kind); }
+.tr-stat b { font-size: 22px; color: var(--text); }
+.tr-stat span { font-size: 12.5px; color: var(--text-2); line-height: 1.2; }
+.tr-rarest { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 14%, var(--card)), var(--card)); min-width: 0; }
+.tr-rarest > div { flex: 1; min-width: 0; display: grid; }
+.tr-rarest small { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.tr-rarest b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-serie { --kind: var(--s2); }
+.tr-digiuno { --kind: var(--warn); }
+.tr-frequenza { --kind: var(--s1); }
+.tr-block { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
+.tr-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 10px; }
+.tr-head .muted { margin-left: auto; }
+.tr-row { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px 10px 14px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card-2); overflow: hidden; transition: border-color .15s, transform .15s; }
+.tr-row::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--kind); }
+.tr-row:hover { border-color: color-mix(in srgb, var(--kind) 45%, var(--line)); transform: translateY(-1px); }
+.tr-kind { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  color: var(--kind); background: color-mix(in srgb, var(--kind) 14%, transparent); }
+.tr-meter { display: block; height: 4px; margin-top: 7px; border-radius: 999px; background: var(--track); overflow: hidden; max-width: 220px; }
+.tr-meter i { display: block; height: 100%; border-radius: 999px; background: var(--muted); }
+.tr-meter.mid i { background: var(--warn); }
+.tr-meter.hi i { background: var(--good); }
+.tr-side { flex-direction: row; align-items: center; gap: 10px; }
+.tr-dial { --p: 0; width: 52px; height: 52px; flex: none; border-radius: 50%; display: grid; place-content: center; text-align: center;
+  background: radial-gradient(closest-side, var(--card-2) 78%, transparent 80% 100%), conic-gradient(var(--kind) calc(var(--p) * 1turn), var(--track) 0); }
+.tr-dial b { font-size: 12.5px; line-height: 1; }
+.tr-dial small { font-size: 8.5px; color: var(--muted); line-height: 1.1; max-width: 40px; }
+.tr-empty { padding: 14px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
+.fm-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); display: grid; gap: 12px; align-content: start; }
+.fm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.fm-head h3 { margin: 0; font-size: 16px; }
+.fm-head .form { margin-left: auto; }
+.fm-wdl { display: flex; height: 22px; gap: 2px; border-radius: 8px; overflow: hidden; }
+.fm-wdl i { display: grid; place-items: center; min-width: 22px; font-style: normal; font-size: 11.5px; }
+.fm-wdl .W, .fm-diff .W i, .fm-h2h-bar .W { background: var(--good); color: var(--accent-ink, #fff); }
+.fm-wdl .D, .fm-diff .D i, .fm-h2h-bar .D { background: color-mix(in srgb, var(--muted) 55%, var(--track)); color: var(--text); }
+.fm-wdl .L, .fm-diff .L i { background: var(--bad); color: #fff; }
+.fm-h2h-bar .A { background: var(--s1); }
+.fm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 8px; }
+.fm-tiles span { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--card-2); border: 1px solid var(--line); }
+.fm-tiles small { font-size: 11px; color: var(--muted); }
+.fm-tiles b { font-size: 17px; }
+.fm-diff { display: flex; align-items: flex-end; gap: 4px; height: 34px; }
+.fm-diff span { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.fm-diff i { display: block; width: 100%; border-radius: 4px 4px 2px 2px; }
+.fm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.fm-list li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 36px; padding: 4px 6px; border-radius: 8px; font-size: 13.5px; }
+.fm-list li:hover { background: var(--card-2); }
+.fm-opp { min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fm-opp small { color: var(--muted); font-size: 11.5px; }
+.fm-venue { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; font-size: 10.5px; font-weight: 700; background: var(--card-2); border: 1px solid var(--line); color: var(--text-2); }
+.fm-score { min-width: 46px; text-align: center; padding: 3px 8px; border-radius: 8px; font-family: var(--font-mono); font-size: 13px; }
+.fm-score.W { background: var(--good-soft); color: var(--good); }
+.fm-score.D { background: var(--card-2); color: var(--text-2); border: 1px solid var(--line); }
+.fm-score.L { background: var(--bad-soft); color: var(--bad); }
+.fm-score.A { background: color-mix(in srgb, var(--s1) 16%, transparent); color: var(--s1); }
+.fm-h2h { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.fm-side { display: flex; align-items: center; gap: 6px; }
+.fm-side b { font-size: 20px; }
+.fm-side small { color: var(--muted); font-size: 11.5px; }
+.fm-h2h-bar { display: flex; gap: 2px; height: 12px; border-radius: 999px; overflow: hidden; }
+.fm-h2h-note { margin: 0; text-align: center; }
+@media (max-width: 760px) {
+  .tr-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tr-rarest { grid-column: 1 / -1; }
+  .tr-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .tr-kind { grid-column: 1 / -1; justify-self: start; }
+  .fm-side small { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tr-row { transition: none; } .tr-row:hover { transform: none; } }
+
+/* Bankroll: only the chosen method's field and hint (the select's checked option drives it, no client code) */
+.bank-form .f-kelly, .bank-form .f-pct, .bank-form .f-flat, .bank-hint .h-kelly, .bank-hint .h-pct, .bank-hint .h-flat { display: none; }
+.bank-form:has(#m option[value="kelly"]:checked) .f-kelly, .bank-form:has(#m option[value="pct"]:checked) .f-pct,
+.bank-form:has(#m option[value="flat"]:checked) .f-flat { display: flex; }
+.bank-form:has(#m option[value="kelly"]:checked) .h-kelly, .bank-form:has(#m option[value="pct"]:checked) .h-pct,
+.bank-form:has(#m option[value="flat"]:checked) .h-flat { display: inline; }

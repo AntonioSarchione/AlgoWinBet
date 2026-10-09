@@ -87,7 +87,7 @@ def model_markets(m: np.ndarray) -> list[dict]:
            {"g": "Gol/NoGol", "l": "Gol", "p": p(gg)}, {"g": "Gol/NoGol", "l": "NoGol", "p": p(~gg)}]
     for line in (0.5, 1.5, 2.5, 3.5, 4.5):
         out += [{"g": "Under/Over", "l": f"Over {line}", "p": p(tot > line)}, {"g": "Under/Over", "l": f"Under {line}", "p": p(tot < line)}]
-    for a, b in ((1, 2), (1, 3), (2, 3), (2, 4), (3, 5), (4, 6)):
+    for a, b in ((1, 2), (1, 3), (2, 3), (2, 4), (2, 5), (2, 6), (3, 5), (4, 5), (4, 6)):
         out.append({"g": "Multigol", "l": f"Multigol {a}-{b}", "p": p((tot >= a) & (tot <= b))})
     for side, g in (("casa", i), ("ospite", j)):
         for line in (0.5, 1.5, 2.5):
@@ -103,6 +103,11 @@ def model_markets(m: np.ndarray) -> list[dict]:
     out += [{"g": "Pari/Dispari", "l": "Dispari", "p": p(tot % 2 == 1)}, {"g": "Pari/Dispari", "l": "Pari", "p": p(tot % 2 == 0)}]
     flat = sorted(((float(m[a, b]), a, b) for a in range(min(n, 7)) for b in range(min(n, 7))), reverse=True)[:8]
     out += [{"g": "Risultato esatto", "l": f"{a}-{b}", "p": round(v, 4)} for v, a, b in flat]
+    # 1X2 + Multigol (Sisal's ranges): the 8 most likely; no price is collected for them, the fair odds only
+    ranges = [(a, b) for a in range(1, 6) for b in range(a + 1, 7)] + [(7, 99)]
+    combos = [(p(r & (tot >= a) & (tot <= b)), f"{lab} + Multigol {a}-{b}" if b < 99 else f"{lab} + Multigol {a}+")
+              for lab, r in (("1", home), ("X", draw), ("2", away)) for a, b in ranges]
+    out += [{"g": "1X2 + Multigol", "l": lab, "p": v} for v, lab in sorted(combos, key=lambda x: -x[0])[:8]]
     return out
 
 
