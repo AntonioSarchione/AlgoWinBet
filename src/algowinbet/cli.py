@@ -834,6 +834,27 @@ def cmd_pub_check(a) -> None:
             print(f"  portiere {names.get(k, k)}: TS {v.get('ts')} GS {v.get('gc')} PP {v.get('sv')} CG {v.get('cg', 0):.0%}")
 
 
+def cmd_team_map(a) -> None:
+    """Every source's spelling of every club next to its GOAL name, read off linked matches (no request): the aliases to
+    add, the conflicts, the clubs whose history sits under two names, the national teams the international results miss."""
+    from .autorun import AutoConfig
+    from .fdcollector import FootballDataCollector
+    from .teammap import TeamMap, print_team_map
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    try:
+        names = TeamNames.load(a.aliases)
+        tm = TeamMap(store, names)
+        tm.load_goal()
+        tm.load_oddspapi()
+        tm.load_fotmob(_fotmob_for(cfg, store, names))
+        tm.load_apif()
+        tm.load_football_data(FootballDataCollector(store, cfg.divisions, names))
+        print_team_map(tm, show_all=a.all)
+    finally:
+        store.close()
+
+
 def cmd_slip_rules(a) -> None:
     """Registered slips against the user's slip rules, each from the moment its code went in (no request): no leg under odds
     1.20 (2026-10-03 14:20 UTC), no national/club mix (2026-10-04 10:06), no leg under 45% and no national value leg under
@@ -2840,6 +2861,12 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--config", default="configs/collect.json")
     pg.add_argument("--apply", action="store_true", help="senza: solo elenco, nessuna cancellazione")
     pg.set_defaults(fn=cmd_registry_purge_stats)
+    tmp = sub.add_parser("team-map", help="nomi delle squadre in ogni fonte accanto al nome GOAL, alias da aggiungere (nessuna richiesta)")
+    tmp.add_argument("--all", action="store_true", help="anche le squadre senza alias da aggiungere")
+    tmp.add_argument("--config", default="configs/collect.json")
+    tmp.add_argument("--aliases", default="configs/team_aliases.json")
+    tmp.add_argument("--db", default="algowinbet.db")
+    tmp.set_defaults(fn=cmd_team_map)
     sr = sub.add_parser("slip-rules", help="schedine registrate contro le regole delle schedine (nessuna richiesta)")
     sr.add_argument("--show", type=int, default=5)
     sr.add_argument("--db", default="turso")
