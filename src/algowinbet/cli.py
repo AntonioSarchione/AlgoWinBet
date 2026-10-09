@@ -1784,6 +1784,46 @@ def cmd_quotes_prune(a) -> None:
         store.close()
 
 
+LEG_BANDS = (0.25, 0.35, 0.40, 0.45, 0.50, 0.60, 0.70, 1.01)
+
+
+def cmd_leg_bands(a) -> None:
+    """Settled registry selections by model probability band (no request): how many won against how many the model and the
+    Sisal-free Pinnacle price expected, overall and split into the model's own view (p above the market by at least 2
+    points) and price-only legs; then the same for the selections that sat in a registered slip."""
+    import math
+    store = SnapshotStore(a.db)
+    try:
+        rows = store.db.execute("SELECT fixture_id, sel_key, p, p_market, result FROM paper_legs WHERE result IN ('won', 'lost') "
+                                "AND p IS NOT NULL").fetchall()
+        in_slip = set()
+        for (legs,) in store.db.execute("SELECT legs FROM paper_slips").fetchall():
+            in_slip.update((l.get("fixture_id"), l.get("sel_key")) for l in json.loads(legs or "[]"))
+
+        def line(label: str, sub: list) -> str:
+            if not sub:
+                return f"    {label:<16} –"
+            n, won = len(sub), sum(r[4] == "won" for r in sub)
+            exp = sum(r[2] for r in sub)
+            mk = [r for r in sub if r[3] is not None]
+            sd = math.sqrt(sum(r[2] * (1 - r[2]) for r in sub))
+            return (f"    {label:<16} n={n:<4} vinte {won / n:5.1%}  modello {exp / n:5.1%}  diff {(won - exp) / n:+6.1%} "
+                    f"(±{2 * sd / n:4.1%})" + (f"  mercato {sum(r[3] for r in mk) / len(mk):5.1%} su {len(mk)}" if mk else ""))
+
+        for title, pool in (("tutte le selezioni chiuse", rows), ("solo quelle entrate in una schedina", [r for r in rows if (r[0], r[1]) in in_slip])):
+            print(f"{title}: {len(pool)}")
+            for lo, hi in zip(LEG_BANDS, LEG_BANDS[1:]):
+                band = [r for r in pool if lo <= r[2] < hi]
+                if not band:
+                    continue
+                print(f"  {lo:.0%}–{min(hi, 1):.0%}")
+                print(line("tutte", band))
+                print(line("parere modello", [r for r in band if r[3] is not None and r[2] - r[3] >= 0.02]))
+                print(line("solo prezzo", [r for r in band if r[3] is None or r[2] - r[3] < 0.02]))
+    finally:
+        store.close()
+
+
 def cmd_registry_calibration(a) -> None:
     """Registry calibration against Pinnacle and Sisal closing prices: model error or luck of the matches (no API request)."""
     from .registrycal import load_rows, print_report, report
@@ -2982,6 +3022,9 @@ def build_parser() -> argparse.ArgumentParser:
     qk.add_argument("--past", type=float, default=0, help="giorni prima di adesso (partite già giocate)")
     qk.add_argument("--db", default="turso")
     qk.set_defaults(fn=cmd_quotes_check)
+    lb = sub.add_parser("leg-bands", help="selezioni chiuse del registro per fascia di probabilità: vinte contro attese (nessuna richiesta)")
+    lb.add_argument("--db", default="turso")
+    lb.set_defaults(fn=cmd_leg_bands)
     rc = sub.add_parser("registry-check", help="diagnosi del registro: schedine per giorno, dettagli di una partita (nessuna richiesta API)")
     rc.add_argument("team", nargs="?", default="")
     rc.add_argument("--db", default="turso")
