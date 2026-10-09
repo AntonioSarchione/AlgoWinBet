@@ -1643,6 +1643,26 @@ def cmd_slip_review(a) -> None:
         print(f"selezioni senza esito con la partita finita da oltre 4 ore: {len(late)}" + (f" (adesso {now_iso[:16]})" if late else ""))
         for m_, ko, sk, stt in late[:20]:
             print(f"  {ko[:16]} {m_} {sk} [{stt}]")
+        # every selection the slips used, by kind: how often Under/Over and the rest, the model against Pinnacle, the results
+        fam = _dd(lambda: [0, 0.0, 0.0, 0, 0, 0, 0.0])  # n, sum p, sum p_market, n with market, settled, won, sum odds
+        for desc, p_, pm_, res, od in store.db.execute("SELECT market, p, p_market, result, odds FROM paper_legs").fetchall():
+            d = (desc or "").lower()
+            k = ("Under squadra" if "under" in d and "squadra" in d else "Over squadra" if "over" in d and "squadra" in d
+                 else "Under totale" if "under" in d else "Over totale" if "over" in d else "1X2/doppia" if d.startswith(("1x2", "doppia"))
+                 else "Goal/NoGoal" if "btts" in d or "goal" in d else "altro")
+            f_ = fam[k]
+            f_[0] += 1
+            f_[1] += p_ or 0
+            f_[6] += od or 0
+            if pm_ is not None:
+                f_[2] += pm_
+                f_[3] += 1
+            if res in ("won", "lost"):
+                f_[4] += 1
+                f_[5] += res == "won"
+        print("selezioni delle schedine per tipo: n, prob. finale media, Pinnacle media, quota media, chiuse, vinte")
+        for k, (n, sp, spm, nm, ns, nw, so) in sorted(fam.items(), key=lambda x: -x[1][0]):
+            print(f"  {k:<14}{n:>5}  {sp / n:6.1%}  {(spm / nm) if nm else float('nan'):6.1%}  {so / n:5.2f}  {ns:>4}  {nw / ns if ns else float('nan'):6.1%}")
         slips = store.db.execute("SELECT id, legs, joint, total_odds, result, profile FROM paper_slips WHERE result IN ('won', 'lost')").fetchall()
         if not slips:
             print("nessuna schedina chiusa")
