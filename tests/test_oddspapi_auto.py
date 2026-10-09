@@ -152,6 +152,21 @@ def test_mapper_links_fixture_and_maps_goal_markets_only():
     assert m.match_fixture(fixture_odds(start="2026-10-11T19:00:00Z"), twice) is None  # two candidates: never guess
 
 
+def test_mapper_links_a_club_spelled_past_recognition_by_the_other_one_at_the_same_kickoff():
+    parts = PARTICIPANTS + [{"participantId": 7, "participantName": "1. FC Cologne"}, {"participantId": 8, "participantName": "M'gladbach"}]
+    m = OddsPapiMapper(NAMES, MARKETS, parts)
+    ko = utc(2026, 10, 11, 13, 30)
+    cal = [Fixture(id="goal:k1", competition="Bundesliga", home="Köln", away="Borussia M'gladbach", kickoff=ko),
+           Fixture(id="goal:g1", competition="Serie A", home="Genoa", away="Fiorentina", kickoff=ko)]
+    assert m.match_fixture(fixture_odds(home=7, away=8, start="2026-10-11T13:30:00Z"), cal).id == "goal:k1"
+    assert m.match_fixture(fixture_odds(home=7, away=8, start="2026-10-11T14:30:00Z"), cal) is None  # kickoff an hour apart
+    m2 = OddsPapiMapper(NAMES, MARKETS, parts)
+    swapped = [Fixture(id="goal:k2", competition="Bundesliga", home="Borussia M'gladbach", away="Köln", kickoff=ko)]
+    assert m2.match_fixture(fixture_odds(home=7, away=8, start="2026-10-11T13:30:00Z"), swapped) is None  # other side: no
+    both = cal + [Fixture(id="goal:k3", competition="DFB Pokal", home="Paderborn", away="Borussia M'gladbach", kickoff=ko)]
+    assert m.match_fixture(fixture_odds(home=7, away=8, start="2026-10-11T13:30:00Z"), both) is None  # two candidates: never guess
+
+
 def test_history_keeps_only_prekickoff_points_and_marks_close():
     m = OddsPapiMapper(NAMES, MARKETS)
     fx = Fixture(id="goal:g1", competition="Serie A", home="Genoa", away="Fiorentina", kickoff=utc(2026, 10, 10, 13))

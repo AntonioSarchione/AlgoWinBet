@@ -144,6 +144,9 @@ class OddsPapiClient:
 
 
 # ------------------------------------------------------------------- mapping
+ONE_SIDE_KICKOFF = timedelta(minutes=30)  # match_fixture: one team recognised, kickoff this close
+
+
 class OddsPapiMapper:
     """Converts OddsPapi fixtures/odds into our fixtures (matched to the GOAL calendar) and OddsQuote rows."""
 
@@ -204,6 +207,14 @@ class OddsPapiMapper:
         if len(moved) == 1:
             self.report.good("fixture link (orario diverso)")
             return moved[0]
+        # One club spelled past recognition ("1. FC Cologne" / "Köln", "Stade Rennais FC" / "Rennes"): the other one, on the
+        # same side, at the same kickoff is the same match, a team plays one match at a time. Only when that fixture is the
+        # only candidate.
+        same = [f for f in calendar if abs(f.kickoff - ko) <= ONE_SIDE_KICKOFF
+                and max(self._sim(home, f.home), self._sim(away, f.away)) >= 0.9]
+        if len(same) == 1:
+            self.report.good("fixture link (una squadra, stesso orario)")
+            return same[0]
         self.report.gap(f"fixture oddspapi senza corrispondenza: {home}-{away} {ko:%Y-%m-%d %H:%M}")
         return None
 
