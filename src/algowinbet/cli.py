@@ -1932,6 +1932,50 @@ def cmd_dataset_relink(a) -> None:
         store.close()
 
 
+def cmd_odds_relink(a) -> None:
+    """OddsPapi matches of the stored snapshots (last --days) not linked to our calendar, matched again with the current
+    mapper (no request): linked, their quotes and Sisal player prices saved. The free price paths of the next runs then
+    follow them like every linked match."""
+    from .oddscollector import LINKS_SCHEMA, SOURCE as ODDS
+    from .playerquotes import player_odds, save_player_quotes
+    from .providers.oddspapi import OddsPapiMapper
+    store = SnapshotStore(a.db)
+    try:
+        markets, parts = store.last_raw(ODDS, "/markets"), store.last_raw(ODDS, "/participants")
+        if not markets:
+            sys.exit("catalogo /markets non presente nel database")
+        m = OddsPapiMapper(TeamNames.load(a.aliases), markets[1] if isinstance(markets[1], list) else [], parts[1] if parts else [])
+        now = datetime.now(timezone.utc)
+        calendar = SnapshotProvider(store).list_fixtures(None, now - timedelta(hours=3), now + timedelta(days=10))
+        store.db.executescript(LINKS_SCHEMA)
+        linked = {e for (e,) in store.db.execute("SELECT ext_id FROM fixture_links WHERE source=?", (ODDS,)).fetchall()}
+        since = (now - timedelta(days=a.days)).isoformat()
+        raws = store.db.execute("SELECT id, fetched_at FROM raw_requests WHERE source=? AND status=200 AND endpoint='/odds-by-tournaments' "
+                                "AND fetched_at >= ? ORDER BY id DESC", (ODDS, since)).fetchall()
+        done: set[str] = set()
+        for rid, fetched in raws:  # newest first
+            at = datetime.fromisoformat(fetched)
+            body = json.loads(store.raw_body(rid))
+            for row in body if isinstance(body, list) else [body]:
+                ext = str(row.get("fixtureId"))
+                if ext in linked or ext in done:
+                    continue
+                fx = m.match_fixture(row, calendar)
+                if fx is None:
+                    continue
+                done.add(ext)
+                store.db.execute("INSERT OR REPLACE INTO fixture_links(source, ext_id, fixture_id, linked_at) VALUES(?,?,?,?)",
+                                 (ODDS, ext, fx.id, now.isoformat()))
+                store.db.commit()
+                n = store.save_quotes(ODDS, m.odds(row, fx, at), rid)
+                npl = sum(save_player_quotes(store, fx.id, b, player_odds(row, m.markets, b), at)
+                          for b in row.get("bookmakerOdds") or {} if b.startswith("sisal"))
+                print(f"{fx.kickoff:%d/%m %H:%M} {fx.competition} | {fx.home}-{fx.away}: collegata, {n} quote, {npl} quote giocatore (fotografia {at:%d/%m %H:%M})")
+        print(f"snapshot letti: {len(raws)}, partite collegate ora: {len(done)}")
+    finally:
+        store.close()
+
+
 def cmd_player_quotes(a) -> None:
     """Sisal player prices filled from the OddsPapi snapshots already stored (no API request): the newest snapshot of every
     match not started yet. Then, per market, how many matches and players have a price."""
@@ -2852,6 +2896,11 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--db", default="turso")
     sc.add_argument("--all", action="store_true", help="tutte le statistiche, non solo corner e cartellini")
     sc.set_defaults(fn=cmd_stat_coverage)
+    orl = sub.add_parser("odds-relink", help="partite OddsPapi delle fotografie salvate non collegate: abbinate di nuovo (nessuna richiesta)")
+    orl.add_argument("--db", default="turso")
+    orl.add_argument("--aliases", default="configs/team_aliases.json")
+    orl.add_argument("--days", type=float, default=1.0, help="fotografie degli ultimi N giorni")
+    orl.set_defaults(fn=cmd_odds_relink)
     pq = sub.add_parser("player-quotes", help="quote giocatore Sisal dagli snapshot OddsPapi già salvati (nessuna richiesta)")
     pq.add_argument("--db", default="turso")
     pq.add_argument("--aliases", default="configs/team_aliases.json")
