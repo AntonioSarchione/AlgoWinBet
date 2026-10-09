@@ -680,7 +680,6 @@ th.num .th-sort { justify-content: flex-end; }
 .tr-rare { font-family: var(--font-mono); font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--card-2); color: var(--text-2); white-space: nowrap; }
 .tr-rare.mid { background: var(--warn-soft); color: var(--warn); }
 .tr-rare.hi { background: var(--good-soft); color: var(--good); }
-.tr-model { font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .tr-more { margin-top: 6px; }
 .tr-more summary { cursor: pointer; color: var(--text-2); font-size: 13px; min-height: 32px; display: flex; align-items: center; }
 .tr-more .tr-list { margin-top: 6px; }
@@ -899,10 +898,12 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .tr-meter.mid i { background: var(--warn); }
 .tr-meter.hi i { background: var(--good); }
 .tr-side { flex-direction: row; align-items: center; gap: 10px; }
-.tr-dial { --p: 0; width: 52px; height: 52px; flex: none; border-radius: 50%; display: grid; place-content: center; text-align: center;
-  background: radial-gradient(closest-side, var(--card-2) 78%, transparent 80% 100%), conic-gradient(var(--kind) calc(var(--p) * 1turn), var(--track) 0); }
+.tr-model { width: 64px; flex: none; display: grid; justify-items: center; gap: 3px; }
+.tr-model small { font-size: 10.5px; line-height: 1.15; color: var(--muted); text-align: center; }
+.tr-dial { --p: 0; width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-content: center;
+  background: radial-gradient(closest-side, var(--card-2) 76%, transparent 78% 100%), conic-gradient(var(--kind) calc(var(--p) * 1turn), var(--track) 0); }
 .tr-dial b { font-size: 12.5px; line-height: 1; }
-.tr-dial small { font-size: 8.5px; color: var(--muted); line-height: 1.1; max-width: 40px; }
+.tr-nomodel .tr-dial b { color: var(--muted); }
 .tr-empty { padding: 14px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
 .fm-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); display: grid; gap: 12px; align-content: start; }
 .fm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }

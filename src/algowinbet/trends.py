@@ -69,7 +69,7 @@ EVENTS = (
     Event("draw", "Pareggia", "Senza pareggi", "pareggi", lambda v: v.gf == v.ga, lambda h: "X"),
     Event("loss", "Perde", "Senza sconfitte", "sconfitte", lambda v: v.gf < v.ga, lambda h: "2" if h else "1"),
     Event("scores", "Segna", "Senza segnare", "partite a segno", lambda v: v.gf > 0, lambda h: f"Over 0.5 {'casa' if h else 'ospite'}"),
-    Event("clean", "Porta inviolata", "Subisce gol", "porte inviolate", lambda v: v.ga == 0, None),
+    Event("clean", "Porta inviolata", "Subisce gol", "porte inviolate", lambda v: v.ga == 0, lambda h: f"!Over 0.5 {'ospite' if h else 'casa'}"),
     Event("o15", "Over 1.5", "Under 1.5", "Over 1.5", lambda v: v.gf + v.ga > 1.5, lambda h: "Over 1.5"),
     Event("o25", "Over 2.5", "Under 2.5", "Over 2.5", lambda v: v.gf + v.ga > 2.5, lambda h: "Over 2.5"),
     Event("o35", "Over 3.5", "Under 3.5", "Over 3.5", lambda v: v.gf + v.ga > 3.5, lambda h: "Over 3.5"),
@@ -122,6 +122,15 @@ def _xg(vs: list[View]) -> str | None:
     return f"xG medio {sum(x[0] for x in xs) / len(xs):.2f} fatti, {sum(x[1] for x in xs) / len(xs):.2f} subiti"
 
 
+def _model(markets: dict[str, float], label: str) -> float | None:
+    """The model market's probability; "!label": its complement (a clean sheet is the opponent's Under 0.5). Corners and
+    cards have no model market: None."""
+    if label.startswith("!"):
+        p = markets.get(label[1:])
+        return None if p is None else 1.0 - p
+    return markets.get(label)
+
+
 def streaks(vs: list[View], base: dict, home_next: bool, markets: dict[str, float], subject: str = "") -> list[dict]:
     """Runs and counts of every event over the views (newest first). `m` is the model's probability that the event happens in
     the next match (it ends a drought, it extends a run). `subject` names the side in the head-to-head list."""
@@ -131,7 +140,7 @@ def streaks(vs: list[View], base: dict, home_next: bool, markets: dict[str, floa
         seq = [(y, p) for y, p in seq if y is not None and p is not None]
         if len(seq) < MIN_RUN:
             continue
-        model = markets.get(e.model(home_next)) if e.model and markets else None
+        model = _model(markets, e.model(home_next)) if e.model and markets else None
         label = f"{subject}: " if subject and e.key in TEAM_EVENTS else ""
         # run from the newest match back
         first = seq[0][0]

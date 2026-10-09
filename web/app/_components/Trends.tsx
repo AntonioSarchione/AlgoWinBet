@@ -32,9 +32,15 @@ function Row({ s }: { s: Trend }) {
       <div className="tr-side">
         <span className={`tr-rare ${tier(s.r)}`}>1 su {s.r.toLocaleString("it-IT")}</span>
         {s.m != null && (
-          <span className="tr-dial" style={{ "--p": s.m } as React.CSSProperties} title="probabilità del modello per la prossima partita">
-            <b className="num">{Math.round(s.m * 100)}%</b>
+          <span className="tr-model" title="probabilità del modello per la prossima partita">
+            <span className="tr-dial" style={{ "--p": s.m } as React.CSSProperties}><b className="num">{Math.round(s.m * 100)}%</b></span>
             <small>{K.next}</small>
+          </span>
+        )}
+        {s.m == null && (
+          <span className="tr-model tr-nomodel" title="il modello stima solo i mercati dei gol: corner e cartellini no">
+            <span className="tr-dial"><b>–</b></span>
+            <small>nessun modello</small>
           </span>
         )}
       </div>
