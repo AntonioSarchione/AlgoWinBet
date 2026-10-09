@@ -171,7 +171,7 @@ def cmd_analyze(a) -> None:
     for an in r.analyses.values():
         if an.availability and (an.state.lineup_state != "none" or any(av.notes for av in an.availability.values())):
             f = an.state.fixture
-            print(f"\n  Formazioni/notizie {f.home} - {f.away} (stato {an.state.lineup_state}, shift gol attesi "
+            print(f"\n  Formazioni/notizie {f.home} - {f.away} (stato {an.state.lineup_state}, shift goal attesi "
                   f"casa {an.adjustment.d_home:+.3f} / ospite {an.adjustment.d_away:+.3f} in log):")
             for n in (an.opportunities[0].lineup_notes if an.opportunities else [])[:6]:
                 print(f"    · {n}")
@@ -202,7 +202,7 @@ def cmd_timeline(a) -> None:
     prev: dict[str, float] = {}
     for e in eng.timeline(fx, model_cutoff=cutoff - timedelta(days=1)):
         stale = "  !! quote più vecchie dell'ultima informazione" if e.stale_quotes else ""
-        print(f"\n[{e.label}] {e.cutoff:%d/%m %H:%M}  formazioni: {e.lineup_state}  gol attesi {e.expected_goals[0]:.2f}-{e.expected_goals[1]:.2f} "
+        print(f"\n[{e.label}] {e.cutoff:%d/%m %H:%M}  formazioni: {e.lineup_state}  goal attesi {e.expected_goals[0]:.2f}-{e.expected_goals[1]:.2f} "
               f"(shift log {e.lambda_shift[0]:+.3f}/{e.lambda_shift[1]:+.3f}){stale}")
         for k, r in e.rows.items():
             d = f"  Δp_finale {r['p_final'] - prev[k]:+.3f}" if k in prev else ""
@@ -2214,7 +2214,7 @@ def cmd_model_check(a) -> None:
                 mat = m.score_matrix(f.home, f.away)
                 print(f"[{name}] {f.home}-{f.away} ({f.competition}): xG {lh:.2f}-{la:.2f}, Over 7.5 {probability(mat, o75):.1%}, "
                       f"partite nello storico {m.n_matches.get(f.home, 0)}/{m.n_matches.get(f.away, 0)}, "
-                      f"livello gol {m.mu_comp.get(f.competition, m.mu):.2f}, casa {m.home_adv:.2f}")
+                      f"livello goal {m.mu_comp.get(f.competition, m.mu):.2f}, casa {m.home_adv:.2f}")
                 for t in (f.home, f.away):
                     if t in m.teams:
                         k = m.teams[t]
@@ -2817,8 +2817,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--mock-stage", default="early", choices=["early", "pre_lineup", "post_lineup"])
         sp.add_argument("--mock-fresh-quotes", action="store_true", help="post_lineup: i book hanno già aggiornato le quote")
         sp.add_argument("--mock-effect-scale", type=float, default=1.0, help="peso reale dei giocatori nel mock")
-        sp.add_argument("--mock-bias-over", type=float, default=0.0, help="inefficienza pianificata nel mock (gol sottostimati dai book)")
-        sp.add_argument("--mock-noise", type=float, default=0.02, help="rumore dei book sul ritmo gol reale (0=book perfetti)")
+        sp.add_argument("--mock-bias-over", type=float, default=0.0, help="inefficienza pianificata nel mock (goal sottostimati dai book)")
+        sp.add_argument("--mock-noise", type=float, default=0.02, help="rumore dei book sul ritmo goal reale (0=book perfetti)")
         sp.add_argument("--odds-min", type=float)
         sp.add_argument("--odds-max", type=float)
         sp.add_argument("--min-probability", type=float)
@@ -2977,7 +2977,7 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--db", default="turso")
     dr.add_argument("--examples", type=int, default=6)
     dr.set_defaults(fn=cmd_dataset_report)
-    mk = sub.add_parser("model-check", help="gol attesi del modello per le prossime partite di una squadra (nessuna richiesta)")
+    mk = sub.add_parser("model-check", help="goal attesi del modello per le prossime partite di una squadra (nessuna richiesta)")
     mk.add_argument("team")
     mk.add_argument("--db", default="turso")
     mk.add_argument("--config")
@@ -3208,7 +3208,7 @@ def build_parser() -> argparse.ArgumentParser:
     pe = sub.add_parser("player-eval", help="numeri dei giocatori (tiri, falli, cartellino, assist) rigiocati giorno per giorno (nessuna richiesta API)")
     pe.add_argument("--since", default="2026-01-01")
     pe.add_argument("--tune", action="store_true", help="varianti (ultime presenze, peso del ruolo, binomiale negativa)")
-    pe.add_argument("--keepers", action="store_true", help="i portieri: tiri in porta subiti, gol subiti, parate")
+    pe.add_argument("--keepers", action="store_true", help="i portieri: tiri in porta subiti, goal subiti, parate")
     pe.add_argument("--db", default="turso")
     pe.set_defaults(fn=cmd_player_eval)
     se = sub.add_parser("scorer-eval", help="Fase 9: marcatori rigiocati settimana per settimana (nessuna richiesta API)")

@@ -86,7 +86,7 @@ def _lineup_notes(adj: Adjustment, avail: dict[str, TeamAvailability]) -> list[s
         if a.key_absences:
             notes.append(f"{a.team}: titolari abituali fuori dall'XI: " + ", ".join(p.name for p in a.key_absences[:4]))
     for _, text, eff in adj.contributions[:4]:
-        notes.append(f"{text} -> {math.exp(eff) - 1:+.1%} gol attesi")
+        notes.append(f"{text} -> {math.exp(eff) - 1:+.1%} goal attesi")
     return notes
 
 

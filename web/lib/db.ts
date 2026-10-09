@@ -155,7 +155,12 @@ const OPP_COLS =
   "fixture_id, kickoff, competition, pub_opportunities.\"match\" AS match_label, market, bookmaker, odds, fair_odds, p_final, p_market, ev, ev_lower, uncertainty, " +
   "data_quality, status, odds_stale, lineup_state, p_struct, p_low, p_high, n_books, edge, NULL AS factors";
 
-const withMatch = (rows: (OppRow & { match_label?: string })[]) => rows.map(({ match_label, ...o }) => ({ ...o, match: match_label ?? o.match ?? "" }));
+// "gol" became "goal" in every label on 2026-10-09: rows and JSON written before keep the old word, shown with the new one
+export const goalify = (s: string) =>
+  s.replace(/NoGol/g, "NoGoal").replace(/Multigol/g, "Multigoal").replace(/Gol/g, "Goal").replace(/gol/g, "goal");
+
+const withMatch = (rows: (OppRow & { match_label?: string })[]) =>
+  rows.map(({ match_label, ...o }) => ({ ...o, market: goalify(o.market), match: match_label ?? o.match ?? "" }));
 
 export const runOpps = cache(async (runId: number) =>
   withMatch(await all<OppRow>(`SELECT ${OPP_COLS} FROM pub_opportunities WHERE run_id = ? ORDER BY ev DESC`, [runId])),
@@ -473,7 +478,7 @@ export async function systemStatus() {
 export function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(goalify(raw)) as T;
   } catch {
     return fallback;
   }

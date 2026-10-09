@@ -119,7 +119,7 @@ def print_lineup_eval(reps: dict) -> None:
 
 
 def _print_one(rep: dict) -> None:
-    print(f"Formazioni ufficiali nel modello: {rep['weeks']} settimane, spostamento medio dei gol attesi {rep['mean_shift']:.3f} (log)")
+    print(f"Formazioni ufficiali nel modello: {rep['weeks']} settimane, spostamento medio dei goal attesi {rep['mean_shift']:.3f} (log)")
     print("differenza di log loss con formazione − senza (negativo = meglio), ±intervallo 95%")
     print(f"  {'gruppo':<18}{'partite':>8}  {'LL 1X2 senza':>13} {'diff 1X2':>16} {'diff O2.5':>16} {'diff GG':>16}")
     for g, r in sorted(rep["groups"].items(), key=lambda kv: -kv[1]["n"]):
@@ -127,7 +127,7 @@ def _print_one(rep: dict) -> None:
         print(f"  {g:<18}{r['n']:>8}  {r['base']['ll_1x2']:>13.4f} {f(r['d_1x2']):>16} {f(r['d_o25']):>16} {f(r['d_btts']):>16}")
     if rep.get("diag"):
         d = rep["diag"]
-        print(f"diagnosi: spostamento medio casa {d['mean_dh']:+.3f}, ospite {d['mean_da']:+.3f} (log); correlazione con gli scarti di gol "
+        print(f"diagnosi: spostamento medio casa {d['mean_dh']:+.3f}, ospite {d['mean_da']:+.3f} (log); correlazione con gli scarti di goal "
               f"casa {d['corr_home']:+.3f}, ospite {d['corr_away']:+.3f}; titolari nella formazione {d['xi_size']:.1f} contro somma usuale {d['base_size']:.1f}")
     if rep["skipped"]:
         print("partite saltate: " + ", ".join(f"{k} {v}" for k, v in rep["skipped"].items()))

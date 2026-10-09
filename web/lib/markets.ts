@@ -6,12 +6,12 @@ export const MARKET_GROUPS = [
   "Doppia chance",
   "Draw no bet",
   "Under/Over",
-  "Gol/NoGol",
-  "Gol squadra",
+  "Goal/NoGoal",
+  "Goal squadra",
   "Handicap",
-  "Risultato e gol esatti",
+  "Risultato e goal esatti",
   "1° e 2° tempo",
-  "Primo/ultimo gol",
+  "Primo/ultimo goal",
   "Corner",
   "Cartellini",
 ] as const;
@@ -22,17 +22,17 @@ const BY_CODE: Record<string, MarketGroup> = {
   DOUBLE_CHANCE: "Doppia chance",
   DRAW_NO_BET: "Draw no bet",
   TOTAL_GOALS: "Under/Over",
-  BTTS: "Gol/NoGol",
+  BTTS: "Goal/NoGoal",
   EURO_HANDICAP: "Handicap",
   ASIAN_HANDICAP: "Handicap",
-  CORRECT_SCORE: "Risultato e gol esatti",
-  TOTAL_EXACT: "Risultato e gol esatti",
-  WINNING_MARGIN: "Risultato e gol esatti",
-  ODD_EVEN: "Risultato e gol esatti",
-  WIN_TO_NIL_HOME: "Risultato e gol esatti",
-  WIN_TO_NIL_AWAY: "Risultato e gol esatti",
-  FIRST_GOAL: "Primo/ultimo gol",
-  LAST_GOAL: "Primo/ultimo gol",
+  CORRECT_SCORE: "Risultato e goal esatti",
+  TOTAL_EXACT: "Risultato e goal esatti",
+  WINNING_MARGIN: "Risultato e goal esatti",
+  ODD_EVEN: "Risultato e goal esatti",
+  WIN_TO_NIL_HOME: "Risultato e goal esatti",
+  WIN_TO_NIL_AWAY: "Risultato e goal esatti",
+  FIRST_GOAL: "Primo/ultimo goal",
+  LAST_GOAL: "Primo/ultimo goal",
 };
 
 export function marketGroup(selKey: string): MarketGroup {
@@ -41,6 +41,6 @@ export function marketGroup(selKey: string): MarketGroup {
   if (base.startsWith("CORNERS_")) return "Corner";
   if (base.startsWith("CARDS_")) return "Cartellini";
   if (period || base.startsWith("HT_FT") || base.includes("HALF")) return "1° e 2° tempo";
-  if (base.startsWith("TEAM_")) return "Gol squadra";
-  return BY_CODE[base] ?? "Risultato e gol esatti";
+  if (base.startsWith("TEAM_")) return "Goal squadra";
+  return BY_CODE[base] ?? "Risultato e goal esatti";
 }

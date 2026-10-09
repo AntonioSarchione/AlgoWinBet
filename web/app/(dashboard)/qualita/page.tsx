@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Qualità del modello" };
 
 const GROUPS: Record<string, string> = { campionati: "Campionati", coppe: "Coppe europee", nazionali: "Nazionali", tutte: "Tutte" };
-const FAMILIES = ["1X2", "U/O 2.5", "Gol/NoGol"];
+const FAMILIES = ["1X2", "U/O 2.5", "Goal/NoGoal"];
 // one colour and one marker shape per series, so identity never relies on colour alone
 const SERIES = [
   { key: "model", label: "Modello", color: "var(--s1)", shape: "circle" },
@@ -214,7 +214,7 @@ export default async function Qualita({ searchParams }: { searchParams: Promise<
             </table>
           </div>
           <p className="note card-pad">
-            Partite senza quota Pinnacle (coppe, Gol/NoGol, nazionali): il modello va corretto da solo. Ogni settimana i tre metodi sono adattati solo sulle
+            Partite senza quota Pinnacle (coppe, Goal/NoGoal, nazionali): il modello va corretto da solo. Ogni settimana i tre metodi sono adattati solo sulle
             settimane precedenti; l&apos;analisi live usa quello che sbaglia meno.
           </p>
         </section>

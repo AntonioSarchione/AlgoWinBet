@@ -148,7 +148,7 @@ export function MatchExplorer({ matches, initial }: { matches: ExplorerMatch[]; 
             )}
             {f.xg_home != null && f.xg_away != null && (
               <p className="note" style={{ textAlign: "center", marginTop: 12 }}>
-                Gol attesi: <span className="num">{f.xg_home.toFixed(2)}</span> – <span className="num">{f.xg_away.toFixed(2)}</span>
+                Goal attesi: <span className="num">{f.xg_home.toFixed(2)}</span> – <span className="num">{f.xg_away.toFixed(2)}</span>
               </p>
             )}
           </div>

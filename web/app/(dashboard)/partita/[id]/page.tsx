@@ -69,7 +69,7 @@ export default async function Partita({ params, searchParams }: Props) {
           </div>
           <div className="hero-stats">
             <div className="hero-stat">
-              <small>Gol attesi (modello)</small>
+              <small>Goal attesi (modello)</small>
               <b className="num">{fx.xg_home != null && fx.xg_away != null ? `${fx.xg_home.toFixed(2)} – ${fx.xg_away.toFixed(2)}` : "–"}</b>
               <span className="note">{fx.lineup_state === "confirmed" ? "formazioni ufficiali incluse" : "formazioni non ancora ufficiali"}</span>
             </div>
@@ -105,8 +105,8 @@ export default async function Partita({ params, searchParams }: Props) {
               <PlayersTab id={id} fx={fx} d={d} />
             ) : (
               <Empty icon={Users} title="Giocatori non disponibili">
-                Servono almeno 5 partite di storico con formazioni e gol per entrambe le squadre (le nazionali spesso non le hanno ancora),
-                e i gol attesi del modello.
+                Servono almeno 5 partite di storico con formazioni e goal per entrambe le squadre (le nazionali spesso non le hanno ancora),
+                e i goal attesi del modello.
               </Empty>
             )
           ) : tab === "ritardi" ? (
@@ -169,21 +169,21 @@ function Probabilities({ fx, mk, opps }: { fx: { home: string; away: string; p_h
       </div>
       <div className="split">
         <div>
-          <h2 className="section">Under / Over gol totali</h2>
+          <h2 className="section">Under / Over goal totali</h2>
           <div style={{ marginTop: 12 }}>{group("Under/Over").filter((m) => m.l.startsWith("Over")).map((m) => <HBar key={m.l} label={m.l} p={m.p} />)}</div>
         </div>
         <div>
-          <h2 className="section">Gol/NoGol</h2>
-          <div style={{ marginTop: 12 }}>{group("Gol/NoGol").map((m) => <HBar key={m.l} label={m.l} p={m.p} />)}</div>
+          <h2 className="section">Goal/NoGoal</h2>
+          <div style={{ marginTop: 12 }}>{group("Goal/NoGoal").map((m) => <HBar key={m.l} label={m.l} p={m.p} />)}</div>
         </div>
       </div>
       <div>
-        <h2 className="section">Gol squadra</h2>
+        <h2 className="section">Goal squadra</h2>
         <div className="split" style={{ marginTop: 12 }}>
           {([["casa", fx.home], ["ospite", fx.away]] as const).map(([side, team]) => (
             <div key={side}>
               <h3 className="team-sub"><TeamBadge name={team} /> {team}</h3>
-              {group("Gol squadra").filter((m) => m.l.endsWith(` ${side}`)).map((m) => (
+              {group("Goal squadra").filter((m) => m.l.endsWith(` ${side}`)).map((m) => (
                 <HBar key={m.l} label={m.l.replace(` ${side}`, "")} p={m.p} />
               ))}
             </div>
@@ -486,10 +486,10 @@ function Form({ home, away, fh, fa, h2h }: { home: string; away: string; fh: Res
               {(["W", "D", "L"] as const).map((k) => n(k) > 0 && <i key={k} className={k} style={{ flex: n(k) }}><b>{n(k)}</b></i>)}
             </div>
             <div className="fm-tiles">
-              <span><small>Gol fatti</small><b className="num">{avg("gf")}</b></span>
-              <span><small>Gol subiti</small><b className="num">{avg("ga")}</b></span>
+              <span><small>Goal fatti</small><b className="num">{avg("gf")}</b></span>
+              <span><small>Goal subiti</small><b className="num">{avg("ga")}</b></span>
               <span><small>Over 2.5</small><b className="num">{g.over}</b></span>
-              <span><small>Gol/Gol</small><b className="num">{g.btts}</b></span>
+              <span><small>Goal/Goal</small><b className="num">{g.btts}</b></span>
               <span><small>Porta inviolata</small><b className="num">{share(o.filter((x) => x.ga === 0).length, o.length)}</b></span>
             </div>
             <div className="fm-diff" aria-hidden="true" title="differenza reti partita per partita (dalla più recente)">
@@ -551,7 +551,7 @@ function Form({ home, away, fh, fa, h2h }: { home: string; away: string; fh: Res
                 ))}
               </ul>
             </div>
-            <p className="note fm-h2h-note">{g.avg} gol a partita · Over 2.5 {g.over} · Gol/Gol {g.btts}</p>
+            <p className="note fm-h2h-note">{g.avg} goal a partita · Over 2.5 {g.over} · Goal/Goal {g.btts}</p>
             <ul className="fm-list">
               {h2h.map((r) => {
                 const res = outcome(r, home).res;

@@ -75,7 +75,7 @@ def _migrate(store: SnapshotStore) -> None:
 
 def model_markets(m: np.ndarray) -> list[dict]:
     """Fair probabilities of the goal markets the dashboard shows, all read from one score matrix (model only, no price).
-    Multigol and same-match combos are exact sums over the joint score distribution."""
+    Multigoal and same-match combos are exact sums over the joint score distribution."""
     n = m.shape[0]
     i, j = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
     tot = i + j
@@ -84,18 +84,18 @@ def model_markets(m: np.ndarray) -> list[dict]:
     out = [{"g": "1X2", "l": "1", "p": p(home)}, {"g": "1X2", "l": "X", "p": p(draw)}, {"g": "1X2", "l": "2", "p": p(away)},
            {"g": "Doppia chance", "l": "1X", "p": p(i >= j)}, {"g": "Doppia chance", "l": "X2", "p": p(i <= j)},
            {"g": "Doppia chance", "l": "12", "p": p(i != j)},
-           {"g": "Gol/NoGol", "l": "Gol", "p": p(gg)}, {"g": "Gol/NoGol", "l": "NoGol", "p": p(~gg)}]
+           {"g": "Goal/NoGoal", "l": "Goal", "p": p(gg)}, {"g": "Goal/NoGoal", "l": "NoGoal", "p": p(~gg)}]
     for line in (0.5, 1.5, 2.5, 3.5, 4.5):
         out += [{"g": "Under/Over", "l": f"Over {line}", "p": p(tot > line)}, {"g": "Under/Over", "l": f"Under {line}", "p": p(tot < line)}]
     for a, b in ((1, 2), (1, 3), (2, 3), (2, 4), (2, 5), (2, 6), (3, 5), (4, 5), (4, 6)):
-        out.append({"g": "Multigol", "l": f"Multigol {a}-{b}", "p": p((tot >= a) & (tot <= b))})
+        out.append({"g": "Multigoal", "l": f"Multigoal {a}-{b}", "p": p((tot >= a) & (tot <= b))})
     for side, g in (("casa", i), ("ospite", j)):
         for line in (0.5, 1.5, 2.5):
-            out.append({"g": "Gol squadra", "l": f"Over {line} {side}", "p": p(g > line)})
-    for label, mask in (("1 + Over 2.5", home & (tot > 2.5)), ("2 + Over 2.5", away & (tot > 2.5)), ("1 + Gol", home & gg),
-                        ("2 + Gol", away & gg), ("Gol + Over 2.5", gg & (tot > 2.5)), ("1X + Under 3.5", (i >= j) & (tot < 3.5)),
+            out.append({"g": "Goal squadra", "l": f"Over {line} {side}", "p": p(g > line)})
+    for label, mask in (("1 + Over 2.5", home & (tot > 2.5)), ("2 + Over 2.5", away & (tot > 2.5)), ("1 + Goal", home & gg),
+                        ("2 + Goal", away & gg), ("Goal + Over 2.5", gg & (tot > 2.5)), ("1X + Under 3.5", (i >= j) & (tot < 3.5)),
                         ("X2 + Under 3.5", (i <= j) & (tot < 3.5)), ("1X + Over 1.5", (i >= j) & (tot > 1.5)),
-                        ("X2 + Over 1.5", (i <= j) & (tot > 1.5)), ("NoGol + Under 2.5", ~gg & (tot < 2.5))):
+                        ("X2 + Over 1.5", (i <= j) & (tot > 1.5)), ("NoGoal + Under 2.5", ~gg & (tot < 2.5))):
         out.append({"g": "Combo", "l": label, "p": p(mask)})
     for h in (-1, 1):
         adj = i + h
@@ -103,11 +103,11 @@ def model_markets(m: np.ndarray) -> list[dict]:
     out += [{"g": "Pari/Dispari", "l": "Dispari", "p": p(tot % 2 == 1)}, {"g": "Pari/Dispari", "l": "Pari", "p": p(tot % 2 == 0)}]
     flat = sorted(((float(m[a, b]), a, b) for a in range(min(n, 7)) for b in range(min(n, 7))), reverse=True)[:8]
     out += [{"g": "Risultato esatto", "l": f"{a}-{b}", "p": round(v, 4)} for v, a, b in flat]
-    # 1X2 + Multigol (Sisal's ranges): the 8 most likely; no price is collected for them, the fair odds only
+    # 1X2 + Multigoal (Sisal's ranges): the 8 most likely; no price is collected for them, the fair odds only
     ranges = [(a, b) for a in range(1, 6) for b in range(a + 1, 7)] + [(7, 99)]
-    combos = [(p(r & (tot >= a) & (tot <= b)), f"{lab} + Multigol {a}-{b}" if b < 99 else f"{lab} + Multigol {a}+")
+    combos = [(p(r & (tot >= a) & (tot <= b)), f"{lab} + Multigoal {a}-{b}" if b < 99 else f"{lab} + Multigoal {a}+")
               for lab, r in (("1", home), ("X", draw), ("2", away)) for a, b in ranges]
-    out += [{"g": "1X2 + Multigol", "l": lab, "p": v} for v, lab in sorted(combos, key=lambda x: -x[0])[:8]]
+    out += [{"g": "1X2 + Multigoal", "l": lab, "p": v} for v, lab in sorted(combos, key=lambda x: -x[0])[:8]]
     return out
 
 

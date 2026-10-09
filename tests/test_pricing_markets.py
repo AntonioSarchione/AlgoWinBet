@@ -119,8 +119,8 @@ def test_settlement_of_half_markets_needs_the_half_time_score():
 
 
 def test_new_markets_have_italian_labels():
-    assert R("TOTAL_GOALS@H1", "OVER", 0.5).label() == "Over 0.5 (totale gol) · 1° tempo"
+    assert R("TOTAL_GOALS@H1", "OVER", 0.5).label() == "Over 0.5 (totale goal) · 1° tempo"
     assert R("HT_FT", "X/1").label() == "Parziale/Finale X/1"
     assert R("DRAW_NO_BET", "AWAY").label() == "Draw no bet: 2 (ospite)"
-    assert R("FIRST_GOAL", "NONE").label() == "Primo gol: nessun gol"
+    assert R("FIRST_GOAL", "NONE").label() == "Primo goal: nessun goal"
     assert M.family_of("TOTAL_GOALS@H2") == "TOTALS_H2" and M.family_of("HT_FT") == "HALVES"

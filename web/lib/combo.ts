@@ -4,7 +4,7 @@
 // The score matrix is rebuilt exactly as src/algowinbet/models/dixon_coles.py score_matrix does: Poisson(xg_home) x
 // Poisson(xg_away) on 0..10 goals, Dixon-Coles tau on the low scores with the published rho, normalised. Every selection is
 // a set of scores, so the joint probability of a combo is the sum over the scores where all its selections win: the
-// dependence between them (1 + Over 2.5, Gol + Over 2.5...) comes out exactly.
+// dependence between them (1 + Over 2.5, Goal + Over 2.5...) comes out exactly.
 // The model alone is not the final word on each selection: where the published analysis has the final probability of a
 // selection (model shrunk toward the market), the joint is rescaled by final / model of every such selection. The
 // correlation stays the model's, the level follows the final probabilities.
@@ -50,20 +50,20 @@ export const COMBO_SELECTIONS: ComboSel[] = [
   sel("DOUBLE_CHANCE|1X|", "Doppia chance", "1X", (h, a) => h >= a),
   sel("DOUBLE_CHANCE|X2|", "Doppia chance", "X2", (h, a) => h <= a),
   sel("DOUBLE_CHANCE|12|", "Doppia chance", "12", (h, a) => h !== a),
-  sel("BTTS|YES|", "Gol/NoGol", "Gol", (h, a) => h > 0 && a > 0),
-  sel("BTTS|NO|", "Gol/NoGol", "NoGol", (h, a) => h === 0 || a === 0),
+  sel("BTTS|YES|", "Goal/NoGoal", "Goal", (h, a) => h > 0 && a > 0),
+  sel("BTTS|NO|", "Goal/NoGoal", "NoGoal", (h, a) => h === 0 || a === 0),
   ...[0.5, 1.5, 2.5, 3.5, 4.5].flatMap((l) => [
     sel(`TOTAL_GOALS|OVER|${l}`, "Under/Over", `Over ${l}`, (h, a) => h + a > l),
     sel(`TOTAL_GOALS|UNDER|${l}`, "Under/Over", `Under ${l}`, (h, a) => h + a < l),
   ]),
   ...[0.5, 1.5, 2.5].flatMap((l) => [
-    sel(`TEAM_TOTAL_HOME|OVER|${l}`, "Gol squadra casa", `Over ${l}`, (h) => h > l),
-    sel(`TEAM_TOTAL_HOME|UNDER|${l}`, "Gol squadra casa", `Under ${l}`, (h) => h < l),
-    sel(`TEAM_TOTAL_AWAY|OVER|${l}`, "Gol squadra ospite", `Over ${l}`, (_h, a) => a > l),
-    sel(`TEAM_TOTAL_AWAY|UNDER|${l}`, "Gol squadra ospite", `Under ${l}`, (_h, a) => a < l),
+    sel(`TEAM_TOTAL_HOME|OVER|${l}`, "Goal squadra casa", `Over ${l}`, (h) => h > l),
+    sel(`TEAM_TOTAL_HOME|UNDER|${l}`, "Goal squadra casa", `Under ${l}`, (h) => h < l),
+    sel(`TEAM_TOTAL_AWAY|OVER|${l}`, "Goal squadra ospite", `Over ${l}`, (_h, a) => a > l),
+    sel(`TEAM_TOTAL_AWAY|UNDER|${l}`, "Goal squadra ospite", `Under ${l}`, (_h, a) => a < l),
   ]),
   ...([[1, 2], [1, 3], [2, 3], [2, 4], [2, 5], [2, 6], [3, 5], [4, 5], [4, 6]] as const).map(([lo, hi]) =>
-    sel(`MULTIGOL|${lo}-${hi}|`, "Multigol", `${lo}-${hi}`, (h, a) => h + a >= lo && h + a <= hi)),
+    sel(`MULTIGOL|${lo}-${hi}|`, "Multigoal", `${lo}-${hi}`, (h, a) => h + a >= lo && h + a <= hi)),
   sel("WIN_TO_NIL_HOME|YES|", "Vince a zero", "Casa", (h, a) => h > a && a === 0),
   sel("WIN_TO_NIL_AWAY|YES|", "Vince a zero", "Ospite", (h, a) => a > h && h === 0),
   sel("ODD_EVEN|ODD|", "Pari/Dispari", "Dispari", (h, a) => (h + a) % 2 === 1),

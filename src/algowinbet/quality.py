@@ -7,7 +7,7 @@ For each match:
                average; margin removed), as the analysis would have seen it
   ensemble ... model and market blended as the live analysis does (adaptive weight)
   closing .... the closing price of the same reference book: the benchmark, and the price CLV is measured against
-Scores per family (1X2, Over/Under 2.5, Gol/NoGol) and group (leagues, cups, national teams): log loss, Brier, calibration.
+Scores per family (1X2, Over/Under 2.5, Goal/NoGoal) and group (leagues, cups, national teams): log loss, Brier, calibration.
 Value test: a flat 1-unit paper bet on every selection whose ensemble probability clears the live thresholds (EV and
 minimum probability) at the bookmaker price of that moment (Sisal when stored, else the market average): hit rate, ROI and
 CLV against the closing price.
@@ -39,7 +39,7 @@ DECISION = timedelta(hours=2)
 FAMILIES = {
     "1X2": [("MATCH_1X2", s, None) for s in ("HOME", "DRAW", "AWAY")],
     "U/O 2.5": [("TOTAL_GOALS", s, 2.5) for s in ("OVER", "UNDER")],
-    "Gol/NoGol": [("BTTS", s, None) for s in ("YES", "NO")],
+    "Goal/NoGoal": [("BTTS", s, None) for s in ("YES", "NO")],
 }
 # the previous model (no national-team Elo or international history) shows what the Fase 2 changes bought
 VERSIONS = {"attuale": {}, "v1": {"nation_elo_per_100": 0.0, "national_history_years": 0.0}}

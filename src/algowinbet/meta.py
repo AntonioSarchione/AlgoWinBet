@@ -1,6 +1,6 @@
 """Meta-model and calibration (Fase 4): how much to trust the model against the sharp market price, learned from results.
 
-For a market family (1X2, Over/Under 2.5, Gol/NoGol) the final probabilities are a logarithmic opinion pool
+For a market family (1X2, Over/Under 2.5, Goal/NoGoal) the final probabilities are a logarithmic opinion pool
 
     p_i  proportional to  exp(a * log p_model_i + b * log p_market_i + c_i)        (c_0 = 0)
 
@@ -35,7 +35,7 @@ from .domain import SelectionRef
 FAMILY_SELECTIONS = {
     "1X2": [("MATCH_1X2", "HOME", None), ("MATCH_1X2", "DRAW", None), ("MATCH_1X2", "AWAY", None)],
     "U/O 2.5": [("TOTAL_GOALS", "OVER", 2.5), ("TOTAL_GOALS", "UNDER", 2.5)],
-    "Gol/NoGol": [("BTTS", "YES", None), ("BTTS", "NO", None)],
+    "Goal/NoGoal": [("BTTS", "YES", None), ("BTTS", "NO", None)],
 }
 # national teams are priced by a different model (Elo prior, international history): the club fit made them worse in the
 # replay (1X2 log loss 0.876 -> 0.886 on 34 matches), so they use only a fit of their own

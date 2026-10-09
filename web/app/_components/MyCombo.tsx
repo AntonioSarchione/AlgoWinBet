@@ -90,7 +90,7 @@ export function MyCombo({ home, away, xgHome, xgAway, rho, finals, prices }: Pro
             </div>
           ) : null}
           <p className="note">
-            Solo selezioni sui gol (esito, doppia chance, Gol/NoGol, under/over, gol squadra, multigol, vince a zero, pari/dispari). Corner,
+            Solo selezioni sui goal (esito, doppia chance, Goal/NoGoal, under/over, goal squadra, multigoal, vince a zero, pari/dispari). Corner,
             cartellini e marcatori non entrano nel calcolo. Uso personale, solo paper trading.
           </p>
         </div>

@@ -1,6 +1,6 @@
 """Walk-forward comparison of goal-model variants (Fase 2): every week the model is fitted only on results known before
 Monday 00:00 UTC and predicts that week's matches. Scores are about probability quality, not betting:
-  1X2 log loss and RPS, Over/Under 2.5 and Gol/NoGol log loss (lower = better),
+  1X2 log loss and RPS, Over/Under 2.5 and Goal/NoGoal log loss (lower = better),
 and, where the season CSVs have them, the same 1X2 log loss of the closing price (Pinnacle, else Betfair Exchange, else
 the market average, margin removed) on the same matches, as the reference a good model approaches.
 """

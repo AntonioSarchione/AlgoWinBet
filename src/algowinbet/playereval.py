@@ -233,7 +233,7 @@ def print_player_eval(rep: PlayerReport, calibration: tuple[str, ...] = ("ammoni
 
 # ------------------------------------------------------------------------------------------------------------ keepers
 KEEPER_LINES = (("parate 2+", "sv", 2), ("parate 3+", "sv", 3), ("parate 4+", "sv", 4), ("tiri in porta subiti 4+", "ts", 4),
-                ("tiri in porta subiti 6+", "ts", 6), ("porta inviolata", "gc", 0), ("gol subiti 2+", "gc", 2))
+                ("tiri in porta subiti 6+", "ts", 6), ("porta inviolata", "gc", 0), ("goal subiti 2+", "gc", 2))
 
 
 @dataclass(frozen=True)

@@ -560,11 +560,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
               <div>
                 <span className="note">Con quote dei bookmaker (valore atteso)</span>
-                <div className="text-2">Tutti i mercati gol quotati da Sisal: 1X2, doppia chance, draw no bet, Under/Over e gol squadra, Gol/NoGol, handicap, risultato e gol esatti, margine, primo/ultimo gol, 1° e 2° tempo, Parziale/Finale. Corner (1X2, totale, squadra) dal modello dei corner. Cartellini: solo 1X2 (squadra con più cartellini)</div>
+                <div className="text-2">Tutti i mercati goal quotati da Sisal: 1X2, doppia chance, draw no bet, Under/Over e goal squadra, Goal/NoGoal, handicap, risultato e goal esatti, margine, primo/ultimo goal, 1° e 2° tempo, Parziale/Finale. Corner (1X2, totale, squadra) dal modello dei corner. Cartellini: solo 1X2 (squadra con più cartellini)</div>
               </div>
               <div>
                 <span className="note">Solo probabilità del modello (quota equa)</span>
-                <div className="text-2">Multigol e Combo. Cartellini e marcatori arrivano con i loro modelli</div>
+                <div className="text-2">Multigoal e Combo. Cartellini e marcatori arrivano con i loro modelli</div>
               </div>
             </div>
           </section>
@@ -615,8 +615,8 @@ function explorerMatch(f: FixtureRow): ExplorerMatch {
   // where Sisal prices the selection, the bar shows the probability the slips use (model shrunk toward the market)
   const picks: [string, number | undefined, ("p_over25" | "p_btts")?][] = [
     ["Over 2.5", book.p_over25?.pf ?? get("Under/Over", "Over 2.5") ?? f.p_over25 ?? undefined, "p_over25"],
-    ["Gol", book.p_btts?.pf ?? get("Gol/NoGol", "Gol") ?? f.p_btts ?? undefined, "p_btts"],
-    ["Multigol 2-4", get("Multigol", "Multigol 2-4")],
+    ["Goal", book.p_btts?.pf ?? get("Goal/NoGoal", "Goal") ?? f.p_btts ?? undefined, "p_btts"],
+    ["Multigoal 2-4", get("Multigoal", "Multigoal 2-4")],
     ["1X", get("Doppia chance", "1X")],
     ["1 + Over 2.5", get("Combo", "1 + Over 2.5")],
   ];

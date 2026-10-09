@@ -15,11 +15,11 @@ export type ScorersData = Record<string, TeamScorers>;
 
 type Market = { k: string; l: string; hint: string; sisal?: string };
 const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" | "ga" })[] = [
-  { k: "a", l: "Segna", hint: "almeno un gol nella partita (rigori inclusi, autogol esclusi)", sisal: "SCORER" },
-  { k: "f", l: "Primo marcatore", hint: "il primo gol della partita è suo", sisal: "FIRST_SCORER" },
-  { k: "d", l: "Doppietta", hint: "almeno due gol", sisal: "TWO_PLUS" },
+  { k: "a", l: "Segna", hint: "almeno un goal nella partita (rigori inclusi, autogoal esclusi)", sisal: "SCORER" },
+  { k: "f", l: "Primo marcatore", hint: "il primo goal della partita è suo", sisal: "FIRST_SCORER" },
+  { k: "d", l: "Doppietta", hint: "almeno due goal", sisal: "TWO_PLUS" },
   // no Sisal price in the OddsPapi feed (2026-10-09): written by hand
-  { k: "ga", l: "Gol o assist", hint: "segna o fa un assist (gol dal modello marcatori, assist dalla scheda del giocatore, presi come indipendenti: la probabilità può essere un po' alta)" },
+  { k: "ga", l: "Goal o assist", hint: "segna o fa un assist (goal dal modello marcatori, assist dalla scheda del giocatore, presi come indipendenti: la probabilità può essere un po' alta)" },
 ];
 // every player market: probability given that he starts, not times the chance of starting: Sisal voids a player bet when
 // the player does not take part, so its price is a price given that he plays. Only the starters (official XI) or the likely
@@ -44,7 +44,7 @@ const CARD_MARKETS: Record<string, CardMarket[]> = {
   ],
 };
 const GROUPS = [
-  { k: "gol", l: "Gol" },
+  { k: "goal", l: "Goal" },
   { k: "assist", l: "Assist" },
   { k: "cartellini", l: "Cartellini" },
   { k: "falli", l: "Falli" },
@@ -133,11 +133,11 @@ function TeamTable({ team, head, state, rows, market, sisal, prices, setPrice }:
 export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} }: {
   home: string; away: string; xgHome: number | null; xgAway: number | null; data: ScorersData; pm?: PmData; sisal?: SisalPrices;
 }) {
-  const [group, setGroup] = useState<GroupKey>("gol");
-  const [mk, setMk] = useState<Record<string, string>>({ gol: "a", assist: "as", cartellini: "cg", falli: "fc1", tiri: "sh1" });
+  const [group, setGroup] = useState<GroupKey>("goal");
+  const [mk, setMk] = useState<Record<string, string>>({ goal: "a", assist: "as", cartellini: "cg", falli: "fc1", tiri: "sh1" });
   const [prices, setPrices] = useState<Record<string, string>>({});
   const setPrice = (key: string, v: string) => setPrices((cur) => ({ ...cur, [key]: v }));
-  const markets: Market[] = group === "gol" ? GOAL_MARKETS : CARD_MARKETS[group];
+  const markets: Market[] = group === "goal" ? GOAL_MARKETS : CARD_MARKETS[group];
   const market = markets.find((x) => x.k === mk[group]) ?? markets[0];
   const nSisal = Object.keys(sisal).length;
 
@@ -168,11 +168,11 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
       .slice(0, TOP);
   };
   const side = (team: string, xg: number | null) => {
-    if (group === "gol") {
+    if (group === "goal") {
       const t = data[team];
       return t ? (
         <TeamTable key={team} team={team} state={t.state} rows={goalRows(t, team)} market={market} sisal={sisal} prices={prices} setPrice={setPrice}
-          head={`${xg != null ? `${xg.toFixed(2)} gol attesi · ` : ""}${t.sheets} partite di storico`} />
+          head={`${xg != null ? `${xg.toFixed(2)} goal attesi · ` : ""}${t.sheets} partite di storico`} />
       ) : null;
     }
     const t = pm[team];
@@ -180,7 +180,7 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
       <TeamTable key={team} team={team} state={t.state} rows={cardRows(t)} market={market} sisal={sisal} prices={prices} setPrice={setPrice} head="" />
     ) : null;
   };
-  const anyData = group === "gol" ? Boolean(data[home] || data[away]) : Boolean(pm[home] || pm[away]);
+  const anyData = group === "goal" ? Boolean(data[home] || data[away]) : Boolean(pm[home] || pm[away]);
 
   return (
     <div className="col">
@@ -216,8 +216,8 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
         </p>
       )}
       <p className="note">
-        {group === "gol"
-          ? "I gol attesi di ogni squadra sono divisi tra i giocatori secondo la loro quota dei gol della squadra (ultimo anno pesato di più, rigoristi a parte), ristretta verso la media del ruolo quando i dati sono pochi."
+        {group === "goal"
+          ? "I goal attesi di ogni squadra sono divisi tra i giocatori secondo la loro quota dei goal della squadra (ultimo anno pesato di più, rigoristi a parte), ristretta verso la media del ruolo quando i dati sono pochi."
           : "Dalle ultime 60 presenze FotMob del giocatore, ristrette verso la media del suo ruolo, scalate ai minuti che gioca da titolare e corrette per avversario e campo (verificate sulle partite passate con player-eval)."}{" "}
         La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Sono
         elencati solo i titolari (formazione ufficiale) o, prima, i titolari probabili (almeno 50%).{" "}

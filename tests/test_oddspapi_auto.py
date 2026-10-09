@@ -455,7 +455,7 @@ def test_publish_writes_dashboard_tables_and_prunes():
     mk = {(m["g"], m["l"]): m["p"] for m in json.loads(raw)}
     assert xg_h > 0 and abs(mk[("1X2", "1")] + mk[("1X2", "X")] + mk[("1X2", "2")] - 1) < 0.01
     assert mk[("Combo", "1 + Over 2.5")] <= min(mk[("1X2", "1")], mk[("Under/Over", "Over 2.5")])
-    assert mk[("Multigol", "Multigol 1-3")] >= mk[("Multigol", "Multigol 2-3")]
+    assert mk[("Multigoal", "Multigoal 1-3")] >= mk[("Multigoal", "Multigoal 2-3")]
     # bookmaker side of the headline selections: playable price, market probability, final (blended) probability
     books = [json.loads(b) for (b,) in s.db.execute("SELECT book FROM pub_fixtures WHERE run_id=? AND book IS NOT NULL", (rid,))]
     assert books and all(v["odds"] > 1 and 0 < v["pf"] < 1 for b in books for v in b.values())

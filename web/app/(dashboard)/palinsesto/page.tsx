@@ -83,7 +83,7 @@ export default async function Palinsesto({ searchParams }: { searchParams: Promi
                 <thead>
                   <tr>
                     <th><span className="sr-only">Scegli</span></th><th>Ora</th><th>Partita</th><th className="num">1</th><th className="num">X</th><th className="num">2</th>
-                    <th>Esito</th><th className="num">Over 2.5</th><th className="num">Gol</th><th className="num">Gol attesi</th><th>Info</th>
+                    <th>Esito</th><th className="num">Over 2.5</th><th className="num">Goal</th><th className="num">Goal attesi</th><th>Info</th>
                   </tr>
                 </thead>
                 <tbody>

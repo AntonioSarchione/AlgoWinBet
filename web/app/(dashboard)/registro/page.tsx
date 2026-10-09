@@ -256,7 +256,7 @@ export default async function Registro() {
           <p className="note card-pad">
             Tutte le selezioni registrate (valore ed eque). Una fascia è fuori quando dista dalla previsione più di {cal.zMax.toFixed(1)} errori standard:
             con {cal.tested} fasce controllate, un modello ben calibrato resta dentro 95 volte su 100. Fasce con meno di {CRITERION.minBand} selezioni non contano.
-            Gli errori standard raggruppano le selezioni della stessa partita: un weekend con pochi gol fa vincere tutti gli under insieme.
+            Gli errori standard raggruppano le selezioni della stessa partita: un weekend con pochi goal fa vincere tutti gli under insieme.
           </p>
         </section>
       </div>

@@ -38,7 +38,7 @@ function Row({ s }: { s: Trend }) {
           </span>
         )}
         {s.m == null && (
-          <span className="tr-model tr-nomodel" title="il modello stima solo i mercati dei gol: corner e cartellini no">
+          <span className="tr-model tr-nomodel" title="il modello stima solo i mercati dei goal: corner e cartellini no">
             <span className="tr-dial"><b>–</b></span>
             <small>nessun modello</small>
           </span>
@@ -115,12 +115,12 @@ export function Trends({ home, away, data }: { home: string; away: string; data:
         <Block title="Scontri diretti" head={icon(Swords)} sub={data.n_h2h ? `ultimi ${data.n_h2h} nello storico` : "nessuno nello storico"} items={data.h2h}
           empty={data.n_h2h >= 3 ? "Nessuna serie fuori dal comune." : "Servono almeno 3 precedenti."} />
         <Block title="Marcatori" head={icon(Target)} sub="titolari delle due squadre" items={data.scorers}
-          empty="Nessun digiuno o serie fuori dal comune rispetto ai gol attesi dal modello." />
+          empty="Nessun digiuno o serie fuori dal comune rispetto ai goal attesi dal modello." />
       </div>
       <Block title="Falli e cartellini" head={icon(ShieldAlert)} sub="difensori e centrocampisti" items={data.discipline}
         empty="Nessuna serie fuori dal comune: servono almeno 5 partite per giocatore." />
       <p className="note">
-        &quot;1 su N&quot;: quanto spesso capita una serie così lunga con le medie del campionato (ultime due stagioni) o, per i marcatori, con i gol
+        &quot;1 su N&quot;: quanto spesso capita una serie così lunga con le medie del campionato (ultime due stagioni) o, per i marcatori, con i goal
         che il modello attende dal giocatore; la barra è in scala logaritmica (piena da 1 su 1.000). Una serie da sola non rende l&apos;evento più
         probabile: accanto c&apos;è la probabilità del modello per la prossima partita (&quot;continua&quot;: la serie prosegue; &quot;si
         interrompe&quot;: l&apos;evento che manca accade), e xG o tiri quando ci sono, che dicono se è stata sfortuna. Solo paper trading.

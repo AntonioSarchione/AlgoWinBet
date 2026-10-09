@@ -69,11 +69,11 @@ EVENTS = (
     Event("draw", "Pareggia", "Senza pareggi", "pareggi", lambda v: v.gf == v.ga, lambda h: "X"),
     Event("loss", "Perde", "Senza sconfitte", "sconfitte", lambda v: v.gf < v.ga, lambda h: "2" if h else "1"),
     Event("scores", "Segna", "Senza segnare", "partite a segno", lambda v: v.gf > 0, lambda h: f"Over 0.5 {'casa' if h else 'ospite'}"),
-    Event("clean", "Porta inviolata", "Subisce gol", "porte inviolate", lambda v: v.ga == 0, lambda h: f"!Over 0.5 {'ospite' if h else 'casa'}"),
+    Event("clean", "Porta inviolata", "Subisce goal", "porte inviolate", lambda v: v.ga == 0, lambda h: f"!Over 0.5 {'ospite' if h else 'casa'}"),
     Event("o15", "Over 1.5", "Under 1.5", "Over 1.5", lambda v: v.gf + v.ga > 1.5, lambda h: "Over 1.5"),
     Event("o25", "Over 2.5", "Under 2.5", "Over 2.5", lambda v: v.gf + v.ga > 2.5, lambda h: "Over 2.5"),
     Event("o35", "Over 3.5", "Under 3.5", "Over 3.5", lambda v: v.gf + v.ga > 3.5, lambda h: "Over 3.5"),
-    Event("btts", "Gol (entrambe a segno)", "NoGol", "Gol", lambda v: v.gf > 0 and v.ga > 0, lambda h: "Gol"),
+    Event("btts", "Goal (entrambe a segno)", "NoGoal", "Goal", lambda v: v.gf > 0 and v.ga > 0, lambda h: "Goal"),
     Event("corners", "Over 9.5 corner", "Under 9.5 corner", "Over 9.5 corner",
           lambda v: None if _corners(v) is None else _corners(v) > 9.5),
     Event("cards", "Over 4.5 cartellini", "Under 4.5 cartellini", "Over 4.5 cartellini",
@@ -218,7 +218,7 @@ def scorer_streaks(sheets_by_team: dict, tally, roles: dict, names: dict, team: 
         if first:
             text = f"{name}: a segno da {k} partite da titolare di fila"
         else:
-            text = f"{name}: nessun gol da {k} partite da titolare (il modello gliene attendeva {rate * k:.1f})"
+            text = f"{name}: nessun goal da {k} partite da titolare (il modello gliene attendeva {rate * k:.1f})"
         extra = pstats.get(name)
         out.append({"t": text, "p": prob, "m": round(p_one, 3), "k": "serie" if first else "digiuno", "x": extra})
     return sorted(out, key=lambda s: s["p"])[:TOP]
@@ -281,7 +281,7 @@ def match_trends(store, prov, fixtures, markets_of: dict[str, list[dict]], now: 
         vh, va = views.get(f.home, [])[:LAST], views.get(f.away, [])[:LAST]
         if len(vh) < MIN_RUN and len(va) < MIN_RUN:
             continue
-        mk = {m["l"]: m["p"] for m in markets_of.get(f.id, []) if m.get("g") in ("1X2", "Under/Over", "Gol/NoGol", "Gol squadra")}
+        mk = {m["l"]: m["p"] for m in markets_of.get(f.id, []) if m.get("g") in ("1X2", "Under/Over", "Goal/NoGoal", "Goal squadra")}
         h2h = [v for v in views.get(f.home, []) if v.opp == f.away][:LAST]
         if scorer is None:
             scorer = _scorer_context(store, prov, now)

@@ -5,7 +5,7 @@ export const MARKET_NAMES: Record<string, string> = {
   DOUBLE_CHANCE: "Doppia chance",
   DRAW_NO_BET: "Draw no bet",
   TOTAL_GOALS: "Under/Over",
-  BTTS: "Gol/NoGol",
+  BTTS: "Goal/NoGoal",
   TEAM_TOTAL_HOME: "Under/Over casa",
   TEAM_TOTAL_AWAY: "Under/Over ospite",
   EURO_HANDICAP: "Handicap europeo",
@@ -13,19 +13,19 @@ export const MARKET_NAMES: Record<string, string> = {
   ODD_EVEN: "Pari/Dispari",
   TEAM_ODD_EVEN_HOME: "Pari/Dispari casa",
   TEAM_ODD_EVEN_AWAY: "Pari/Dispari ospite",
-  TOTAL_EXACT: "Gol totali esatti",
-  TEAM_EXACT_HOME: "Gol esatti casa",
-  TEAM_EXACT_AWAY: "Gol esatti ospite",
+  TOTAL_EXACT: "Goal totali esatti",
+  TEAM_EXACT_HOME: "Goal esatti casa",
+  TEAM_EXACT_AWAY: "Goal esatti ospite",
   CORRECT_SCORE: "Risultato esatto",
   WINNING_MARGIN: "Margine di vittoria",
   WIN_TO_NIL_HOME: "Casa vince a zero",
   WIN_TO_NIL_AWAY: "Ospite vince a zero",
-  FIRST_GOAL: "Primo gol",
-  LAST_GOAL: "Ultimo gol",
+  FIRST_GOAL: "Primo goal",
+  LAST_GOAL: "Ultimo goal",
   HT_FT: "Parziale/Finale",
-  HIGHEST_HALF: "Tempo con più gol",
-  HIGHEST_HALF_HOME: "Tempo con più gol casa",
-  HIGHEST_HALF_AWAY: "Tempo con più gol ospite",
+  HIGHEST_HALF: "Tempo con più goal",
+  HIGHEST_HALF_HOME: "Tempo con più goal casa",
+  HIGHEST_HALF_AWAY: "Tempo con più goal ospite",
   SCORE_BOTH_HALVES_HOME: "Casa segna in entrambi i tempi",
   SCORE_BOTH_HALVES_AWAY: "Ospite segna in entrambi i tempi",
   WIN_BOTH_HALVES_HOME: "Casa vince entrambi i tempi",
@@ -65,20 +65,20 @@ export const marketName = (code: string) => MARKET_NAMES[baseCode(code)] ?? code
 
 const FIXED: Record<string, string> = {
   HOME: "1", DRAW: "X", AWAY: "2", OVER: "Over", UNDER: "Under", YES: "Sì", NO: "No", ODD: "Dispari", EVEN: "Pari",
-  NONE: "Nessun gol", "1ST": "1° tempo", "2ND": "2° tempo", EQUAL: "Uguale",
+  NONE: "Nessun goal", "1ST": "1° tempo", "2ND": "2° tempo", EQUAL: "Uguale",
 };
 
 export function selectionName(market: string, sel: string): string {
   const base = baseCode(market);
-  if (base === "BTTS") return sel === "YES" ? "Gol" : "NoGol";
+  if (base === "BTTS") return sel === "YES" ? "Goal" : "NoGoal";
   if (base === "WINNING_MARGIN") {
-    if (sel === "D") return "Pareggio con gol";
+    if (sel === "D") return "Pareggio con goal";
     if (sel === "NG") return "0-0";
     if (sel === "DI") return "Pareggio";
     return `${sel[0] === "H" ? "Casa" : "Ospite"} di ${sel.slice(1).replace("+", " o più")}`;
   }
   if (base === "TOTAL_EXACT" || base.startsWith("TEAM_EXACT")) return sel.replace("+", " o più");
-  if (base === "FIRST_GOAL" || base === "LAST_GOAL") return { HOME: "Casa", AWAY: "Ospite", NONE: "Nessun gol" }[sel] ?? sel;
+  if (base === "FIRST_GOAL" || base === "LAST_GOAL") return { HOME: "Casa", AWAY: "Ospite", NONE: "Nessun goal" }[sel] ?? sel;
   return FIXED[sel] ?? sel;
 }
 

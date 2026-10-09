@@ -64,8 +64,8 @@ function story(fx: Fx, fh: ResultRow[], fa: ResultRow[], h2h: ResultRow[], trend
   }
   if (fx.xg_home != null && fx.xg_away != null) {
     const tot = fx.xg_home + fx.xg_away;
-    out.push(`Gol attesi ${fx.xg_home.toFixed(2)} – ${fx.xg_away.toFixed(2)}: ${tot >= 3 ? "partita da gol" : tot <= 2.2 ? "partita chiusa, pochi gol attesi" : "gol nella media"}`
-      + (fx.p_over25 != null ? ` (Over 2.5 ${pct(fx.p_over25)}` + (fx.p_btts != null ? `, Gol ${pct(fx.p_btts)})` : ")") : "") + ".");
+    out.push(`Goal attesi ${fx.xg_home.toFixed(2)} – ${fx.xg_away.toFixed(2)}: ${tot >= 3 ? "partita da goal" : tot <= 2.2 ? "partita chiusa, pochi goal attesi" : "goal nella media"}`
+      + (fx.p_over25 != null ? ` (Over 2.5 ${pct(fx.p_over25)}` + (fx.p_btts != null ? `, Goal ${pct(fx.p_btts)})` : ")") : "") + ".");
   }
   const h = form(fh, fx.home);
   const a = form(fa, fx.away);

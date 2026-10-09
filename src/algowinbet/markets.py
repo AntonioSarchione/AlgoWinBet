@@ -393,7 +393,7 @@ def probability(matrix: np.ndarray, ref: SelectionRef) -> float:
 def joint_probability(matrix: np.ndarray, refs: list[SelectionRef]) -> float:
     """Exact joint probability of several goal-based legs of the SAME match (half markets on the half grid)."""
     if any(split_code(r.market_code)[0] in SEQUENCE | VOID_ON_DRAW for r in refs):
-        raise UnsupportedMarket("combinazione con primo/ultimo gol o draw no bet non supportata")
+        raise UnsupportedMarket("combinazione con primo/ultimo goal o draw no bet non supportata")
     if any(_needs_halves(r.market_code) for r in refs):
         m4 = np.ones(_H1.shape, dtype=bool)
         for r in refs:
@@ -461,12 +461,12 @@ def _describe(ref: SelectionRef) -> str:
     if c == "DRAW_NO_BET":
         return f"Draw no bet: {'1 (casa)' if s == 'HOME' else '2 (ospite)'}"
     if c in ("TEAM_ODD_EVEN_HOME", "TEAM_ODD_EVEN_AWAY"):
-        return f"Gol {_TEAM[c.rsplit('_', 1)[1]]} {'dispari' if s == 'ODD' else 'pari'}"
+        return f"Goal {_TEAM[c.rsplit('_', 1)[1]]} {'dispari' if s == 'ODD' else 'pari'}"
     if c == "HT_FT":
         return f"Parziale/Finale {s}"
     if c.startswith("HIGHEST_HALF"):
-        who = {"HIGHEST_HALF": "", "HIGHEST_HALF_HOME": " (gol casa)", "HIGHEST_HALF_AWAY": " (gol ospite)"}[c]
-        return f"Tempo con più gol{who}: " + {"1ST": "1° tempo", "EQUAL": "uguale", "2ND": "2° tempo"}[s]
+        who = {"HIGHEST_HALF": "", "HIGHEST_HALF_HOME": " (goal casa)", "HIGHEST_HALF_AWAY": " (goal ospite)"}[c]
+        return f"Tempo con più goal{who}: " + {"1ST": "1° tempo", "EQUAL": "uguale", "2ND": "2° tempo"}[s]
     if c in HALF_SPAN:
         kind, team = c.rsplit("_", 1)
         what = {"SCORE_BOTH_HALVES": "segna in entrambi i tempi", "WIN_BOTH_HALVES": "vince entrambi i tempi",
@@ -474,19 +474,19 @@ def _describe(ref: SelectionRef) -> str:
         return f"{_TEAM[team].capitalize()} {what}: {'Sì' if s == 'YES' else 'No'}"
     if c in SEQUENCE:
         first = "Primo" if c == "FIRST_GOAL" else "Ultimo"
-        return f"{first} gol: " + {"HOME": "casa", "AWAY": "ospite", "NONE": "nessun gol"}[s]
+        return f"{first} goal: " + {"HOME": "casa", "AWAY": "ospite", "NONE": "nessun goal"}[s]
     it = {
         "MATCH_1X2": {"HOME": "1 (casa)", "DRAW": "X (pareggio)", "AWAY": "2 (ospite)"},
-        "BTTS": {"YES": "Gol (entrambe segnano)", "NO": "NoGol"},
+        "BTTS": {"YES": "Goal (entrambe segnano)", "NO": "NoGoal"},
     }
     if c in it:
         return f"{'1X2' if c == 'MATCH_1X2' else 'BTTS'}: {it[c][s]}"
     if c == "TOTAL_GOALS":
-        return f"{'Over' if s == 'OVER' else 'Under'} {ln} (totale gol)"
+        return f"{'Over' if s == 'OVER' else 'Under'} {ln} (totale goal)"
     if c == "TEAM_TOTAL_HOME":
-        return f"{'Over' if s == 'OVER' else 'Under'} {ln} gol squadra casa"
+        return f"{'Over' if s == 'OVER' else 'Under'} {ln} goal squadra casa"
     if c == "TEAM_TOTAL_AWAY":
-        return f"{'Over' if s == 'OVER' else 'Under'} {ln} gol squadra ospite"
+        return f"{'Over' if s == 'OVER' else 'Under'} {ln} goal squadra ospite"
     if c == "DOUBLE_CHANCE":
         return f"Doppia chance {s}"
     if c == "CORRECT_SCORE":
@@ -497,16 +497,16 @@ def _describe(ref: SelectionRef) -> str:
         return f"Handicap {kind} ({h} casa): " + {"HOME": "1", "DRAW": "X", "AWAY": "2"}[s]
     if c == "WINNING_MARGIN":
         if s in ("D", "NG", "DI"):
-            return {"D": "Margine: pareggio con gol", "NG": "Margine: 0-0", "DI": "Margine: pareggio"}[s]
+            return {"D": "Margine: pareggio con goal", "NG": "Margine: 0-0", "DI": "Margine: pareggio"}[s]
         return f"Margine: {'casa' if s[0] == 'H' else 'ospite'} vince di {s[1:].replace('+', ' o più')}"
     if c in ("WIN_TO_NIL_HOME", "WIN_TO_NIL_AWAY"):
         return f"{'Casa' if c.endswith('HOME') else 'Ospite'} vince a zero: {'Sì' if s == 'YES' else 'No'}"
     if c == "ODD_EVEN":
-        return f"Totale gol {'dispari' if s == 'ODD' else 'pari'}"
+        return f"Totale goal {'dispari' if s == 'ODD' else 'pari'}"
     if c == "TOTAL_EXACT":
-        return f"Gol totali: {s.replace('+', ' o più')}"
+        return f"Goal totali: {s.replace('+', ' o più')}"
     if c in ("TEAM_EXACT_HOME", "TEAM_EXACT_AWAY"):
-        return f"Gol {'casa' if c.endswith('HOME') else 'ospite'}: {s.replace('+', ' o più')}"
+        return f"Goal {'casa' if c.endswith('HOME') else 'ospite'}: {s.replace('+', ' o più')}"
     return f"{c} {s} {ln if ln is not None else ''}".strip()
 
 
