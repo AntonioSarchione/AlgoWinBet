@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { OppRow } from "@/lib/db";
 import { compShort, dayTime, pct, signed, STATUS_LABEL } from "./format";
-import { MatchCell } from "./ui";
+import { MatchCell, PBar } from "./ui";
 
 type Key = "match" | "market" | "odds" | "fair_odds" | "p_final" | "p_market" | "ev" | "status";
 type Sort = { key: Key; dir: "asc" | "desc" } | null;
@@ -90,11 +90,11 @@ export function OppTable({ rows }: { rows: OppRow[] }) {
                   {o.market}
                   <span className="sub">{o.bookmaker}{o.odds_stale ? " · quota da ricontrollare" : o.lineup_state === "confirmed" ? " · XI ufficiali" : ""}</span>
                 </td>
-                <td className="num">{o.odds.toFixed(2)}</td>
+                <td className="num"><span className="odds-chip">{o.odds.toFixed(2)}</span></td>
                 <td className="num muted">{o.fair_odds.toFixed(2)}</td>
-                <td className="num">{pct(o.p_final, 1)}</td>
+                <td className="num">{pct(o.p_final, 1)}<PBar p={o.p_final} mark={o.p_market} /></td>
                 <td className="num muted">{pct(o.p_market, 1)}</td>
-                <td className={`num ${o.ev >= 0 ? "pos" : "neg"}`}>{signed(o.ev)}</td>
+                <td className="num"><span className={`ev-chip ${o.ev >= 0 ? "pos" : "neg"}`}>{signed(o.ev)}</span></td>
                 <td><span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span></td>
               </tr>
             );

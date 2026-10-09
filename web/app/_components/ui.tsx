@@ -125,3 +125,54 @@ export function HBar({ label, p, max = 1 }: { label: string; p: number; max?: nu
     </div>
   );
 }
+
+// Speedometer-style gauge (270° arc) for one probability, the figure printed in the middle.
+export function ProbGauge({ value, label, sub }: { value: number; label: string; sub?: string }) {
+  const r = 50;
+  const c = 2 * Math.PI * r;
+  const arc = 0.75 * c;
+  const v = Math.min(Math.max(value, 0), 1);
+  return (
+    <div className="gauge" role="img" aria-label={`${label}: ${pct(value, 1)}`}>
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r={r} fill="none" stroke="var(--track)" strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${arc} ${c}`} transform="rotate(135 60 60)" />
+        <circle className="gauge-value" cx="60" cy="60" r={r} fill="none" stroke="var(--accent)" strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${Math.max(v * arc, 0.01)} ${c}`} transform="rotate(135 60 60)" style={{ "--len": v * arc } as React.CSSProperties} />
+      </svg>
+      <span className="gauge-text">
+        <b className="num">{pct(value, 1)}</b>
+        <small>{label}</small>
+        {sub && <small className="gauge-sub">{sub}</small>}
+      </span>
+    </div>
+  );
+}
+
+// Small ring without a label (profile cards): the whole-number percentage inside.
+export function MiniRing({ value, label }: { value: number; label: string }) {
+  const r = 40;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg className="mini-ring" viewBox="0 0 100 100" role="img" aria-label={`${label}: ${pct(value, 1)}`}>
+      <circle cx="50" cy="50" r={r} fill="none" stroke="var(--track)" strokeWidth="11" />
+      <circle cx="50" cy="50" r={r} fill="none" stroke="var(--accent)" strokeWidth="11" strokeLinecap="round"
+        strokeDasharray={`${Math.max(value * c - 2, 0)} ${c}`} transform="rotate(-90 50 50)" />
+      <text x="50" y="59" textAnchor="middle" fontSize="27" fontWeight="700" fill="var(--text)" style={{ fontFamily: "var(--font-mono)" }}>
+        {pct(value, 0)}
+      </text>
+    </svg>
+  );
+}
+
+// Inline probability bar under a table figure: the fill is p, the optional tick is the market's probability.
+// Decorative (the figures are printed next to it), so hidden from screen readers; the title explains it on hover.
+export function PBar({ p, mark }: { p: number; mark?: number | null }) {
+  const title = `Modello ${pct(p, 1)}${mark != null ? ` · tacca: mercato ${pct(mark, 1)}` : ""}`;
+  return (
+    <span className="pbar" title={title} aria-hidden="true">
+      <i className="pbar-fill" style={{ width: `${Math.min(p, 1) * 100}%` }} />
+      {mark != null && <i className="pbar-mark" style={{ left: `${Math.min(mark, 1) * 100}%` }} />}
+    </span>
+  );
+}

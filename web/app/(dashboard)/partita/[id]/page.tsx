@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma, Users } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, CheckCircle2, History, Hourglass, Layers, LineChart, ListChecks, Percent, Shirt, Sigma, Users } from "lucide-react";
 import { fixtureDetail, parseJSON, quoteMenu, quotePath, type ModelMarket, type OppRow, type ResultRow } from "@/lib/db";
 import { groupOf, lineName, MARKET_GROUPS, marketName, orderMarkets, quoteLabel, selectionName, sortSelections } from "@/app/_components/markets";
 import { OddsChart, type Series } from "@/app/_components/OddsChart";
 import { compShort, dayLong, dayTime, fairOdds, hour, pct, shortDate, signed, STATUS_LABEL } from "@/app/_components/format";
-import { Empty, HBar, Ring, TeamBadge } from "@/app/_components/ui";
+import { Empty, HBar, PBar, Ring, TeamBadge } from "@/app/_components/ui";
+import { ChipRow } from "@/app/_components/ChipRow";
 import { Lineups, type ProbableData } from "@/app/_components/Lineups";
 import { Scorers, type ScorersData } from "@/app/_components/Scorers";
 import { Trends, type TrendsData } from "@/app/_components/Trends";
@@ -85,7 +86,7 @@ export default async function Partita({ params, searchParams }: Props) {
             </Link>
           ))}
         </nav>
-        <div className="card-pad">
+        <div className="card-pad fade-in" key={tab}>
           {tab === "mercati" ? (
             <Markets mk={mk} opps={d.opps} />
           ) : tab === "quote" ? (
@@ -185,29 +186,43 @@ function Markets({ mk, opps }: { mk: ModelMarket[]; opps: OppRow[] }) {
     <div className="col">
       <div>
         <h2 className="section">Quote reali (ultime 24 ore)</h2>
+        <p className="note" style={{ margin: "4px 0 10px" }}>
+          Quota del bookmaker contro quota equa del modello. La barra è la probabilità finale, la tacca quella del mercato.
+        </p>
         {opps.length ? (
-          <div className="col" style={{ marginTop: 12, gap: 12 }}>
+          <div className="mkt-grid">
             {opps.map((o, i) => {
               const f = parseJSON<{ positive_factors?: string[]; negative_factors?: string[] }>(o.factors, {});
+              const nf = (f.positive_factors?.length ?? 0) + (f.negative_factors?.length ?? 0);
               return (
-                <div key={i} className="card card-pad" style={{ boxShadow: "none", background: "var(--card-2)" }}>
-                  <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                    <div>
-                      <b>{o.market}</b> <span className="muted">· {o.bookmaker}</span>
-                      <span className="sub">quota {o.odds.toFixed(2)} · equa {o.fair_odds.toFixed(2)} · p {pct(o.p_final, 1)}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <b className={`num ${o.ev >= 0 ? "pos" : "neg"}`}>EV {signed(o.ev)}</b>
-                      <span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span>
-                    </div>
+                <article key={i} className={`mkt-card mkt-${o.ev >= 0 ? "pos" : "neg"}`}>
+                  <header className="mkt-head">
+                    <span>
+                      <b>{o.market}</b>
+                      <small>{o.bookmaker}</small>
+                    </span>
+                    <span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span>
+                  </header>
+                  <div className="mkt-odds">
+                    <span><small>Quota</small><b className="num">{o.odds.toFixed(2)}</b></span>
+                    <ArrowRight size={16} className="muted" aria-hidden="true" />
+                    <span><small>Equa</small><b className="num muted">{o.fair_odds.toFixed(2)}</b></span>
+                    <span className={`ev-chip ${o.ev >= 0 ? "pos" : "neg"}`}>EV {signed(o.ev)}</span>
                   </div>
-                  {(f.positive_factors?.length || f.negative_factors?.length) ? (
-                    <ul className="checklist" style={{ marginTop: 10 }}>
-                      {(f.positive_factors ?? []).map((x, k) => <li key={`p${k}`}><CheckCircle2 size={16} className="ok" aria-label="a favore" /> <span>{x}</span></li>)}
-                      {(f.negative_factors ?? []).map((x, k) => <li key={`n${k}`}><AlertTriangle size={16} className="ko" aria-label="attenzione" /> <span>{x}</span></li>)}
-                    </ul>
-                  ) : null}
-                </div>
+                  <div className="mkt-prob">
+                    <span className="note">Probabilità <b className="num">{pct(o.p_final, 1)}</b>{o.p_market != null && <> · mercato {pct(o.p_market, 1)}</>}</span>
+                    <PBar p={o.p_final} mark={o.p_market} />
+                  </div>
+                  {nf > 0 && (
+                    <details className="mkt-why">
+                      <summary>Perché ({nf})</summary>
+                      <ul className="checklist">
+                        {(f.positive_factors ?? []).map((x, k) => <li key={`p${k}`}><CheckCircle2 size={16} className="ok" aria-label="a favore" /> <span>{x}</span></li>)}
+                        {(f.negative_factors ?? []).map((x, k) => <li key={`n${k}`}><AlertTriangle size={16} className="ko" aria-label="attenzione" /> <span>{x}</span></li>)}
+                      </ul>
+                    </details>
+                  )}
+                </article>
               );
             })}
           </div>
@@ -220,27 +235,30 @@ function Markets({ mk, opps }: { mk: ModelMarket[]; opps: OppRow[] }) {
       <div>
         <h2 className="section">Tutti i mercati del modello</h2>
         <p className="note" style={{ margin: "4px 0 10px" }}>
-          Probabilità e quota equa per ogni mercato: una quota del bookmaker più alta della quota equa indica valore.
+          Probabilità e quota equa per ogni mercato (in evidenza l&apos;esito più probabile del gruppo): una quota del bookmaker più alta
+          della quota equa indica valore.
         </p>
         {mk.length ? (
-          <div className="rail" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-            {groups.map((g) => (
-              <div key={g} className="card" style={{ boxShadow: "none" }}>
-                <div className="card-head"><h3>{g}</h3></div>
-                <table>
-                  <thead><tr><th>Esito</th><th className="num">Probabilità</th><th className="num">Quota equa</th></tr></thead>
-                  <tbody>
-                    {mk.filter((m) => m.g === g).map((m) => (
-                      <tr key={m.l}>
-                        <td>{m.l}</td>
-                        <td className="num">{pct(m.p, 1)}</td>
-                        <td className="num muted">{fairOdds(m.p)}</td>
-                      </tr>
+          <div className="mkt-groups">
+            {groups.map((g) => {
+              const rows = mk.filter((m) => m.g === g);
+              const top = Math.max(...rows.map((m) => m.p));
+              return (
+                <section key={g} className="mkt-group">
+                  <h3>{g} <span className="count">{rows.length}</span></h3>
+                  <ul>
+                    {rows.map((m) => (
+                      <li key={m.l} className={m.p === top ? "top" : undefined}>
+                        <span className="mkt-sel" title={m.l}>{m.l}</span>
+                        <span className="mkt-bar"><i style={{ width: `${Math.min(m.p, 1) * 100}%` }} /></span>
+                        <b className="num">{pct(m.p, 1)}</b>
+                        <span className="num muted">{fairOdds(m.p)}</span>
+                      </li>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+                  </ul>
+                </section>
+              );
+            })}
           </div>
         ) : (
           <Empty icon={Sigma} title="Mercati non disponibili">Arrivano con la prossima analisi pubblicata.</Empty>
@@ -300,37 +318,47 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
     for (const [k, v] of [...u]) if (!v) u.delete(k);
     return `/partita/${encodeURIComponent(id)}?${u}`;
   };
+  // the chosen selection per bookmaker: latest price and its move since the first observation
+  const moves = books
+    .map((b) => {
+      const pts = path.filter((p) => p.bookmaker === b && p.selection === sel);
+      return pts.length ? { b, first: pts[0].odds, last: pts.at(-1)!.odds, at: pts.at(-1)!.observed_at, n: pts.length } : null;
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
 
   return (
     <div className="col">
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="qpick">
         {groups.length > 1 && (
-          <nav className="chips" aria-label="Parte di partita">
-            {groups.map((x) => (
-              <Link key={x.key} href={href({ g: x.key, m: "", s: "", l: "" })} scroll={false} aria-current={x.key === g ? "true" : undefined}>{x.label}</Link>
-            ))}
-          </nav>
+          <ChipRow label="Tempo" variant="seg" active={g} items={groups.map((x) => ({ key: x.key, label: x.label, href: href({ g: x.key, m: "", s: "", l: "" }) }))} />
         )}
-        <nav className={groups.length > 1 ? "chips chips-sub" : "chips"} aria-label="Mercato">
-          {markets.map((x) => (
-            <Link key={x} href={href({ m: x, s: "", l: "" })} scroll={false} aria-current={x === m ? "true" : undefined}>{marketName(x)}</Link>
-          ))}
-        </nav>
-        <nav className="chips chips-sub" aria-label="Esito">
-          {sels.map((x) => (
-            <Link key={x} href={href({ s: x })} scroll={false} aria-current={x === sel ? "true" : undefined}>{selectionName(m, x)}</Link>
-          ))}
-        </nav>
+        <ChipRow label="Mercato" active={m} items={markets.map((x) => ({ key: x, label: marketName(x), href: href({ m: x, s: "", l: "" }) }))} />
+        <ChipRow key={`s|${m}`} label="Esito" variant={sels.length > 6 ? "scroll" : "seg"} active={sel}
+          items={sels.map((x) => ({ key: x, label: selectionName(m, x), href: href({ s: x }) }))} />
         {lines.length > 1 || (lines[0] ?? "") !== "" ? (
-          <nav className="chips chips-sub" aria-label="Linea">
-            {lines.map((x) => (
-              <Link key={x} href={href({ l: x })} scroll={false} aria-current={x === line ? "true" : undefined}>{lineName(m, x)}</Link>
-            ))}
-          </nav>
+          <ChipRow key={`l|${m}|${sel}`} label="Linea" variant={lines.length > 6 ? "scroll" : "seg"} active={line}
+            items={lines.map((x) => ({ key: x, label: lineName(m, x), href: href({ l: x }) }))} />
         ) : null}
       </div>
-      <div>
+      <div className="fade-in" key={`${m}|${sel}|${line}`}>
         <h2 className="section">Andamento · {label}</h2>
+        {moves.length > 0 && (
+          <div className="qtiles">
+            {moves.map((x) => {
+              const d = x.last / x.first - 1;
+              const Icon = d > 0.004 ? ArrowUpRight : d < -0.004 ? ArrowDownRight : ArrowRight;
+              return (
+                <div key={x.b} className="qtile">
+                  <small>{x.b}</small>
+                  <b className="num">{x.last.toFixed(2)}</b>
+                  <span className="note">
+                    <Icon size={13} aria-hidden="true" /> {x.n > 1 ? `da ${x.first.toFixed(2)} (${d >= 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)}%)` : "una rilevazione"} · {dayTime(x.at)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div className="legend" style={{ margin: "8px 0" }}>
           {series.map((s) => (
             <span key={s.key}>
@@ -342,7 +370,7 @@ async function Quotes({ id, home, away, q }: { id: string; home: string; away: s
         {series.length ? <OddsChart series={series} title={`Andamento quota ${label}, ${home} - ${away}`} /> : null}
         <p className="note">Una linea per bookmaker. Usa le frecce sinistra/destra sul grafico per scorrere le rilevazioni.</p>
       </div>
-      <div>
+      <div className="fade-in" key={`t|${m}|${line}`}>
         <h2 className="section">Ultime quote · {marketName(m)}{line ? ` ${lineName(m, line)}` : ""}{groupOf(m) === "h1" ? " · 1° tempo" : groupOf(m) === "h2" ? " · 2° tempo" : ""}</h2>
         <div className="table-wrap" style={{ marginTop: 10 }}>
           <table>

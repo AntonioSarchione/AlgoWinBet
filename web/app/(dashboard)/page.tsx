@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import {
-  AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Database, Filter, Gauge,
-  Layers, ListOrdered, Percent, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Trophy, TrendingUp, XCircle,
+  AlertTriangle, ArrowRight, BarChart3, Brain, CalendarClock, CheckCircle2, ChevronRight, CircleSlash, Coins, Database, Filter, Gauge,
+  Gem, Layers, ListOrdered, Percent, Scale, Search, ShieldAlert, ShieldCheck, Shapes, Sigma, Target, Ticket, Trophy, TrendingUp, Workflow,
+  XCircle, type LucideIcon,
 } from "lucide-react";
-import { absencesFor, DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type Absence, type FixtureRow, type ModelMarket, type OppRow } from "@/lib/db";
+import { absencesFor, DEPLOY, lastTick, latestRun, oppSummary, parseJSON, runFixtures, slipCandidates, usage, type Absence, type FixtureRow, type ModelMarket } from "@/lib/db";
 import { explainSlip, legMinOdds, legReason, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_LABEL, profileHint, runProfiles, toLegs, type ProfileResult } from "@/lib/profiles";
 import { MARKET_GROUPS, marketGroup } from "@/lib/markets";
-import { ago, compShort, dayTime, fairOdds, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
-import { Empty, HBar, Meter, MatchCell, Ring, Split1X2, TeamBadge } from "@/app/_components/ui";
+import { ago, compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
+import { Empty, Meter, MatchCell, MiniRing, PBar, ProbGauge, TeamBadge } from "@/app/_components/ui";
 import { LegAbsences } from "@/app/_components/Absences";
 import { OppTable } from "@/app/_components/OppTable";
 import { MatchExplorer, type ExplorerMatch } from "@/app/_components/MatchExplorer";
@@ -50,6 +51,9 @@ const RISK = [
   { v: "15", l: "Alto · vince ≥ 15%" },
   { v: "5", l: "Molto alto · vince ≥ 5%" },
 ];
+// one icon per slip profile (cards above the slip)
+const PROFILE_ICON: Record<string, LucideIcon> = { probabilita: ShieldCheck, equilibrata: Scale, value: Gem };
+
 type Knobs = { maxEvents: number; minEvents: number; qMin: number; qMax: number; legProb: number; evMin: number; riskMin: number; markets: string[] };
 
 // The slips of every profile for one set of filters. Cached per run + filters (switching profile tab, going back, or a second
@@ -296,7 +300,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
         <div className="col">
           {/* ---------------- hero ---------------- */}
           <section className="card hero" aria-labelledby="hero-title">
-            <div>
+            <div className="hero-copy">
               {best ? (
                 <span className="pill pill-good"><CheckCircle2 size={13} aria-hidden="true" /> Analisi completata</span>
               ) : (
@@ -308,34 +312,40 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 {nMarkets > 0 && <>, valutato <b>{nMarkets.toLocaleString("it-IT")}</b> mercati</>} e trovato <b>{nOpp}</b> opportunità da osservare.
                 {!best && (reasons[0] ? ` ${reasons[0]}` : " Senza quote recenti il motore non propone giocate.")}
               </p>
+              {best && (
+                <ul className="hero-tags" aria-label="In breve">
+                  <li><Ticket size={14} aria-hidden="true" /> {best.legs.length} {best.legs.length === 1 ? "evento" : "eventi"}</li>
+                  <li><Workflow size={14} aria-hidden="true" /> profilo {PROFILE_LABEL[profile] ?? profile}</li>
+                  <li><Coins size={14} aria-hidden="true" /> puntata paper {best.stake.toFixed(2)} €</li>
+                </ul>
+              )}
             </div>
-            <div className="hero-stats">
+            <div className="hero-visual">
               {best ? (
                 <>
-                  <div className="hero-stat">
-                    <small>Quota totale</small>
-                    <b className="num">{best.total_odds.toFixed(2)}</b>
-                    <span className={`chip-ev ${best.ev >= 0 ? "pos" : "neg"}`} style={{ background: best.ev >= 0 ? "var(--good-soft)" : "var(--bad-soft)" }}>
-                      EV {signed(best.ev)}
-                    </span>
-                  </div>
-                  <div className="hero-stat">
-                    <small>Probabilità complessiva</small>
-                    <b className="num">{pct(best.joint_probability, 1)}</b>
-                    <span className="note">EV prudente {signed(best.ev_lower)}{best.bonus ? ` · bonus multipla +${pct(best.bonus)}` : ""}</span>
+                  <ProbGauge value={best.joint_probability} label="Probabilità di vincita" />
+                  <div className="hero-figs">
+                    <div className="hero-fig">
+                      <small>Quota totale</small>
+                      <b className="num">{best.total_odds.toFixed(2)}</b>
+                      <span className={`ev-chip ${best.ev >= 0 ? "pos" : "neg"}`}>EV {signed(best.ev)}</span>
+                    </div>
+                    <div className="hero-fig">
+                      <small>EV prudente</small>
+                      <b className={`num ${best.ev_lower >= 0 ? "pos" : "neg"}`}>{signed(best.ev_lower)}</b>
+                      <span className="note">{best.bonus ? `bonus multipla +${pct(best.bonus)}` : "limite basso del valore"}</span>
+                    </div>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="hero-stat">
-                    <small>Partite con quote (24h)</small>
-                    <b className="num">{run.n_with_quotes}</b>
-                    <span className="note">su {run.n_fixtures} in calendario</span>
-                  </div>
-                  <div className="hero-stat">
-                    <small>Schedine proposte</small>
-                    <b className="num">0</b>
-                    <span className="note">meglio nessuna giocata che una senza valore</span>
+                  <ProbGauge value={run.n_fixtures ? run.n_with_quotes / run.n_fixtures : 0} label="Partite con quote" sub={`${run.n_with_quotes} su ${run.n_fixtures}`} />
+                  <div className="hero-figs">
+                    <div className="hero-fig">
+                      <small>Schedine proposte</small>
+                      <b className="num">0</b>
+                      <span className="note">meglio nessuna giocata che una senza valore</span>
+                    </div>
                   </div>
                 </>
               )}
@@ -344,16 +354,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
 
           {/* how the slips were found, with real numbers: published analysis first, then the dashboard search with these filters */}
           <section className="card" aria-labelledby="funnel-title">
-            <div className="card-head"><h2 id="funnel-title">Riepilogo dell&apos;analisi</h2><span className="count">profilo {PROFILE_LABEL[profile] ?? profile}</span></div>
-            <div className="kpis" style={{ padding: 12, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
-              <Kpi icon={Layers} label="Partite nel periodo" value={fx.length} />
-              <Kpi icon={BarChart3} label="Mercati valutati" value={nMarkets} />
-              <Kpi icon={XCircle} label="Scartati" value={discarded} />
-              <Kpi icon={Target} label="Candidati" value={candidates} />
-              <Kpi icon={Filter} label="Idonei con i filtri" value={result.eligible} />
-              <Kpi icon={Sigma} label="Combinazioni provate" value={result.evaluated} />
-              <Kpi icon={ShieldCheck} label="Schedine proposte" value={sl.length} />
-            </div>
+            <div className="card-head"><h2 id="funnel-title"><Workflow size={17} aria-hidden="true" /> Riepilogo dell&apos;analisi</h2><span className="count">profilo {PROFILE_LABEL[profile] ?? profile}</span></div>
+            <ol className="funnel">
+              <Step icon={Layers} label="Partite nel periodo" value={fx.length} />
+              <Step icon={BarChart3} label="Mercati valutati" value={nMarkets} />
+              <Step icon={Target} label="Candidati" value={candidates}>
+                <XCircle size={13} aria-hidden="true" /> {discarded.toLocaleString("it-IT")} scartati
+              </Step>
+              <Step icon={Filter} label="Idonei con i filtri" value={result.eligible} />
+              <Step icon={Sigma} label="Combinazioni provate" value={result.evaluated} />
+              <Step icon={ShieldCheck} label="Schedine proposte" value={sl.length} last />
+            </ol>
             <p className="note card-pad" style={{ paddingTop: 0 }}>
               Scartati: valore negativo, probabilità sotto il {pct(0.25)} o dati insufficienti. Candidati: selezioni Alta, Media, Equa e Da osservare
               dell&apos;analisi pubblicata. Idonei: quelli che entrano nella ricerca delle schedine con i filtri scelti.
@@ -365,10 +376,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               {profileNames.map((name) => {
                 const r = results[name];
                 const s0 = r.slips[0];
+                const Icon = PROFILE_ICON[name] ?? Workflow;
                 return (
                   <Link key={name} href={profileHref(name)} className={`card profile ${name === profile ? "active" : ""}`} aria-current={name === profile ? "true" : undefined}>
-                    <span className="profile-name">{PROFILE_LABEL[name] ?? name}</span>
-                    <span className="note">{profileHint(name, evMin)}</span>
+                    <span className="profile-top">
+                      <span className="kpi-icon"><Icon size={18} aria-hidden="true" /></span>
+                      <span className="profile-title">
+                        <span className="profile-name">{PROFILE_LABEL[name] ?? name}</span>
+                        <span className="note">{profileHint(name, evMin)}</span>
+                      </span>
+                      {s0 && <MiniRing value={s0.joint_probability} label="Probabilità di vincita" />}
+                    </span>
                     {s0 ? (
                       <span className="profile-stats">
                         <span><small>Quota</small><b className="num">{s0.total_odds.toFixed(2)}</b></span>
@@ -389,10 +407,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
 
           {/* ---------------- slip + why ---------------- */}
           <div className="split">
-            <section className="card" aria-labelledby="slip-title">
+            <section className="card ticket" aria-labelledby="slip-title">
               <div className="card-head">
                 <h2 id="slip-title">
-                  Schedina · {PROFILE_LABEL[profile] ?? profile} {best && <span className="count">{best.legs.length} {best.legs.length === 1 ? "evento" : "eventi"}</span>}
+                  <Ticket size={17} aria-hidden="true" /> Schedina · {PROFILE_LABEL[profile] ?? profile} {best && <span className="count">{best.legs.length} {best.legs.length === 1 ? "evento" : "eventi"}</span>}
                 </h2>
                 {best && (
                   <span className="muted">
@@ -423,13 +441,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                                 <div className={`leg-reason leg-reason-${legReason(l).kind}`}>{legReason(l).text}</div>
                                 <LegAbsences list={absent[o.fixture_id] ?? []} runAt={run.created_at} />
                               </td>
-                              <td className="num">{l.odds.toFixed(2)}</td>
+                              <td className="num"><span className="odds-chip">{l.odds.toFixed(2)}</span></td>
                               <td className="num">
                                 {pct(l.p_final, 1)}
+                                <PBar p={l.p_final} mark={o.p_market} />
                                 {o?.p_low != null && o.p_high != null && <span className="sub">({pct(o.p_low, 1)} – {pct(o.p_high, 1)})</span>}
                               </td>
                               <td className="num">
-                                <span className={o.ev >= 0 ? "pos" : "neg"}>{signed(o.ev)}</span>
+                                <span className={`ev-chip ${o.ev >= 0 ? "pos" : "neg"}`}>{signed(o.ev)}</span>
                                 {<span className="sub"><span className={`status status-${o.status}`}>{STATUS_LABEL[o.status] ?? o.status}</span></span>}
                               </td>
                               <td className="num">{legMinOdds(best, l.odds, evMin).toFixed(2)}</td>
@@ -439,11 +458,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                       </tbody>
                     </table>
                   </div>
-                  <div className="kpis" style={{ padding: 12, borderTop: "1px solid var(--line)" }}>
-                    <Mini label="Quota totale" value={best.total_odds.toFixed(2)} />
-                    <Mini label="Probabilità complessiva" value={pct(best.joint_probability, 1)} />
-                    <Mini label="EV stimato" value={signed(best.ev)} tone={best.ev >= 0 ? "pos" : "neg"} />
-                    <Mini label="Puntata paper" value={`${best.stake.toFixed(2)} €`} />
+                  <div className="ticket-foot">
+                    <Mini icon={Gauge} label="Quota totale" value={best.total_odds.toFixed(2)} />
+                    <Mini icon={Percent} label="Probabilità complessiva" value={pct(best.joint_probability, 1)} />
+                    <Mini icon={TrendingUp} label="EV stimato" value={signed(best.ev)} tone={best.ev >= 0 ? "pos" : "neg"} />
+                    <Mini icon={Coins} label="Puntata paper" value={`${best.stake.toFixed(2)} €`} />
                   </div>
                 </>
               ) : (
@@ -455,7 +474,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
 
             <section className="card" aria-labelledby="why-title">
               <div className="card-head">
-                <h2 id="why-title"><Brain size={17} color="var(--accent)" aria-hidden="true" /> {best ? "Perché questa schedina?" : "Perché nessuna schedina?"}</h2>
+                <h2 id="why-title"><Brain size={17} aria-hidden="true" /> {best ? "Perché questa schedina?" : "Perché nessuna schedina?"}</h2>
               </div>
               <div className="card-pad">
                 <ul className="checklist">
@@ -491,7 +510,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           {/* ---------------- opportunities ---------------- */}
           <section className="card" aria-labelledby="opp-title">
             <div className="card-head">
-              <h2 id="opp-title"><TrendingUp size={17} color="var(--accent)" aria-hidden="true" /> Migliori opportunità <span className="count">{nOpp}</span></h2>
+              <h2 id="opp-title"><TrendingUp size={17} aria-hidden="true" /> Migliori opportunità <span className="count">{nOpp}</span></h2>
               <Link href="/opportunita" className="btn btn-ghost btn-sm">Vedi tutte <ChevronRight size={15} aria-hidden="true" /></Link>
             </div>
             {op.length ? <OppTable rows={op.slice(0, 8)} /> : (
@@ -507,7 +526,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
         {/* ---------------- right rail ---------------- */}
         <aside className="col rail" aria-label="Pannelli rapidi">
           <section className="card">
-            <div className="card-head"><h2>Analisi rapida di una partita</h2></div>
+            <div className="card-head"><h2><Search size={17} aria-hidden="true" /> Analisi rapida di una partita</h2></div>
             <form action="/palinsesto" method="get" role="search" style={{ padding: "12px 16px 4px" }}>
               <label htmlFor="q" className="sr-only">Cerca squadra o campionato</label>
               <div className="control">
@@ -539,7 +558,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </section>
 
           <section className="card">
-            <div className="card-head"><h2>Mercati analizzati</h2></div>
+            <div className="card-head"><h2><Shapes size={17} aria-hidden="true" /> Mercati analizzati</h2></div>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
               <div>
                 <span className="note">Con quote dei bookmaker (valore atteso)</span>
@@ -553,7 +572,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
           </section>
 
           <section className="card">
-            <div className="card-head"><h2>Budget richieste API</h2></div>
+            <div className="card-head"><h2><Database size={17} aria-hidden="true" /> Budget richieste API</h2></div>
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Meter label="GOAL API · oggi" used={use.goalDay} limit={1000} hint="Calendario, risultati, formazioni, statistiche" />
               <Meter label="API-Football · oggi" used={use.apifDay} limit={100} hint="Formazioni con posizioni, infortuni e squalifiche, rose. Prima i 7 campionati" />
@@ -572,23 +591,23 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   );
 }
 
-function Kpi({ icon: Icon, label, value }: { icon: typeof Layers; label: string; value: number }) {
+// one step of the analysis funnel: matches -> markets -> candidates -> eligible -> combinations -> slips
+function Step({ icon: Icon, label, value, last, children }: { icon: LucideIcon; label: string; value: number; last?: boolean; children?: React.ReactNode }) {
   return (
-    <div className="card kpi">
-      <span className="kpi-icon"><Icon size={18} aria-hidden="true" /></span>
-      <span>
-        <small>{label}</small>
-        <b className="num">{value.toLocaleString("it-IT")}</b>
-      </span>
-    </div>
+    <li className={`funnel-step${last ? " last" : ""}`}>
+      <span className="funnel-icon"><Icon size={16} aria-hidden="true" /></span>
+      <b className="num">{value.toLocaleString("it-IT")}</b>
+      <small>{label}</small>
+      {children && <span className="funnel-sub">{children}</span>}
+    </li>
   );
 }
 
-function Mini({ label, value, tone }: { label: string; value: string; tone?: "pos" | "neg" }) {
+function Mini({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone?: "pos" | "neg" }) {
   return (
-    <div>
-      <span className="note">{label}</span>
-      <b className={`num ${tone ?? ""}`} style={{ display: "block", fontSize: 18 }}>{value}</b>
+    <div className="ticket-stat">
+      <span className="note"><Icon size={13} aria-hidden="true" /> {label}</span>
+      <b className={`num ${tone ?? ""}`}>{value}</b>
     </div>
   );
 }
