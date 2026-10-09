@@ -205,6 +205,11 @@ class PlayerPrediction:
     anytime: float
     first: float
     two_plus: float
+    # the same given that he starts: bookmakers void a player bet when the player does not take part, so their price is a
+    # price given that he plays (equal to the above with the official XI)
+    anytime_start: float = 0.0
+    first_start: float = 0.0
+    two_plus_start: float = 0.0
 
 
 def predict_team(tally: Tally, team: str, lam: float, lam_opp: float, prm: Params, roles: dict[str, str], names: dict[str, str],
@@ -239,18 +244,16 @@ def predict_team(tally: Tally, team: str, lam: float, lam_opp: float, prm: Param
     pen_frac = tally.pen_share(team)
     lam_pen = lam * pen_frac
     lam_np = lam * max(1.0 - pen_frac - OWN_GOAL_SHARE, 0.0)
+    tot = tp = 1.0
     if prm.normalise:
-        tot = sum(raw_np.values())
-        if tot > 0:
-            raw_np = {p: x / tot for p, x in raw_np.items()}
-        tp = sum(raw_pen.values())
-        if tp > 0:
-            raw_pen = {p: x / tp for p, x in raw_pen.items()}
+        tot = sum(raw_np.values()) or 1.0
+        raw_np = {p: x / tot for p, x in raw_np.items()}
+        tp = sum(raw_pen.values()) or 1.0
+        raw_pen = {p: x / tp for p, x in raw_pen.items()}
     total_rate = lam + lam_opp
     p_any_goal = 1.0 - math.exp(-total_rate)
-    out = []
-    for pid, (ps, _pb) in members.items():
-        rate = lam_np * raw_np[pid] + lam_pen * raw_pen[pid]
+
+    def probs(rate: float) -> tuple[float, float, float]:  # anytime, first, two or more
         if prm.disp > 0:
             a = prm.disp
             p0 = (1.0 + rate / a) ** -a
@@ -258,8 +261,28 @@ def predict_team(tally: Tally, team: str, lam: float, lam_opp: float, prm: Param
         else:
             p0 = math.exp(-rate)
             p1 = rate * p0
-        out.append(PlayerPrediction(pid, names.get(pid, pid), roles.get(pid, "MID"), ps, rate, 1.0 - p0,
-                                    (rate / total_rate) * p_any_goal if total_rate > 0 else 0.0, 1.0 - p0 - p1))
+        return 1.0 - p0, (rate / total_rate) * p_any_goal if total_rate > 0 else 0.0, 1.0 - p0 - p1
+
+    out = []
+    for pid, (ps, _pb) in members.items():
+        rate = lam_np * raw_np[pid] + lam_pen * raw_pen[pid]
+        if ps >= 1.0:
+            rate_s = rate
+        else:
+            # his share in a start over the team's total in the matches he starts: in the weighed total he counts for his
+            # chance of starting and an average starter of his role fills the rest of his place, who goes to the bench when
+            # he starts
+            role = roles.get(pid, "MID")
+            s0, b0, pen0 = priors.get(role, priors["MID"])
+            v = tally.p.get(pid, [0.0] * 9)
+            sh_s = _share(v[2], v[1], s0, prm.k, prm)
+            sh_b = _share(v[4], v[3], b0, prm.k, prm) if not prm.role_only else b0
+            pen = _share(v[6], v[5], pen0, prm.k_pen, prm)
+            out_ = 1.0 - ps
+            tot_s = tot + out_ * (sh_s - sh_b - (s0 - b0)) if prm.normalise else 1.0
+            tp_s = tp + out_ * (pen - pen0) if prm.normalise else 1.0
+            rate_s = lam_np * sh_s / max(tot_s, 1e-9) + lam_pen * pen / max(tp_s, 1e-9)
+        out.append(PlayerPrediction(pid, names.get(pid, pid), roles.get(pid, "MID"), ps, rate, *probs(rate), *probs(rate_s)))
     return sorted(out, key=lambda x: -x.rate)
 
 

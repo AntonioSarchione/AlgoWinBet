@@ -125,7 +125,8 @@ def team_scorers(store, prov, fixtures, xg: dict[str, tuple[float, float]], now:
                                      squad=got.probs if got else None)
                 state = "probabile"
             rows = [{"n": p.name if p.name != p.player_id else p.player_id.split(":")[-1], "r": p.role, "s": round(p.starter, 2),
-                     "a": round(p.anytime, 4), "f": round(p.first, 4), "d": round(p.two_plus, 4)}
+                     "a": round(p.anytime, 4), "f": round(p.first, 4), "d": round(p.two_plus, 4),
+                     "as": round(p.anytime_start, 4), "fs": round(p.first_start, 4), "ds": round(p.two_plus_start, 4)}
                     for p in preds if p.anytime >= MIN_ANYTIME][:TOP]
             if rows:
                 teams[team] = TeamScorers(state, n_sheets.get(team, 0), rows)

@@ -71,3 +71,18 @@ def test_replay_scores_every_player_and_beats_the_role_reference():
     assert m + hw < 0  # one player scores every week: the player history beats the role average
     pre, prob = rep.scores["modello"]["prima"], rep.scores["modello"]["probabili"]
     assert len(pre.team_ll) == len(prob.team_ll) == 40 and pre.n == prob.n  # same team-matches, same players
+
+
+def test_probabilities_given_a_start():
+    data = load_scorer_data(_store(20))
+    t = Tally(365.0)
+    for s in data.sheets:
+        t.add(s, data.roles)
+    xi = {p.player_id: p for p in predict_team(t, "Milan", 1.8, 1.0, Params(), data.roles, data.names, XI, BENCH)}
+    st = xi["goal:st"]
+    assert (st.anytime_start, st.first_start, st.two_plus_start) == (st.anytime, st.first, st.two_plus)  # official starter
+    squad = {"goal:st": 0.6, "goal:sub": 0.4, **{p: 1.0 for p in XI if p != "goal:st"}}  # the sub starts when he does not
+    pre = {p.player_id: p for p in predict_team(t, "Milan", 1.8, 1.0, Params(), data.roles, data.names, squad=squad)}
+    # a 60% starter: given a start he scores about as often as the official starter, far more than his weighed chance
+    assert pre["goal:st"].anytime < pre["goal:st"].anytime_start
+    assert abs(pre["goal:st"].anytime_start - st.anytime) < 0.1

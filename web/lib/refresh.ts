@@ -10,7 +10,9 @@ export const MANUAL_MONTHLY = 5;
 // MAX_GAP (price-path checkpoints far from kickoff, the daily snapshot). Quiet hours cost no Actions minutes.
 export const MATCH_BEFORE_MS = 3 * 3600e3;
 export const MATCH_AFTER_MS = 3.5 * 3600e3;
-export const MAX_GAP_MS = 3 * 3600e3;
+// one run an hour at most when no match is near (was 3 hours while the private repo paid Actions minutes); 55 minutes, not
+// 60: the pinger's call an hour after a run comes a few seconds short of the hour and would skip to the next one
+export const MAX_GAP_MS = 55 * 60e3;
 // Lineup watch: a pinger may call every 10 minutes. The ordinary run starts only on the half-hour slots (minute 0-9 and 30-39);
 // the pings in between start a run only while a match kicking off in LINEUP_WATCH_FROM..LINEUP_WATCH_UNTIL still lacks both
 // official XI, so the lineups show 30-60 minutes before kickoff instead of 15-30 (2026-10-05: XI of the 20:45 matches

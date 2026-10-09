@@ -7,7 +7,9 @@ import { useState } from "react";
 import { Shirt, Users } from "lucide-react";
 import { pAtLeast, type PmData, type PmPlayer, type PmTeam, type SisalPrices } from "@/lib/playermarkets";
 
-export type ScorerPlayer = { n: string; r: string; s: number; a: number; f: number; d: number };
+// a/f/d: anytime, first, two or more counting the chance of starting; as/fs/ds: the same given that he starts (absent on
+// publications before 2026-10-09)
+export type ScorerPlayer = { n: string; r: string; s: number; a: number; f: number; d: number; as?: number; fs?: number; ds?: number };
 export type TeamScorers = { state: "ufficiale" | "probabile"; sheets: number; players: ScorerPlayer[] };
 export type ScorersData = Record<string, TeamScorers>;
 
@@ -17,9 +19,9 @@ const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" })[] = [
   { k: "f", l: "Primo marcatore", hint: "il primo gol della partita è suo", sisal: "FIRST_SCORER" },
   { k: "d", l: "Doppietta", hint: "almeno due gol", sisal: "TWO_PLUS" },
 ];
-// card-based markets: probability in a start (from the card). Not times the chance of starting: Sisal voids a player bet
-// when the player does not take part, so its price is a price given that he plays. Before the official XI only the likely
-// starters are listed (a bench player who comes on plays a few minutes: the card's start would overstate him)
+// every player market: probability given that he starts, not times the chance of starting: Sisal voids a player bet when
+// the player does not take part, so its price is a price given that he plays. Only the starters (official XI) or the likely
+// starters (our probable lineup) are listed: a bench player who comes on plays a few minutes, a start would overstate him
 type CardMarket = Market & { p: (c: PmPlayer["c"]) => number; outfield?: boolean };
 const LIKELY_STARTER = 0.5;
 const CARD_MARKETS: Record<string, CardMarket[]> = {
@@ -139,7 +141,11 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
 
   const goalRows = (t: TeamScorers): Row[] => {
     const k = market.k as "a" | "f" | "d";
-    return [...t.players].sort((x, y) => y[k] - x[k]).map((p) => ({ n: p.n, sub: `${ROLE[p.r] ?? p.r} · ${starter(p.s, t.state)}`, p: p[k] }));
+    const given = (p: ScorerPlayer) => (p.s >= 1 ? p[k] : p[`${k}s`] ?? p[k] / Math.max(p.s, 0.01));
+    return t.players
+      .filter((p) => p.s >= LIKELY_STARTER)
+      .map((p) => ({ n: p.n, sub: `${ROLE[p.r] ?? p.r} · ${starter(p.s, t.state)}`, p: Math.min(given(p), 0.99) }))
+      .sort((a, b) => b.p - a.p);
   };
   const cardRows = (t: PmTeam): Row[] => {
     const m = market as CardMarket;
@@ -202,9 +208,8 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
         {group === "gol"
           ? "I gol attesi di ogni squadra sono divisi tra i giocatori secondo la loro quota dei gol della squadra (ultimo anno pesato di più, rigoristi a parte), ristretta verso la media del ruolo quando i dati sono pochi."
           : "Dalle ultime 60 presenze FotMob del giocatore, ristrette verso la media del suo ruolo, scalate ai minuti che gioca da titolare e corrette per avversario e campo (verificate sulle partite passate con player-eval)."}{" "}
-        {group === "gol"
-          ? "Prima della formazione ufficiale ogni giocatore conta per la sua probabilità di partire titolare; gli ingressi dalla panchina non sono contati, quindi la probabilità è prudente."
-          : "La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Prima della formazione ufficiale sono elencati solo i titolari probabili (almeno 50%)."}{" "}
+        La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Sono
+        elencati solo i titolari (formazione ufficiale) o, prima, i titolari probabili (almeno 50%).{" "}
         {nSisal > 0
           ? "La quota Sisal compare da sola quando la fotografia delle quote la contiene (marcatori e tiri); altrimenti scrivila tu per leggere l'EV."
           : "Scrivi la quota che vedi su Sisal per leggere l'EV."}{" "}
