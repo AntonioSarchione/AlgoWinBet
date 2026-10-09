@@ -17,8 +17,11 @@ const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" })[] = [
   { k: "f", l: "Primo marcatore", hint: "il primo gol della partita è suo", sisal: "FIRST_SCORER" },
   { k: "d", l: "Doppietta", hint: "almeno due gol", sisal: "TWO_PLUS" },
 ];
-// card-based markets: probability in a start (from the card), times the chance of starting
+// card-based markets: probability in a start (from the card). Not times the chance of starting: Sisal voids a player bet
+// when the player does not take part, so its price is a price given that he plays. Before the official XI only the likely
+// starters are listed (a bench player who comes on plays a few minutes: the card's start would overstate him)
 type CardMarket = Market & { p: (c: PmPlayer["c"]) => number; outfield?: boolean };
+const LIKELY_STARTER = 0.5;
 const CARD_MARKETS: Record<string, CardMarket[]> = {
   assist: [{ k: "as", l: "Fa un assist", hint: "almeno un assist (dagli assist e dagli xA del giocatore)", p: (c) => c.as ?? 0, outfield: true }],
   cartellini: [{ k: "cg", l: "Ammonito", hint: "almeno un cartellino (giallo o rosso)", p: (c) => c.cg }],
@@ -141,8 +144,8 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
   const cardRows = (t: PmTeam): Row[] => {
     const m = market as CardMarket;
     return t.players
-      .filter((p) => !(m.outfield && p.c.gk))
-      .map((p) => ({ n: p.n, sub: [ROLE[p.r] ?? p.r, starter(p.s, t.state), `${p.c.n} presenze`].filter(Boolean).join(" · "), p: p.s * m.p(p.c) }))
+      .filter((p) => !(m.outfield && p.c.gk) && p.s >= LIKELY_STARTER)
+      .map((p) => ({ n: p.n, sub: [ROLE[p.r] ?? p.r, starter(p.s, t.state), `${p.c.n} presenze`].filter(Boolean).join(" · "), p: m.p(p.c) }))
       .filter((r) => r.p >= MIN_P)
       .sort((a, b) => b.p - a.p)
       .slice(0, TOP);
@@ -199,8 +202,9 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
         {group === "gol"
           ? "I gol attesi di ogni squadra sono divisi tra i giocatori secondo la loro quota dei gol della squadra (ultimo anno pesato di più, rigoristi a parte), ristretta verso la media del ruolo quando i dati sono pochi."
           : "Dalle ultime 60 presenze FotMob del giocatore, ristrette verso la media del suo ruolo, scalate ai minuti che gioca da titolare e corrette per avversario e campo (verificate sulle partite passate con player-eval)."}{" "}
-        Prima della formazione ufficiale ogni giocatore conta per la sua probabilità di partire titolare; gli ingressi dalla panchina
-        non sono contati, quindi la probabilità è prudente.{" "}
+        {group === "gol"
+          ? "Prima della formazione ufficiale ogni giocatore conta per la sua probabilità di partire titolare; gli ingressi dalla panchina non sono contati, quindi la probabilità è prudente."
+          : "La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Prima della formazione ufficiale sono elencati solo i titolari probabili (almeno 50%)."}{" "}
         {nSisal > 0
           ? "La quota Sisal compare da sola quando la fotografia delle quote la contiene (marcatori e tiri); altrimenti scrivila tu per leggere l'EV."
           : "Scrivi la quota che vedi su Sisal per leggere l'EV."}{" "}
