@@ -50,6 +50,13 @@ player_keys, player_match_stats, referees.
 
 Columns: the site tables keep the archive's names and columns (the queries stay as they are), except the two new tables.
 
+## Push command
+
+`algowinbet site-push --db data/offline.db` (site from SITE_DATABASE_URL / SITE_AUTH_TOKEN; `--site <file>` for local
+checks, `--full` to send everything again, `--strict` to stop on errors). It runs at the end of collect, fotmob and quality,
+before the archive is saved to the cache (the push state lives in the archive, table `site_pushed`).
+After restoring the archive from a backup, run once with `--full`: the backup's push state is older than the site.
+
 ## Publish consistency
 
 A publish writes the new run's rows first and `pub_runs` last, in one transaction; the run two publishes back is deleted

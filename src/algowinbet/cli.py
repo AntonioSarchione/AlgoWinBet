@@ -2641,6 +2641,27 @@ def cmd_health(a) -> None:
         store.close()
 
 
+def cmd_site_push(a) -> None:
+    """Push what the dashboard reads from the archive to the site database (docs/SITE_DB.md). Without a site database
+    configured it does nothing; an error is a warning, never a failed run (the next run pushes the same differences)."""
+    import sqlite3
+    from .sitepush import Pusher, connect_site
+    target = a.site or os.environ.get("SITE_DATABASE_URL", "")
+    if not target:
+        print("vetrina: SITE_DATABASE_URL non impostato, nessun invio")
+        return
+    src = sqlite3.connect(a.db)
+    try:
+        site = connect_site(target)
+        Pusher(src, site).push(full=a.full)
+    except Exception as e:  # noqa: BLE001 - the next run sends the same differences
+        if a.strict:
+            raise
+        print(f"::warning::vetrina: invio non riuscito ({type(e).__name__}: {e}), riprova il prossimo giro", flush=True)
+    finally:
+        src.close()
+
+
 def cmd_db_backup(a) -> None:
     """Compact gzipped copy of the database for the weekly backup (read from the local replica, no API request)."""
     from pathlib import Path
@@ -3289,6 +3310,12 @@ def build_parser() -> argparse.ArgumentParser:
     hc.add_argument("--db", default="turso")
     hc.add_argument("--save", action="store_true")
     hc.set_defaults(fn=cmd_health)
+    sp_ = sub.add_parser("site-push", help="invia al database del sito (vetrina) solo le differenze rispetto all'ultimo invio")
+    sp_.add_argument("--db", default="data/offline.db", help="archivio completo (file SQLite)")
+    sp_.add_argument("--site", default=None, help="database del sito (predefinito: SITE_DATABASE_URL); un file locale per le prove")
+    sp_.add_argument("--full", action="store_true", help="reinvia tutto")
+    sp_.add_argument("--strict", action="store_true", help="un errore ferma il comando (prove locali)")
+    sp_.set_defaults(fn=cmd_site_push)
     bk = sub.add_parser("db-backup", help="copia compatta del database (replica locale) in un file .db.gz")
     bk.add_argument("--out", default="backup/algowinbet.db.gz")
     bk.add_argument("--skip", nargs="*", default=[], help="tabelle da non copiare")

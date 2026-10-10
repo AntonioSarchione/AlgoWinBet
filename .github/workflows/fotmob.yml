@@ -44,6 +44,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run collect.yml --repo "$GITHUB_REPOSITORY" --ref main -f publish=true
+      # Site database (docs/SITE_DB.md): only the differences since the last push; without SITE_DATABASE_URL it does nothing
+      - name: site push
+        if: always() && hashFiles('data/offline.db') != ''
+        env:
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+        run: algowinbet site-push --db data/offline.db
       - name: save local database
         if: always() && hashFiles('data/offline.db') != ''
         uses: actions/cache/save@v6
