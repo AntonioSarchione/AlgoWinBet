@@ -157,18 +157,6 @@ export default async function Sistema() {
         </section>
       </div>
 
-      <div className="kpis" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
-        {Object.entries(st.counts).map(([k, v]) => (
-          <div key={k} className="card kpi">
-            <span className="kpi-icon"><Database size={18} aria-hidden="true" /></span>
-            <span>
-              <small>{LABELS[k] ?? k}</small>
-              <b className="num">{v.toLocaleString("it-IT")}</b>
-            </span>
-          </div>
-        ))}
-      </div>
-
       <div className="split">
         <section className="card">
           <div className="card-head"><h2>Storico partite per competizione</h2><span className="count">{backfill.length} storici completati</span></div>

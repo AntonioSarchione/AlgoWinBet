@@ -457,22 +457,24 @@ function teamForm(team: string, before: string) {
   );
 }
 
-export async function systemStatus() {
-  const tables = ["raw_requests", "fixtures", "results", "quotes", "lineups", "match_stats"] as const;
-  const counts = await Promise.all(tables.map((t) => all<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`)));
-  const [runs, jobs, byComp] = await Promise.all([
-    all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 12"),
-    all<{ name: string; done_at: string; detail: string | null }>("SELECT name, done_at, detail FROM jobs ORDER BY done_at DESC"),
+// Results per competition: a scan of the results table, so read at most every 6 hours. The row counts of the big tables
+// (quotes ~1M rows) were dropped on 2026-10-10: Turso bills every row a COUNT(*) scans, about 1M rows per visit.
+const resultsByComp = persist(
+  () =>
     all<{ competition: string; n: number; first: string; last: string }>(
       "SELECT competition, COUNT(*) AS n, MIN(kickoff) AS first, MAX(kickoff) AS last FROM results GROUP BY competition ORDER BY n DESC",
     ),
+  "resultsByComp",
+  6 * 3600,
+);
+
+export async function systemStatus() {
+  const [runs, jobs, byComp] = await Promise.all([
+    all<Run>("SELECT * FROM pub_runs ORDER BY id DESC LIMIT 12"),
+    all<{ name: string; done_at: string; detail: string | null }>("SELECT name, done_at, detail FROM jobs ORDER BY done_at DESC"),
+    resultsByComp(),
   ]);
-  return {
-    counts: Object.fromEntries(tables.map((t, i) => [t, Number(counts[i][0]?.n ?? 0)])) as Record<(typeof tables)[number], number>,
-    runs,
-    jobs,
-    byComp,
-  };
+  return { runs, jobs, byComp };
 }
 
 export function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
