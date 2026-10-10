@@ -96,6 +96,6 @@ jobs:
         with:
           name: db-daily-${{ github.run_id }}
           path: backup/*.db.gz.gpg
-          retention-days: 10
+          retention-days: 30  # the archive lives only in the Actions cache: a month of daily copies
           compression-level: 0
           if-no-files-found: ignore

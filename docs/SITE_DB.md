@@ -72,8 +72,33 @@ after. A page that read the previous run id still finds its rows.
 - Storage: < 50 MB (5 GB).
 - First load: ~30k rows, one push.
 
-## Switch-over (2026-11-01)
+## Switch-over runbook (from 2026-11-01, after the Turso quota reset)
 
-1. Owner creates the new Turso database and sets its URL and token (GitHub secrets for the push, Vercel env for the site).
-2. First push from the archive; checks on the local site against the new database.
-3. Site live; the old 560 MB database stays untouched until the owner deletes it.
+The workflows stay on the archive for good: the switch-over only adds the site database and points the dashboard at it.
+
+Owner (secrets are never handled by Claude):
+1. Check on the Turso dashboard that the account is unblocked (new billing cycle).
+2. Create a new database, e.g. `algowinbet-site`, in the region closest to Vercel `fra1` (Frankfurt), and a token for it
+   (read and write: the push writes, the site writes nothing there).
+3. GitHub secrets: `SITE_DATABASE_URL` (libsql://...) and `SITE_AUTH_TOKEN`.
+
+Claude:
+4. Start a collect run (workflow_dispatch). Its "site push" step does the first load: the log must show
+   `vetrina: invio completo (prima volta)` and about 25-30k rows written. A second run must write only a few rows.
+
+Owner:
+5. Vercel, Production: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set to the site database. Check that `LOGIN_DB_URL`
+   works again (its database is unblocked by the same reset).
+
+Claude:
+6. One push: `DB_OFFLINE = false` in web/app/api/tick/route.ts (the tick reads fixtures and lineups from the site
+   database again). The deployment also picks up the new Vercel variables.
+7. Checks online: every page, the odds-trend tab, Stato del sistema (Turso meters), the tick's answers in the Vercel logs.
+8. First three days: Turso meters every day. Expected: syncs ~0, rows written < 30k/day, rows read < 1M/day.
+
+Later:
+9. The old 560 MB database is no longer read or written. The owner deletes it after a week of stable operation.
+10. The GitHub secrets `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` become unused by the workflows.
+11. probe, analyze and fotmob-backfill still use `--db turso`: move them to the archive before enabling them again.
+12. Morning health check: its database-size check measured the Turso replica; with the archive it is skipped. Point it at
+    the archive (Actions cache limit 10 GB) so Stato del sistema shows the size again.
