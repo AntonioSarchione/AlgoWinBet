@@ -2,17 +2,18 @@
 # months. Actions > fotmob-backfill > Run workflow: it launches itself again while matches are left. A run that saved
 # nothing (FotMob not answering, Turso down) is tried again up to 3 times, 10 minutes apart; a FotMob refusal (12-hour
 # pause) stops the chain, since insisting would make the block worse. A run never fails (no e-mail).
-# Its own concurrency group: the collect ticks (quotes, lineups, recent FotMob matches) never wait for it, and it takes
-# the day's FotMob history slot first, so the ticks leave the history alone while it runs.
+# It writes the archive (.github/actions/offline-db), so it shares the offline-db concurrency group with collect and fotmob:
+# while it reads, the collect ticks wait. Launches are therefore short (25 minutes) and chained. A launch still pending when
+# a collect run is queued is cancelled by GitHub (one pending run per group): the chain then stops, relaunch it by hand.
 name: fotmob-backfill
 
 on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: "minuti di lettura per lancio (circa 1.800 partite in 130 minuti)"
+        description: "minuti di lettura per lancio (circa 350 partite in 25 minuti)"
         required: false
-        default: "130"
+        default: "25"
       interval:
         description: "secondi tra una pagina e l'altra"
         required: false
@@ -23,7 +24,7 @@ on:
         default: "0"
 
 concurrency:
-  group: fotmob-backfill
+  group: offline-db
   cancel-in-progress: false
 
 permissions:
@@ -33,7 +34,7 @@ permissions:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # 130 minutes of reading: a wide margin, so a slow database never ends in a failed run
+    timeout-minutes: 60  # 25 minutes of reading by default: a wide margin
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -41,16 +42,28 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
+      - uses: ./.github/actions/offline-db
       - name: fotmob-backfill
         id: fill
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
           MINUTES: ${{ inputs.minutes }}
           INTERVAL: ${{ inputs.interval }}
         # inputs arrive as environment variables, never interpolated into the script (no shell injection)
-        run: algowinbet fotmob-backfill --minutes "${MINUTES:-130}" --interval "${INTERVAL:-1}" --db turso
+        run: algowinbet fotmob-backfill --minutes "${MINUTES:-25}" --interval "${INTERVAL:-1}" --db data/offline.db
+      - name: site push
+        if: always() && hashFiles('data/offline.db') != ''
+        env:
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+        run: algowinbet site-push --db data/offline.db
+      - name: save local database
+        if: always() && hashFiles('data/offline.db') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: data/offline.db
+          key: offline-db-${{ github.run_id }}-${{ github.run_attempt }}
       - name: next run
         if: always()
         env:
@@ -64,13 +77,12 @@ jobs:
         run: |
           next() {
             gh workflow run fotmob-backfill.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
-              -f minutes="${MINUTES:-130}" -f interval="${INTERVAL:-1}" -f retries="$1"
+              -f minutes="${MINUTES:-25}" -f interval="${INTERVAL:-1}" -f retries="$1"
           }
           if [ "${LEFT:-}" = "0" ]; then echo "storico FotMob completo"; exit 0; fi
           if [ "${PAUSED:-0}" = "1" ]; then echo "::warning::FotMob in pausa (richieste rifiutate): catena ferma, rilanciare a mano dopo la pausa"; exit 0; fi
           if [ "${SAVED:-0}" != "0" ]; then echo "ancora ${LEFT} partite: nuovo lancio"; next 0; exit 0; fi
           n=$(( ${RETRIES:-0} + 1 ))
           if [ "$n" -gt 3 ]; then echo "::warning::3 lanci di fila senza righe salvate: catena ferma, rilanciare a mano"; exit 0; fi
-          echo "nessuna riga salvata: nuovo tentativo $n di 3 tra 10 minuti"
-          sleep 600
+          echo "nessuna riga salvata: nuovo tentativo $n di 3"
           next "$n"

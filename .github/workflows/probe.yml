@@ -27,6 +27,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: offline-db  # probes write the archive too (raw payloads, budget counters, fixes): one writer at a time
+  cancel-in-progress: false
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -38,22 +42,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
-      # Local replica only for the commands that read a lot (evaluations, backfills): Turso's free plan counts every synced byte
-      # (3 GB a month) and a probe pulls everything written since the last saved replica. The others read the primary directly.
-      - name: restore database replica
-        if: ${{ inputs.source == 'db' && contains(fromJSON('["lineupeval","lineupfill","boosttrain","boosteval","playereval","scorereval","xieval","fmresults","resultsrefill","fdrelink","teammap","xinames","oddsrelink","resultholes","health"]'), inputs.command) }}
-        uses: actions/cache/restore@v6
-        with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
-          restore-keys: turso-replica-
+      # Turso is no longer the working database: every probe reads and writes the archive (.github/actions/offline-db)
+      - uses: ./.github/actions/offline-db
       - name: run
         env:
           GOALAPI_KEY: ${{ secrets.GOAL_API_KEY || secrets.GOALAPI_KEY }}
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
           APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
           SOURCE: ${{ inputs.source }}
           COMMAND: ${{ inputs.command }}
@@ -61,11 +56,7 @@ jobs:
           PARAMS: ${{ inputs.params }}
         run: |
           # inputs arrive as environment variables, never interpolated into the script (no shell injection)
-          DB=data/probe.db
-          if [ -n "$TURSO_DATABASE_URL" ]; then DB=turso; fi   # raw payloads and budget counters persist on Turso
-          case "$COMMAND" in  # the commands with a replica (same list as the restore step's condition)
-            lineupeval|lineupfill|boosttrain|boosteval|playereval|scorereval|xieval|fmresults|resultsrefill|fdrelink|teammap|xinames|oddsrelink|resultholes|health) export TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db ;;
-          esac
+          DB=data/offline.db   # raw payloads and budget counters persist in the archive
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "remap" ]; then algowinbet remap-odds --db "$DB" && algowinbet inspect Denmark --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "coverage" ]; then algowinbet market-coverage --db "$DB" --book "${ARG:-sisal}"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "model" ]; then algowinbet model-check "$ARG" --db "$DB"; exit $?; fi
@@ -115,8 +106,7 @@ jobs:
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "datasets" ]; then algowinbet dataset-report --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "results" ]; then algowinbet results-day "${ARG:-$(date -u -d yesterday +%F)}" --comp "$PARAMS" --db "$DB"; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "health" ]; then
-            export TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db
-            algowinbet health --save --db "$DB" && algowinbet db-backup --out backup/test.db.gz --skip ${ARG:-blobs}; exit $?
+            algowinbet health --save --db "$DB" && algowinbet db-backup --src "$DB" --out backup/test.db.gz --skip ${ARG:-blobs}; exit $?
           fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "bench" ]; then algowinbet db-bench; exit $?; fi
           if [ "$SOURCE" = "db" ] && [ "$COMMAND" = "raw" ]; then algowinbet raw-last "$ARG" --source "${PARAMS:-goal}" --db "$DB"; exit $?; fi
@@ -134,9 +124,17 @@ jobs:
           if [ "$COMMAND" = "probe" ]; then for kv in $PARAMS; do args+=(--param "$kv"); done; fi
           algowinbet "${args[@]}" --db "$DB"
 
-      - name: save database replica
-        if: ${{ always() && hashFiles('data/turso-replica.db') != '' && inputs.source == 'db' && contains(fromJSON('["lineupeval","lineupfill","boosttrain","boosteval","playereval","scorereval","xieval","fmresults","resultsrefill","fdrelink","teammap","xinames","oddsrelink","resultholes","health"]'), inputs.command) }}
+      # Site database (docs/SITE_DB.md): what a probe changed (results, registry...) reaches the dashboard
+      - name: site push
+        if: always() && hashFiles('data/offline.db') != ''
+        env:
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}
+          SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+        run: algowinbet site-push --db data/offline.db
+      - name: save local database
+        if: always() && hashFiles('data/offline.db') != ''
         uses: actions/cache/save@v6
         with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
+          path: data/offline.db
+          key: offline-db-${{ github.run_id }}-${{ github.run_attempt }}

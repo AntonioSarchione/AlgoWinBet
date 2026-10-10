@@ -92,13 +92,12 @@ Owner:
 
 Claude:
 6. One push: `DB_OFFLINE = false` in web/app/api/tick/route.ts (the tick reads fixtures and lineups from the site
-   database again). The deployment also picks up the new Vercel variables.
+   database again) and `DB_PAUSED = false` in web/proxy.ts (the pages stop showing the pause notice). The deployment also
+   picks up the new Vercel variables.
 7. Checks online: every page, the odds-trend tab, Stato del sistema (Turso meters), the tick's answers in the Vercel logs.
 8. First three days: Turso meters every day. Expected: syncs ~0, rows written < 30k/day, rows read < 1M/day.
 
 Later:
 9. The old 560 MB database is no longer read or written. The owner deletes it after a week of stable operation.
 10. The GitHub secrets `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` become unused by the workflows.
-11. probe, analyze and fotmob-backfill still use `--db turso`: move them to the archive before enabling them again.
-12. Morning health check: its database-size check measured the Turso replica; with the archive it is skipped. Point it at
-    the archive (Actions cache limit 10 GB) so Stato del sistema shows the size again.
+11. Done on 2026-10-10: probe, analyze and fotmob-backfill work on the archive; the morning size check measures it.

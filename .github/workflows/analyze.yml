@@ -1,4 +1,4 @@
-# Analysis on the data collected in Turso (read-only on the data providers: no API request is spent here).
+# Analysis on the data collected in the archive (read-only on the data providers: no API request is spent here).
 # Manual for now; it will be scheduled (morning + after lineups) once the output is published somewhere readable.
 name: analyze
 
@@ -27,13 +27,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
+      # read only (the archive, .github/actions/offline-db): nothing is saved back
+      - uses: ./.github/actions/offline-db
       - name: analyze
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
           DAYS: ${{ inputs.days }}
           FAIR: ${{ inputs.fair }}
         run: |
-          if [ "$FAIR" = "true" ]; then algowinbet analyze --provider snapshots --db turso --days "$DAYS" --fair
-          else algowinbet analyze --provider snapshots --db turso --days "$DAYS"; fi
+          if [ "$FAIR" = "true" ]; then algowinbet analyze --provider snapshots --db data/offline.db --days "$DAYS" --fair
+          else algowinbet analyze --provider snapshots --db data/offline.db --days "$DAYS"; fi
