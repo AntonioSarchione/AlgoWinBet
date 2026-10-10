@@ -252,6 +252,9 @@ class BudgetExceeded(RuntimeError):
 class SnapshotStore:
     def __init__(self, path: str | Path):
         self.db, self.remote = connect(path)
+        p = str(path)
+        # the local file, when there is one (the archive kept in the Actions cache): the morning check measures it
+        self.path = None if p in ("turso", ":memory:") or p.startswith(REMOTE_PREFIXES) else Path(p)
         self._defer = False  # inside one_commit(): _bulk leaves the commit to it
         self.db.executescript(SCHEMA)
         self.db.commit()

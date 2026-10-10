@@ -22,6 +22,8 @@ const LEVEL = {
   error: { label: "Errore", cls: "status-AVOID", icon: XCircle, state: "fail" },
 } as const;
 const TURSO_FREE_MB = 5000;
+// the archive (every table, every price) lives in the Actions cache: 10 GB per repository (docs/SITE_DB.md)
+const ARCHIVE_MB = 10000;
 // Turso free plan, per billing cycle (the 1st of the month): synced to the embedded replicas, rows read and written
 const TURSO_SYNC_MB = 3000;
 const TURSO_READS_M = 500;
@@ -70,12 +72,14 @@ export default async function Sistema() {
   // Turso's own counts (Platform API), with or without the morning's size measure: hitting any limit blocks the account
   const synced = turso.ok ? (
     <>
+      <Meter label="Turso · spazio del database del sito (MB)" used={Math.round(turso.usage.storageBytes / 1e6)} limit={TURSO_FREE_MB}
+        hint="Solo ciò che il sito mostra: lo storico completo resta nell'archivio" />
       <Meter label="Turso · byte sincronizzati nel mese (MB)" used={Math.round(turso.usage.bytesSynced / 1e6)} limit={TURSO_SYNC_MB}
-        hint="Copie locali del database nelle run di GitHub Actions" />
+        hint="Copie locali del database: nessuna da novembre 2026" />
       <Meter label="Turso · righe lette nel mese (milioni)" used={Math.round(turso.usage.rowsRead / 1e6)} limit={TURSO_READS_M}
-        hint="Sito, avvio delle raccolte e run senza copia locale" />
+        hint="Pagine del sito e avvio delle raccolte" />
       <Meter label="Turso · righe scritte nel mese (milioni)" used={Math.round(turso.usage.rowsWritten / 1e5) / 10} limit={TURSO_WRITES_M}
-        hint="Raccolta, pubblicazione delle analisi, registro" />
+        hint="Invio delle differenze dall'archivio dopo ogni raccolta" />
       <p className="note">Piano gratuito Turso: superare uno qualsiasi dei limiti blocca tutto l&apos;account fino all&apos;inizio del mese seguente.</p>
     </>
   ) : (
@@ -128,9 +132,9 @@ export default async function Sistema() {
           {health?.dbBytes != null ? (
             <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <Meter
-                label="Turso · totale (MB)"
+                label="Archivio · totale (MB)"
                 used={Math.round(health.dbBytes / 1e6)}
-                limit={TURSO_FREE_MB}
+                limit={ARCHIVE_MB}
                 hint={health.weekGrowth ? `Prezzi: circa +${Math.round(health.weekGrowth / 1e6)} MB a settimana` : undefined}
               />
               {synced}
@@ -146,11 +150,12 @@ export default async function Sistema() {
                   ))}
                 </tbody>
               </table>
-              <p className="note">Copia compatta di tutto il database ogni lunedì, tenuta 3 settimane tra gli artifact del workflow quality.</p>
+              <p className="note">L&apos;archivio vive nella cache di GitHub Actions (limite sulle copie compresse, circa un quarto del file). Copia
+                cifrata ogni mattina, tenuta 30 giorni tra gli artifact del workflow collect.</p>
             </div>
           ) : (
             <>
-              <Empty icon={Database} title="Misura in arrivo">Il giro del mattino misura lo spazio sulla copia locale del database.</Empty>
+              <Empty icon={Database} title="Misura in arrivo">Il giro del mattino misura lo spazio dell&apos;archivio.</Empty>
               <div className="card-pad" style={{ paddingTop: 0 }}>{synced}</div>
             </>
           )}
