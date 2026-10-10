@@ -1,0 +1,60 @@
+name: secure-copy
+
+# Turso blocked the account on 2026-10-10 (free plan over its monthly quota, reset on 2026-11-01). The newest copy of the
+# database is the embedded replica in the Actions cache (saved 2026-10-09 15:04 UTC), which GitHub evicts after 7 days
+# without use. This run restores it (which also counts as a use), and uploads an encrypted, compact copy as an artifact.
+# No Turso connection: the replica file is read as a plain SQLite file.
+# Restore: download the artifact, then
+#   gpg --decrypt algowinbet-copy-<date>.db.gz.gpg | gunzip > algowinbet.db
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: secure-copy
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: restore database replica
+        id: replica
+        uses: actions/cache/restore@v6
+        with:
+          path: data/turso-replica.db*
+          key: turso-replica-secure-${{ github.run_id }}
+          restore-keys: turso-replica-
+      - name: check
+        run: |
+          echo "copia ripristinata: ${{ steps.replica.outputs.cache-matched-key }}"
+          ls -la data/
+          test -f data/turso-replica.db
+      - name: compact copy
+        run: algowinbet db-backup --src data/turso-replica.db --out "backup/algowinbet-copy-$(date -u +%F).db.gz"
+      - name: encrypt copy
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::BACKUP_PASSPHRASE non impostato: copia NON caricata (mai in chiaro)"
+            rm -f backup/*.db.gz
+            exit 1
+          fi
+          for f in backup/*.db.gz; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$f.gpg" "$f" <<< "$BACKUP_PASSPHRASE"
+            rm -f "$f"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: db-copy-${{ github.run_id }}
+          path: backup/*.db.gz.gpg
+          retention-days: 90
+          compression-level: 0
