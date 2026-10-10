@@ -293,9 +293,9 @@ export async function manualRefreshesThisMonth(): Promise<number> {
   return rows[0]?.used ?? 0;
 }
 
+// newest stored request (site_meta, written by the site push from the archive's raw_requests): one row by primary key
 export const lastTick = cache(async () => {
-  // newest row by primary key (ids grow with time): no scan of the whole table
-  const r = await all<{ t: string | null }>("SELECT fetched_at AS t FROM raw_requests ORDER BY id DESC LIMIT 1");
+  const r = await all<{ t: string | null }>("SELECT value AS t FROM site_meta WHERE key = 'last_tick'");
   return r[0]?.t ?? null;
 });
 
@@ -382,7 +382,7 @@ async function fixtureDetailUncached(id: string, run: Run, _lineupsAt: string) {
       run.id,
       id,
     ]).then(withMatch),
-    all<{ n: number }>("SELECT COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND bookmaker LIKE 'sisal%'", [id]),
+    all<{ n: number }>("SELECT n FROM pub_quote_paths WHERE fixture_id = ?", [id]),
     // detail (shirt numbers, pitch positions) arrives with the API-Football collector; older databases lack the column
     all<LineupRow>("SELECT team, status, formation, starters, bench, observed_at, detail FROM lineups WHERE fixture_id = ? ORDER BY observed_at DESC", [id]).catch(
       (e) =>
@@ -420,33 +420,38 @@ async function fixtureDetailUncached(id: string, run: Run, _lineupsAt: string) {
 }
 
 // Only Sisal is playable: the odds tab lists and draws Sisal prices (Pinnacle stays an internal reference of the model).
-const PLAYABLE = "bookmaker LIKE 'sisal%'";
+// The site database holds them as one row per published fixture (pub_quote_paths, written by the site push): every price
+// path of the match keyed "MARKET|line_key", each point [selection, bookmaker, odds, observed_at], oldest first.
+type PathPoint = [string, string, number, string];
+// keyed by the newest Sisal price of the match: a new price shows on the first visit
+const quotesAt = cache(async (id: string) =>
+  (await all<{ t: string | null }>("SELECT last_at AS t FROM pub_quote_paths WHERE fixture_id = ?", [id]))[0]?.t ?? "",
+);
+const quotePaths = persist(
+  async (id: string, _at: string): Promise<Record<string, PathPoint[]>> =>
+    parseJSON<Record<string, PathPoint[]>>((await all<{ paths: string }>("SELECT paths FROM pub_quote_paths WHERE fixture_id = ?", [id]))[0]?.paths, {}),
+  "quotePaths",
+  6 * 3600,
+);
 
 // Every priced selection of a fixture (market, selection, line): the menu of the odds-trend tab.
 export type QuoteKey = { market_code: string; selection: string; line_key: string; n: number };
-// keyed by the newest stored quote of the match (index on fixture_id, observed_at)
-const quotesAt = cache(async (id: string) =>
-  (await all<{ t: string | null }>("SELECT MAX(observed_at) AS t FROM quotes WHERE fixture_id = ?", [id]))[0]?.t ?? "",
-);
-const quoteMenuAt = persist(quoteMenuUncached, "quoteMenu", 6 * 3600);
-export const quoteMenu = async (id: string) => quoteMenuAt(id, await quotesAt(id));
-function quoteMenuUncached(id: string, _quotesAt: string) {
-  return all<QuoteKey>(
-    `SELECT market_code, selection, COALESCE(line_key, '') AS line_key, COUNT(*) AS n FROM quotes WHERE fixture_id = ? AND ${PLAYABLE} ` +
-      "GROUP BY market_code, selection, COALESCE(line_key, '')",
-    [id],
-  );
+export async function quoteMenu(id: string): Promise<QuoteKey[]> {
+  const paths = await quotePaths(id, await quotesAt(id));
+  const out: QuoteKey[] = [];
+  for (const [k, pts] of Object.entries(paths)) {
+    const [market_code, line_key] = k.split("|");
+    const n = new Map<string, number>();
+    for (const [sel] of pts) n.set(sel, (n.get(sel) ?? 0) + 1);
+    for (const [selection, c] of n) out.push({ market_code, selection, line_key, n: c });
+  }
+  return out;
 }
 
-// Price path of one market line (all its selections, all bookmakers), oldest first.
-const quotePathAt = persist(quotePathUncached, "quotePath", 6 * 3600);
-export const quotePath = async (id: string, market: string, lineKey: string) => quotePathAt(id, market, lineKey, await quotesAt(id));
-function quotePathUncached(id: string, market: string, lineKey: string, _quotesAt: string) {
-  return all<QuotePoint>(
-    `SELECT selection, bookmaker, odds, observed_at FROM quotes WHERE fixture_id = ? AND market_code = ? AND COALESCE(line_key, '') = ? AND ${PLAYABLE} ` +
-      "ORDER BY observed_at",
-    [id, market, lineKey],
-  );
+// Price path of one market line (all its selections, all Sisal books), oldest first.
+export async function quotePath(id: string, market: string, lineKey: string): Promise<QuotePoint[]> {
+  const paths = await quotePaths(id, await quotesAt(id));
+  return (paths[`${market}|${lineKey}`] ?? []).map(([selection, bookmaker, odds, observed_at]) => ({ selection, bookmaker, odds, observed_at }));
 }
 
 function teamForm(team: string, before: string) {

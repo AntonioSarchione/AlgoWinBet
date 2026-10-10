@@ -1,6 +1,6 @@
 # Site database ("vetrina") — design
 
-Status: design, step 1 of the plan agreed on 2026-10-10. Target: live from the Turso quota reset on 2026-11-01.
+Status: steps 1-3 done (2026-10-10): design, push (`sitepush.py`), dashboard reads (`web/lib/db.ts`). Target: live from the Turso quota reset on 2026-11-01.
 
 ## Why
 
@@ -17,7 +17,8 @@ big tables (a COUNT(*) over ~1M quotes on every visit of Stato del sistema, prob
 - **Push**: diff-based. The archive keeps, per site row, the hash of what was last pushed (table `site_pushed`). A run
   pushes only rows whose hash changed and deletes rows that left the site scope. `site_pushed` is updated only after
   Turso confirms the write, so a failed push is redone by the next run. A failed push never fails the run (warning only).
-- **Login tables** (`login_attempts`, `login_failures`) live only on the site database: the site creates and writes them.
+- **Login tables** (`login_attempts`, `login_failures`) live in their own database (`LOGIN_DB_URL` / `LOGIN_DB_TOKEN`, set on
+  Vercel): the site creates and writes them, the push never touches them.
 
 ## What the site reads (web/lib/db.ts, web/lib/loginguard.ts, web/app/api/tick/route.ts) and the site scope
 
