@@ -1,18 +1,17 @@
 name: secure-copy
 
-# Turso blocked the account on 2026-10-10 (free plan over its monthly quota, reset on 2026-11-01). The newest copy of the
-# database is the embedded replica in the Actions cache (saved 2026-10-09 15:04 UTC), which GitHub evicts after 7 days
-# without use. This run restores it (which also counts as a use), and uploads an encrypted, compact copy as an artifact.
-# No Turso connection: the replica file is read as a plain SQLite file.
+# Turso blocked the account on 2026-10-10 (free plan over its monthly quota, reset on 2026-11-01): the runs work on
+# data/offline.db, a plain SQLite copy kept in the Actions cache (.github/actions/offline-db). This run uploads an encrypted,
+# compact copy of the newest one as an artifact, e.g. to look at the dashboard on a PC (no Turso connection).
+# With "seed" it instead creates the first data/offline.db from the cached Turso replica (saved 2026-10-09 15:04 UTC), but
+# only when the cache holds no offline copy yet: a newer one would be overwritten.
 # Restore: download the artifact, then
 #   gpg --decrypt algowinbet-copy-<date>.db.gz.gpg | gunzip > algowinbet.db
-# With "seed" it also creates data/offline.db, the plain SQLite copy the runs use until Turso is back (see
-# .github/actions/offline-db), but only when the cache holds no such copy yet: a newer one would be overwritten.
 on:
   workflow_dispatch:
     inputs:
       seed:
-        description: "Crea la copia locale per i run (solo se non esiste ancora)"
+        description: "Crea la copia locale per i run dalla replica di Turso (solo se non esiste ancora)"
         type: boolean
         default: false
 
@@ -33,20 +32,25 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
+      - name: restore local copy
+        if: ${{ !inputs.seed }}
+        uses: ./.github/actions/offline-db
       - name: restore database replica
-        id: replica
+        if: inputs.seed
         uses: actions/cache/restore@v6
         with:
           path: data/turso-replica.db*
           key: turso-replica-secure-${{ github.run_id }}
           restore-keys: turso-replica-
-      - name: check
+      - name: source
+        id: src
         run: |
-          echo "copia ripristinata: ${{ steps.replica.outputs.cache-matched-key }}"
-          ls -la data/
-          test -f data/turso-replica.db
+          if [ -f data/offline.db ]; then echo "path=data/offline.db" >> "$GITHUB_OUTPUT"
+          else test -f data/turso-replica.db && echo "path=data/turso-replica.db" >> "$GITHUB_OUTPUT"; fi
       - name: compact copy
-        run: algowinbet db-backup --src data/turso-replica.db --out "backup/algowinbet-copy-$(date -u +%F).db.gz"
+        env:
+          SRC: ${{ steps.src.outputs.path }}
+        run: algowinbet db-backup --src "$SRC" --out "backup/algowinbet-copy-$(date -u +%F-%H%M).db.gz"
       - name: encrypt copy
         env:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
