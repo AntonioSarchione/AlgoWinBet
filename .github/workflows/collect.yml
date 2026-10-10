@@ -28,7 +28,7 @@ on:
         default: false
 
 concurrency:
-  group: collect
+  group: offline-db  # every run that writes the local database, one at a time (was: collect)
   cancel-in-progress: false
 
 permissions:
@@ -51,32 +51,43 @@ jobs:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
       - run: uv pip install -e ".[turso]"
-      # Local copy of the Turso database (libSQL embedded replica): reads are local instead of one network round trip each,
-      # writes still go to Turso. The copy is kept between runs in the Actions cache, so a run only downloads what changed.
-      - name: restore database replica
-        uses: actions/cache/restore@v6
-        with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
-          restore-keys: turso-replica-
+      # Turso blocked until 2026-11-01: a plain SQLite copy kept in the Actions cache (.github/actions/offline-db)
+      - uses: ./.github/actions/offline-db
       - name: collect-auto
         env:
           GOALAPI_KEY: ${{ secrets.GOAL_API_KEY || secrets.GOALAPI_KEY }}
           APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}
           ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
-          TURSO_MODE: replica
-          TURSO_REPLICA_PATH: data/turso-replica.db
           FORCE_PUBLISH: ${{ inputs.publish && '--force-publish' || '' }}
           MANUAL: ${{ inputs.refresh && '--manual' || '' }}
           HISTORY: ${{ inputs.history && '--history --max-seconds 900' || '' }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: algowinbet collect-auto --config configs/collect.json --db turso $FORCE_PUBLISH $MANUAL $HISTORY
-      - name: save database replica
-        if: always()
+        run: algowinbet collect-auto --config configs/collect.json --db data/offline.db $FORCE_PUBLISH $MANUAL $HISTORY
+      - name: save local database
+        if: always() && hashFiles('data/offline.db') != ''
         uses: actions/cache/save@v6
         with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
+          path: data/offline.db
+          key: offline-db-${{ github.run_id }}-${{ github.run_attempt }}
+      # Daily encrypted copy while the database lives only in the Actions cache (artifacts of a public repository are public:
+      # never uploaded in clear). Restore: gpg --decrypt <file>.db.gz.gpg | gunzip > algowinbet.db
+      - name: daily copy
+        if: success()
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ "$(date -u +%H)" != "06" ] || [ -z "$BACKUP_PASSPHRASE" ]; then exit 0; fi
+          algowinbet db-backup --src data/offline.db --out "backup/algowinbet-$(date -u +%F).db.gz"
+          for f in backup/*.db.gz; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$f.gpg" "$f" <<< "$BACKUP_PASSPHRASE"
+            rm -f "$f"
+          done
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: db-daily-${{ github.run_id }}
+          path: backup/*.db.gz.gpg
+          retention-days: 10
+          compression-level: 0
+          if-no-files-found: ignore

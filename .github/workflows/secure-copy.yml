@@ -6,14 +6,22 @@ name: secure-copy
 # No Turso connection: the replica file is read as a plain SQLite file.
 # Restore: download the artifact, then
 #   gpg --decrypt algowinbet-copy-<date>.db.gz.gpg | gunzip > algowinbet.db
+# With "seed" it also creates data/offline.db, the plain SQLite copy the runs use until Turso is back (see
+# .github/actions/offline-db), but only when the cache holds no such copy yet: a newer one would be overwritten.
 on:
   workflow_dispatch:
+    inputs:
+      seed:
+        description: "Crea la copia locale per i run (solo se non esiste ancora)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: secure-copy
+  group: offline-db
+  cancel-in-progress: false
 
 jobs:
   copy:
@@ -58,3 +66,36 @@ jobs:
           path: backup/*.db.gz.gpg
           retention-days: 90
           compression-level: 0
+      - name: existing local copy
+        if: inputs.seed
+        id: existing
+        uses: actions/cache/restore@v6
+        with:
+          path: data/offline.db
+          key: offline-db-none
+          restore-keys: offline-db-
+          lookup-only: true
+      - name: create local copy
+        if: inputs.seed && steps.existing.outputs.cache-matched-key == ''
+        run: |
+          python - <<'PY'
+          import sqlite3
+          src = sqlite3.connect("file:data/turso-replica.db?mode=ro", uri=True)
+          dst = sqlite3.connect("data/offline.db")
+          src.backup(dst)
+          n = dst.execute("SELECT COUNT(*) FROM quotes").fetchone()[0]
+          dst.close(); src.close()
+          print(f"copia locale creata: quotes {n}")
+          PY
+      - name: save local copy
+        if: inputs.seed && steps.existing.outputs.cache-matched-key == ''
+        uses: actions/cache/save@v6
+        with:
+          path: data/offline.db
+          key: offline-db-${{ github.run_id }}-seed
+      - name: local copy already there
+        if: inputs.seed && steps.existing.outputs.cache-matched-key != ''
+        env:
+          MATCHED: ${{ steps.existing.outputs.cache-matched-key }}
+        run: |
+          echo "::notice::copia locale già presente ($MATCHED), non sovrascritta"

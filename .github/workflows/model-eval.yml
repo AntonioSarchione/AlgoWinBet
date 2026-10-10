@@ -27,23 +27,15 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
-      # The replica kept by the collector runs: only what changed since is synced. Without it every run downloaded the whole
-      # database (~560 MB) and Turso counts every synced byte against the plan's monthly quota.
-      - name: restore database replica
-        uses: actions/cache/restore@v6
-        with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
-          restore-keys: turso-replica-
+      # Turso blocked until 2026-11-01: a plain SQLite copy kept in the Actions cache (.github/actions/offline-db) (read only, never saved)
+      - uses: ./.github/actions/offline-db
       - name: run
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
           WEEKS: ${{ inputs.weeks }}
           VARIANTS: ${{ inputs.variants }}
         run: |
           # inputs arrive as environment variables, never interpolated into the script
-          args=(--db turso --weeks "${WEEKS:-52}")
+          args=(--db data/offline.db --weeks "${WEEKS:-52}")
           if [ -n "$VARIANTS" ]; then args+=(--variants $VARIANTS); fi
-          TURSO_MODE=replica TURSO_REPLICA_PATH=data/turso-replica.db algowinbet model-eval "${args[@]}"
+          algowinbet model-eval "${args[@]}"

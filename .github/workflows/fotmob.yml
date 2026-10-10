@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: fotmob
+  group: offline-db  # every run that writes the local database, one at a time (was: fotmob)
   cancel-in-progress: false
 
 permissions:
@@ -32,29 +32,21 @@ jobs:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
       - run: uv pip install -e ".[turso]"
-      - name: restore database replica
-        uses: actions/cache/restore@v6
-        with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
-          restore-keys: turso-replica-
+      # Turso blocked until 2026-11-01: a plain SQLite copy kept in the Actions cache (.github/actions/offline-db)
+      - uses: ./.github/actions/offline-db
       - name: fotmob-tick
         id: tick
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
-          TURSO_MODE: replica
-          TURSO_REPLICA_PATH: data/turso-replica.db
-        run: algowinbet fotmob-tick --config configs/collect.json --db turso
+        run: algowinbet fotmob-tick --config configs/collect.json --db data/offline.db
       - name: new analysis
         if: steps.tick.outputs.reanalyse != '' && steps.tick.outputs.reanalyse != '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run collect.yml --repo "$GITHUB_REPOSITORY" --ref main -f publish=true
-      - name: save database replica
-        if: always()
+      - name: save local database
+        if: always() && hashFiles('data/offline.db') != ''
         uses: actions/cache/save@v6
         with:
-          path: data/turso-replica.db*
-          key: turso-replica-${{ github.run_id }}
+          path: data/offline.db
+          key: offline-db-${{ github.run_id }}-${{ github.run_attempt }}

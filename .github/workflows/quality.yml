@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: quality
+  group: offline-db  # every run that writes the local database, one at a time (was: quality)
+  cancel-in-progress: false
 
 jobs:
   quality:
@@ -28,21 +29,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[turso]"
-      - name: restore database replica  # the collect runs keep it fresh: only the latest changes are synced
-        uses: actions/cache/restore@v6
-        with:
-          path: data/turso-replica.db*
-          key: turso-replica-quality-${{ github.run_id }}
-          restore-keys: turso-replica-
+      # Turso blocked until 2026-11-01: a plain SQLite copy kept in the Actions cache (.github/actions/offline-db)
+      - uses: ./.github/actions/offline-db
       - name: run
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
-          TURSO_MODE: replica
-          TURSO_REPLICA_PATH: data/turso-replica.db
           WEEKS: ${{ inputs.weeks }}
-        run: algowinbet quality --db turso --weeks "${WEEKS:-60}" --save
+        run: algowinbet quality --db data/offline.db --weeks "${WEEKS:-60}" --save
       # Weekly backup: a compact, consistent copy of the whole database (VACUUM INTO + gzip, about 50 MB in October 2026),
       # encrypted (AES-256, passphrase in the BACKUP_PASSPHRASE secret) and kept as a run artifact for 3 weeks. Artifacts of a
       # public repository can be downloaded by anyone: the plain copy is never uploaded, and without the secret nothing is.
@@ -51,10 +44,7 @@ jobs:
       #   turso db create <name> --from-file algowinbet.db
       - name: weekly backup
         if: success()
-        env:  # reads the local replica only: no credentials needed
-          TURSO_MODE: replica
-          TURSO_REPLICA_PATH: data/turso-replica.db
-        run: algowinbet db-backup --out "backup/algowinbet-$(date -u +%F).db.gz"
+        run: algowinbet db-backup --src data/offline.db --out "backup/algowinbet-$(date -u +%F).db.gz"
       - name: encrypt backup
         if: success()
         env:
@@ -83,9 +73,11 @@ jobs:
         if: success()
         continue-on-error: true
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           PYTHONUNBUFFERED: "1"
-          TURSO_MODE: replica
-          TURSO_REPLICA_PATH: data/turso-replica.db
-        run: pip install -q "lightgbm>=4.3" && algowinbet boost-shadow --db turso --save
+        run: pip install -q "lightgbm>=4.3" && algowinbet boost-shadow --db data/offline.db --save
+      - name: save local database
+        if: always() && hashFiles('data/offline.db') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: data/offline.db
+          key: offline-db-${{ github.run_id }}-${{ github.run_attempt }}

@@ -1,0 +1,24 @@
+name: offline database
+description: >
+  Restores data/offline.db, the plain SQLite copy of the database the runs use while Turso is blocked (2026-10-10 until the
+  quota reset on 2026-11-01). The newest copy in the Actions cache is the latest state: the runs that write it share one
+  concurrency group (offline-db), so they never overlap. A missing copy fails the run on purpose: starting again from an
+  older copy would silently drop what the runs stored since. The first copy comes from the secure-copy workflow.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache/restore@v6
+      id: copy
+      with:
+        path: data/offline.db
+        key: offline-db-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: offline-db-
+    - shell: bash
+      env:
+        MATCHED: ${{ steps.copy.outputs.cache-matched-key }}
+      run: |
+        if [ ! -f data/offline.db ]; then
+          echo "::error::copia locale del database non trovata nella cache (offline-db-): lancia il workflow secure-copy"
+          exit 1
+        fi
+        echo "database locale: $MATCHED ($(du -m data/offline.db | cut -f1) MB)"
