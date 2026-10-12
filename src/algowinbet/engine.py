@@ -164,6 +164,19 @@ class Engine:
             self._counts[key] = cm.fit(rows, cutoff) if len(rows) >= m.stat_min_history else None
         return self._counts[key]
 
+    def combo_params(self, f: Fixture, cutoff: datetime) -> dict[str, dict]:
+        """statistic -> CountModel.params for the My Combo, under the same conditions as stat_matrices; team shots only for a
+        competition with shots of its own (the 7 domestic leagues: football-data)."""
+        out = {}
+        for stat in [*self.cfg.model.stat_models, *self.cfg.model.combo_stats]:
+            cm = self.count_model(stat, cutoff)
+            if cm is None or not (cm.knows(f.home) and cm.knows(f.away)) or cm.sample_size(f.home, f.away) < self.cfg.model.stat_min_team_matches:
+                continue
+            if stat in self.cfg.model.combo_stats and f.competition not in cm.base.mu_comp:
+                continue
+            out[stat] = cm.params(f.home, f.away, f.competition, getattr(f, "neutral", False))
+        return out
+
     def stat_matrices(self, f: Fixture, cutoff: datetime) -> dict[str, tuple]:
         """statistic -> (count matrix, matches of the less-known team) for one match, for the statistics with a model."""
         out = {}

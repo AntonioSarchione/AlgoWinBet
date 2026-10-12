@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import { ArrowLeft, CircleSlash, Filter, Gauge, ListChecks, ListOrdered, Percent, Shapes, ShieldAlert, Sigma, Target, Unlock } from "lucide-react";
-import { absencesFor, DEPLOY, fixtureBook, fixtureCandidates, latestRun, parseJSON, runFixtures, type Absence, type BookSel, type OppRow } from "@/lib/db";
+import { absencesFor, DEPLOY, fixtureBook, fixtureCandidates, fixtureDetail, latestRun, parseJSON, playerQuotes, runFixtures, type Absence, type BookSel, type OppRow } from "@/lib/db";
+import type { ComboParams } from "@/lib/combo";
+import { comboPlayers } from "@/lib/comboplayers";
+import { matchSisal, playerPool } from "@/lib/playermarkets";
 import { legMinOdds, type OptSettings } from "@/lib/optimizer";
 import { PROFILE_LABEL, profileHint, runProfiles, toLegs, type Cand, type ProfileResult } from "@/lib/profiles";
 import { compShort, dayTime, hour, pct, signed, STATUS_LABEL } from "@/app/_components/format";
@@ -415,8 +418,9 @@ async function ComboPage({ id }: { id: string }) {
         <h1>My Combo{f ? ` · ${f.home} – ${f.away}` : ""}</h1>
         <p>
           {f ? <>{compShort(f.competition)} · {dayTime(f.kickoff)}. </> : null}
-          Scegli più esiti della stessa partita e scrivi la quota My Combo che vedi su Sisal: il modello calcola la probabilità che vincano
-          insieme, la quota equa e l&apos;EV. Uso personale, solo paper trading: non entra nel Registro.
+          Scegli più esiti della stessa partita (goal, tempi, corner, cartellini, tiri, giocatori) o generane una nella fascia di quota che vuoi,
+          poi scrivi la quota My Combo che vedi su Sisal: il modello calcola la probabilità che vincano insieme, la quota equa e l&apos;EV. Uso
+          personale, solo paper trading: non entra nel Registro.
         </p>
       </div>
       <Link href={f ? back : "/palinsesto"} className="btn"><ArrowLeft size={17} aria-hidden="true" /> {f ? "Torna alla partita" : "Palinsesto"}</Link>
@@ -428,17 +432,38 @@ async function ComboPage({ id }: { id: string }) {
   if (f.xg_home == null || f.xg_away == null || f.rho == null) {
     return <>{head}<div className="card"><Empty icon={CircleSlash} title="Matrice dei risultati non disponibile">Analisi pubblicata con una versione precedente: riprova dopo la prossima pubblicazione.</Empty></div></>;
   }
-  const sels = parseJSON<BookSel[]>((await fixtureBook(run.id, [id]))[0]?.sels ?? "[]", []);
+  const [book, d] = await Promise.all([fixtureBook(run.id, [id]), fixtureDetail(id)]);
+  const sels = parseJSON<BookSel[]>(book[0]?.sels ?? "[]", []);
   const finals: Record<string, number> = {};
   const prices: Record<string, number> = {};
   for (const x of sels) {
     finals[x.k] = x.p;
     if (!isEstimated(x.b)) prices[x.k] = x.o;
   }
+  // players: who can play with his card and his goals per start; Sisal's player prices (DUO) on the combo's keys
+  const pm = d ? playerPool([f.home, f.away], d.lineups, parseJSON(f.probable, {}), d.players, d.cards) : {};
+  const players = comboPlayers(f.home, f.away, f.xg_home, f.xg_away, pm, parseJSON(f.scorers, {}));
+  const sisal = players.length ? matchSisal(players.map((p) => p.name), await playerQuotes(id)) : {};
+  for (const p of players) {
+    const q = sisal[p.name] ?? {};
+    const put = (kind: string, k: number, market: string) => {
+      if (q[market]) prices[`PLAYER|${p.pid}|${kind}|${k}`] = q[market];
+    };
+    put("goal", 1, "SCORER");
+    put("goal2", 2, "TWO_PLUS");
+    put("first", 1, "FIRST_SCORER");
+    put("assist", 1, "ASSIST");
+    for (const k of [1, 2, 3, 4]) {
+      put("shots", k, `SHOTS@${k - 0.5}`);
+      put("sot", k, `SHOTS_ON@${k - 0.5}`);
+      put("fc", k, `FOULS@${k - 0.5}`);
+    }
+  }
   return (
     <>
       {head}
-      <MyCombo home={f.home} away={f.away} xgHome={f.xg_home} xgAway={f.xg_away} rho={f.rho} finals={finals} prices={prices} />
+      <MyCombo home={f.home} away={f.away} xgHome={f.xg_home} xgAway={f.xg_away} rho={f.rho} params={parseJSON<ComboParams | null>(f.combo, null)}
+        players={players} finals={finals} prices={prices} />
     </>
   );
 }

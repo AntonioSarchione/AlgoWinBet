@@ -51,6 +51,7 @@ export type FixtureRow = {
   probable?: string | null; // JSON: our probable XI of the teams without an official one (app/_components/Lineups.tsx)
   markets: string | null;
   book?: string | null; // JSON: Sisal price, market and final probability of the headline selections (absent on old runs)
+  combo?: string | null; // JSON: My Combo's half-time split and count-model parameters (lib/combo.ts ComboParams; absent on old runs)
 };
 
 export type OppRow = {

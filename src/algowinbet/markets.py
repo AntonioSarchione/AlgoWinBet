@@ -91,8 +91,9 @@ REGISTRY: dict[str, MarketType] = {
 }
 
 # stat market -> (statistic, goal rule it applies to that statistic's counts)
+# SHOTS / SHOTS_ON: team shots, only for the My Combo of the 7 domestic leagues (no MarketType: never priced or recorded)
 STAT_MARKETS: dict[str, tuple[str, str]] = {
-    f"{p}_{k}": (stat, rule) for p, stat in (("CORNERS", "corners"), ("CARDS", "cards"))
+    f"{p}_{k}": (stat, rule) for p, stat in (("CORNERS", "corners"), ("CARDS", "cards"), ("SHOTS", "shots"), ("SHOTS_ON", "shots_on"))
     for k, rule in (("1X2", "MATCH_1X2"), ("TOTAL", "TOTAL_GOALS"), ("TEAM_HOME", "TEAM_TOTAL_HOME"), ("TEAM_AWAY", "TEAM_TOTAL_AWAY"))
 }
 

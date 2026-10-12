@@ -29,7 +29,7 @@ from scipy.stats import nbinom, poisson
 from ..domain import MatchResult
 from .dixon_coles import DixonColes
 
-GRID = {"corners": 31, "cards": 16}  # counts 0..30 corners, 0..15 cards per team
+GRID = {"corners": 31, "cards": 16, "shots": 46, "shots_on": 21}  # counts per team: 0..30 corners, 0..15 cards, 0..45 shots, 0..20 on target
 
 
 class CountModel:
@@ -119,6 +119,19 @@ class CountModel:
             p = nbinom.pmf(g, self.size, self.size / (self.size + lam))
         p[-1] += max(0.0, 1.0 - p.sum())  # the tail beyond the grid counts as the last cell
         return p
+
+    def params(self, home: str, away: str, competition: str | None = None, neutral: bool = False) -> dict:
+        """What the dashboard needs to rebuild matrix() (My Combo, web/lib/combo.ts): the two means, the grid, the negative
+        binomial size (None: Poisson) and, with the shared factor, the Gauss-Laguerre nodes [G, weight] of its Gamma."""
+        lh, la = self.expected(home, away, competition, neutral)
+        out: dict = {"lh": round(float(lh), 4), "la": round(float(la), 4), "n": self.grid,
+                     "size": None if math.isinf(self.size) else round(float(self.size), 4)}
+        if not math.isinf(self.shared_size):
+            k = self.shared_size
+            x, wq = roots_genlaguerre(24, k - 1.0)
+            wq = wq * np.exp(-gammaln(k))
+            out["g"] = [[round(float(xi / k), 6), float(f"{wi:.6g}")] for xi, wi in zip(x, wq) if wi > 1e-12]
+        return out
 
     def matrix(self, home: str, away: str, competition: str | None = None, neutral: bool = False,
                referee: str | None = None) -> np.ndarray:

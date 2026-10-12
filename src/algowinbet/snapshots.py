@@ -653,11 +653,12 @@ class SnapshotProvider:
         return {fid: (d[1], d[0]) for fid, d in got.items() if 0 in d and 1 in d}
 
     def stat_counts(self, stat: str) -> dict[str, tuple[float, float]]:
-        """Full-time (home, away) counts of 'corners' or 'cards' per match, under the canonical result id. Cards are Sisal's
+        """Full-time (home, away) counts of 'corners', 'shots', 'shots_on' (football-data) or 'cards' per match, under the
+        canonical result id. Cards are Sisal's
         bookings (1X2 ammonizioni: second yellow = two, straight red = none) from the FotMob player rows where read; otherwise
         yellow + red from the team stats (GOAL lists red cards only when there is one: with the yellow cards known, a missing
         red count is 0), which counts a straight red as one and, in English football-data files, a second yellow as one."""
-        names = ("corners",) if stat == "corners" else ("yellow_cards", "red_cards")
+        names = {"corners": ("corners",), "shots": ("shots",), "shots_on": ("shots_on_target",)}.get(stat, ("yellow_cards", "red_cards"))
         marks = ",".join("?" * len(names))
         rows = self.store.db.execute(f"SELECT fixture_id, stat, home, away FROM match_stats WHERE period='FT' AND stat IN ({marks})",
                                      names).fetchall()

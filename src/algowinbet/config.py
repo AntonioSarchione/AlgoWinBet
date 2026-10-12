@@ -44,7 +44,12 @@ class ModelCfg(BaseModel):
     # average (clear), totals no better than the league average (O3.5 0.6694 vs 0.6728, O4.5 0.6422 vs 0.6436, O5.5 0.5220
     # vs 0.5224): only the 1X2 is priced; totals wait for the referee.
     stat_models: list[str] = Field(default_factory=lambda: ["corners", "cards"])
-    stat_options: dict[str, dict] = Field(default_factory=lambda: {"cards": {"shared": True, "level_half_life_days": 60.0, "l2": 5.0}})
+    combo_stats: list[str] = Field(default_factory=lambda: ["shots", "shots_on"])  # team shots: My Combo only, 7 domestic leagues
+    # shots / shots_on: stat-eval of 2026-10-12 (914 matches of the 30 weeks before, 7 leagues): strong shrinkage of the team
+    # strengths and the recent league level beat the plain model and the league average on 1X2 and every over line
+    stat_options: dict[str, dict] = Field(default_factory=lambda: {"cards": {"shared": True, "level_half_life_days": 60.0, "l2": 5.0},
+                                                                   "shots": {"level_half_life_days": 60.0, "l2": 100.0},
+                                                                   "shots_on": {"level_half_life_days": 60.0, "l2": 20.0}})
     stat_markets_off: list[str] = Field(default_factory=lambda: ["CARDS_TOTAL", "CARDS_TEAM_HOME", "CARDS_TEAM_AWAY"])
     stat_min_history: int = 300
     # each team needs this many matches with the statistic: national teams have a handful (GOAL stats of a few Nations

@@ -20,13 +20,19 @@ from .markets import stat_probability
 from .models.counts import CountModel
 from .state import history_at
 
-LINES = {"corners": (8.5, 9.5, 10.5), "cards": (3.5, 4.5, 5.5)}
+LINES = {"corners": (8.5, 9.5, 10.5), "cards": (3.5, 4.5, 5.5), "shots": (22.5, 24.5, 26.5), "shots_on": (7.5, 8.5, 9.5)}
 LEVEL_XI = math.log(2) / 60.0  # level half-life of 2 months
 VARIANTS = {
     "corners": {"modello": {}},
     "cards": {"modello": {}, "l2x5": {"l2": 5.0}, "condiviso": {"shared": True}, "livello": {"level_xi": LEVEL_XI},
               "cond+liv": {"shared": True, "level_xi": LEVEL_XI}, "tutto": {"shared": True, "level_xi": LEVEL_XI, "l2": 5.0},
               "arbitro": {"shared": True, "level_xi": LEVEL_XI, "l2": 5.0, "referee": True}},
+    "shots": {"modello": {}, "livello": {"level_xi": LEVEL_XI}, "l2x5": {"l2": 5.0}, "l2x5+liv": {"l2": 5.0, "level_xi": LEVEL_XI},
+              "l2x20+liv": {"l2": 20.0, "level_xi": LEVEL_XI}, "l2x50+liv": {"l2": 50.0, "level_xi": LEVEL_XI},
+              "l2x100+liv": {"l2": 100.0, "level_xi": LEVEL_XI}},
+    "shots_on": {"modello": {}, "livello": {"level_xi": LEVEL_XI}, "l2x5": {"l2": 5.0}, "l2x5+liv": {"l2": 5.0, "level_xi": LEVEL_XI},
+                 "l2x20+liv": {"l2": 20.0, "level_xi": LEVEL_XI}, "l2x50+liv": {"l2": 50.0, "level_xi": LEVEL_XI},
+                 "l2x100+liv": {"l2": 100.0, "level_xi": LEVEL_XI}},
 }
 
 

@@ -626,7 +626,7 @@ th.num .th-sort { justify-content: flex-end; }
 .status-NEUTRAL { background: var(--card-2); color: var(--muted); }
 .status-AVOID { background: var(--bad-soft); color: var(--bad); }
 
-/* My Combo: chips of one match's goal selections, the combo summary beside them */
+/* My Combo: chips of one match's selections, the combo summary beside them */
 .combo { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
 .combo-groups { display: grid; gap: 12px; }
 .combo-group { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); min-width: 0; }
@@ -647,6 +647,22 @@ th.num .th-sort { justify-content: flex-end; }
 .combo-kpis span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .combo-kpis b { font-size: 20px; }
 .combo-kpis small { font-size: 12px; color: var(--muted); }
+/* sections of the selections (goals, halves, corners, cards, shots, players), the generator above the summary */
+.combo-section { border: 1px solid var(--line); border-radius: 12px; background: var(--card); min-width: 0; }
+.combo-section > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 14px;
+  font-size: 14px; font-weight: 600; border-radius: 12px; transition: background 140ms ease; }
+.combo-section > summary::-webkit-details-marker { display: none; }
+.combo-section > summary:hover { background: var(--card-2); }
+.combo-section > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.combo-section[open] > summary { border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; }
+.combo-section[open] .fold-chev { transform: rotate(180deg); }
+.combo-section-body { display: grid; gap: 10px; padding: 12px; }
+.combo-section-body .combo-group { background: var(--card-2); }
+.combo-section-body .chip { background: var(--card); }
+.combo-section-body .chip.on { background: var(--accent-soft); }
+.combo-gen { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.combo-gen .control input { width: 100%; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .combo-section > summary { transition: none; } }
 @media (max-width: 900px) { .combo { grid-template-columns: minmax(0, 1fr); } .combo-side { position: static; } }
 
 /* Bankroll: the staking plan form (8 fields + hint) */
