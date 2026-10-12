@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Layers, PieChart, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
 import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
@@ -11,6 +12,15 @@ export const metadata = { title: "Registro" };
 
 const RESULT_LABEL: Record<string, string> = { won: "Vinta", lost: "Persa", void: "Rimborsata", "non valutabile": "Non valutabile" };
 const RESULT_CLASS: Record<string, string> = { won: "status-STRONG", lost: "status-AVOID", void: "status-WATCH", "non valutabile": "status-WATCH" };
+// filter of the "Schedine registrate" table (?esito=)
+const OUTCOMES = [
+  { v: "", l: "Tutte", f: (_: PaperSlip) => true },
+  { v: "attesa", l: "In attesa", f: (x: PaperSlip) => !x.result },
+  { v: "vinte", l: "Vinte", f: (x: PaperSlip) => x.result === "won" },
+  { v: "perse", l: "Perse", f: (x: PaperSlip) => x.result === "lost" },
+  { v: "altre", l: "Rimborsate o non valutabili", f: (x: PaperSlip) => x.result === "void" || x.result === "non valutabile" },
+];
+const SHOWN_SLIPS = 50;
 const STATE: Record<State, { label: string; cls: string; icon: typeof CheckCircle2 }> = {
   pass: { label: "Superato", cls: "status-STRONG", icon: CheckCircle2 },
   fail: { label: "Fallito", cls: "status-AVOID", icon: XCircle },
@@ -88,7 +98,9 @@ function StatRow({ label, s }: { label: string; s: Stats }) {
   );
 }
 
-export default async function Registro() {
+export default async function Registro({ searchParams }: { searchParams: Promise<{ esito?: string }> }) {
+  const { esito = "" } = await searchParams;
+  const outcome = OUTCOMES.find((o) => o.v === esito) ?? OUTCOMES[0];
   const reg = await paperRegistry();
   if (!reg || (!reg.legs.length && !reg.slips.length)) {
     return (
@@ -111,6 +123,7 @@ export default async function Registro() {
   const V = STATE[crit.verdict];
   const legResult = legResults(reg.legs);
   const settledSlips = reg.slips.filter((s) => s.result && s.result !== "non valutabile");
+  const shownSlips = reg.slips.filter(outcome.f);
   const slipPnl = settledSlips.reduce((a, s) => a + (s.payout ?? 0) - 1, 0);
   const slipsWon = settledSlips.filter((s) => s.result === "won").length;
   const slipsOpen = reg.slips.filter((s) => !s.result).length;
@@ -279,11 +292,18 @@ export default async function Registro() {
         </p>
       </Fold>
 
-      <section className="card">
+      <section className="card" id="schedine">
         <div className="card-head">
           <h2>Schedine registrate</h2>
           <span className="count">{settledSlips.length} chiuse · saldo {signed(settledSlips.length ? slipPnl / settledSlips.length : null)} a schedina</span>
         </div>
+        <nav className="chips card-pad" aria-label="Filtra per esito">
+          {OUTCOMES.map((o) => (
+            <Link key={o.v} href={o.v ? `/registro?esito=${o.v}#schedine` : "/registro#schedine"} scroll={false} aria-current={outcome.v === o.v ? "true" : undefined}>
+              {o.l} ({reg.slips.filter(o.f).length})
+            </Link>
+          ))}
+        </nav>
         <div className="table-wrap">
           <table className="compact">
             <thead>
@@ -293,7 +313,7 @@ export default async function Registro() {
               </tr>
             </thead>
             <tbody>
-              {reg.slips.slice(0, 50).map((s: PaperSlip) => {
+              {shownSlips.slice(0, SHOWN_SLIPS).map((s: PaperSlip) => {
                 const legs = parseJSON<SlipLeg[]>(s.legs, []);
                 return (
                   <tr key={s.id}>
@@ -314,6 +334,11 @@ export default async function Registro() {
             </tbody>
           </table>
         </div>
+        {!shownSlips.length ? (
+          <p className="note card-pad">Nessuna schedina con questo esito.</p>
+        ) : shownSlips.length > SHOWN_SLIPS ? (
+          <p className="note card-pad">Le {SHOWN_SLIPS} più recenti su {shownSlips.length}.</p>
+        ) : null}
       </section>
     </>
   );
