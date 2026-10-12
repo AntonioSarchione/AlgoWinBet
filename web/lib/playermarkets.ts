@@ -80,3 +80,9 @@ export function pAtLeast(mu: number | undefined, k: number): number {
   }
   return Math.max(0, 1 - below);
 }
+
+/** Sisal's DUO rule (goals, assists, goal or assist, shots on target): the bet counts the player or whoever replaces him, so it
+ * covers his slot over the whole match. His card is per start in his own minutes: the slot is that times 90 / his minutes. */
+export function duoSlot(min: number | undefined): number {
+  return 90 / Math.min(90, Math.max(30, min ?? 80));
+}

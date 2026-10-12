@@ -3,9 +3,12 @@
 // Assists, bookings, fouls and shots: the published player cards (playercard.py, verified by player-eval) times the player's
 // chance of starting. Sisal's price is shown when its feed has it for the player (player_quotes: goalscorer, first goalscorer,
 // 2+ goals, shots, shots on target); otherwise the user types it, like My Combo. Typed prices live in this page only.
+// Sisal's DUO markets (goals, assists, goal or assist, shots on target) count the player or whoever replaces him: their
+// probability covers his slot over the whole match (lib/playermarkets.ts duoSlot), the substitute at the player's own rate.
 import { useState } from "react";
 import { Shirt, Users } from "lucide-react";
-import { pAtLeast, type PmData, type PmPlayer, type PmTeam, type SisalPrices } from "@/lib/playermarkets";
+import { nbMean } from "@/lib/combo";
+import { duoSlot, pAtLeast, type PmData, type PmPlayer, type PmTeam, type SisalPrices } from "@/lib/playermarkets";
 
 // a/f/d: anytime, first, two or more counting the chance of starting; as/fs/ds: the same given that he starts (absent on
 // publications before 2026-10-09)
@@ -13,21 +16,23 @@ export type ScorerPlayer = { n: string; r: string; s: number; a: number; f: numb
 export type TeamScorers = { state: "ufficiale" | "probabile"; sheets: number; players: ScorerPlayer[] };
 export type ScorersData = Record<string, TeamScorers>;
 
-type Market = { k: string; l: string; hint: string; sisal?: string };
+type Market = { k: string; l: string; hint: string; sisal?: string; duo?: true };
 const GOAL_MARKETS: (Market & { k: "a" | "f" | "d" | "ga" })[] = [
-  { k: "a", l: "Segna", hint: "almeno un goal nella partita (rigori inclusi, autogoal esclusi)", sisal: "SCORER" },
-  { k: "f", l: "Primo marcatore", hint: "il primo goal della partita è suo", sisal: "FIRST_SCORER" },
-  { k: "d", l: "Doppietta", hint: "almeno due goal", sisal: "TWO_PLUS" },
+  { k: "a", l: "Segna", hint: "almeno un goal nella partita (rigori inclusi, autogoal esclusi)", sisal: "SCORER", duo: true },
+  { k: "f", l: "Primo marcatore", hint: "il primo goal della partita è suo", sisal: "FIRST_SCORER", duo: true },
+  { k: "d", l: "Doppietta", hint: "almeno due goal", sisal: "TWO_PLUS", duo: true },
   // no Sisal price in the OddsPapi feed (2026-10-09): written by hand
-  { k: "ga", l: "Goal o assist", hint: "segna o fa un assist (goal dal modello marcatori, assist dalla scheda del giocatore, presi come indipendenti: la probabilità può essere un po' alta)" },
+  { k: "ga", l: "Goal o assist", hint: "segna o fa un assist (goal dal modello marcatori, assist dalla scheda del giocatore, presi come indipendenti: la probabilità può essere un po' alta)", duo: true },
 ];
 // every player market: probability given that he starts, not times the chance of starting: Sisal voids a player bet when
 // the player does not take part, so its price is a price given that he plays. Only the starters (official XI) or the likely
 // starters (our probable lineup) are listed: a bench player who comes on plays a few minutes, a start would overstate him
 type CardMarket = Market & { p: (c: PmPlayer["c"]) => number; outfield?: boolean };
+/** P(assist) over his DUO slot, from his assist probability in his own minutes (negative binomial, playercard.py). */
+const assistDuo = (c: PmPlayer["c"]) => pAtLeast(nbMean(c.as ?? 0) * duoSlot(c.min), 1);
 const LIKELY_STARTER = 0.5;
 const CARD_MARKETS: Record<string, CardMarket[]> = {
-  assist: [{ k: "as", l: "Fa un assist", hint: "almeno un assist (dagli assist e dagli xA del giocatore)", p: (c) => c.as ?? 0, outfield: true, sisal: "ASSIST" }],
+  assist: [{ k: "as", l: "Fa un assist", hint: "almeno un assist (dagli assist e dagli xA del giocatore)", p: assistDuo, outfield: true, sisal: "ASSIST", duo: true }],
   cartellini: [{ k: "cg", l: "Ammonito", hint: "almeno un cartellino (giallo o rosso)", p: (c) => c.cg }],
   falli: [
     { k: "fc1", l: "Falli fatti 1+", hint: "almeno un fallo commesso", p: (c) => pAtLeast(c.fc, 1), outfield: true, sisal: "FOULS@0.5" },
@@ -39,8 +44,8 @@ const CARD_MARKETS: Record<string, CardMarket[]> = {
     { k: "sh1", l: "Tiri 1+", hint: "almeno un tiro (Over 0.5 tiri)", p: (c) => pAtLeast(c.sh, 1), outfield: true, sisal: "SHOTS@0.5" },
     { k: "sh2", l: "Tiri 2+", hint: "almeno due tiri (Over 1.5 tiri)", p: (c) => pAtLeast(c.sh, 2), outfield: true, sisal: "SHOTS@1.5" },
     { k: "sh3", l: "Tiri 3+", hint: "almeno tre tiri (Over 2.5 tiri)", p: (c) => pAtLeast(c.sh, 3), outfield: true, sisal: "SHOTS@2.5" },
-    { k: "sot1", l: "In porta 1+", hint: "almeno un tiro in porta (Over 0.5)", p: (c) => pAtLeast(c.sot, 1), outfield: true, sisal: "SHOTS_ON@0.5" },
-    { k: "sot2", l: "In porta 2+", hint: "almeno due tiri in porta (Over 1.5)", p: (c) => pAtLeast(c.sot, 2), outfield: true, sisal: "SHOTS_ON@1.5" },
+    { k: "sot1", l: "In porta 1+", hint: "almeno un tiro in porta (Over 0.5)", p: (c) => pAtLeast((c.sot ?? 0) * duoSlot(c.min), 1), outfield: true, sisal: "SHOTS_ON@0.5", duo: true },
+    { k: "sot2", l: "In porta 2+", hint: "almeno due tiri in porta (Over 1.5)", p: (c) => pAtLeast((c.sot ?? 0) * duoSlot(c.min), 2), outfield: true, sisal: "SHOTS_ON@1.5", duo: true },
   ],
 };
 const GROUPS = [
@@ -144,11 +149,19 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
   const goalRows = (t: TeamScorers, team: string): Row[] => {
     const given = (p: ScorerPlayer, k: "a" | "f" | "d") => (p.s >= 1 ? p[k] : p[`${k}s`] ?? p[k] / Math.max(p.s, 0.01));
     const key = (n: string) => n.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-    const assist = new Map((pm[team]?.players ?? []).map((p) => [key(p.n), p.c.as] as const));
+    const cards = new Map((pm[team]?.players ?? []).map((p) => [key(p.n), p.c] as const));
+    // DUO: his own start (published) plus whoever replaces him for the rest of the match, scoring at his rate (Poisson)
     const prob = (p: ScorerPlayer): number | undefined => {
-      if (market.k !== "ga") return given(p, market.k as "a" | "f" | "d");
-      const a = assist.get(key(p.n));
-      return a == null ? undefined : 1 - (1 - given(p, "a")) * (1 - a);
+      const c = cards.get(key(p.n));
+      const whole = duoSlot(c?.min);
+      const a = Math.min(given(p, "a"), 0.95);
+      const mu = -Math.log(1 - a) * (whole - 1); // the substitute's expected goals
+      const none = Math.exp(-mu);
+      const anytime = 1 - (1 - a) * none;
+      if (market.k === "a") return anytime;
+      if (market.k === "d") return 1 - (1 - a) * none - (a - given(p, "d")) * none - (1 - a) * mu * none;
+      if (market.k === "f") return given(p, "f") * whole; // first goal: his share of the team's goals over the whole slot (as My Combo)
+      return c?.as == null ? undefined : 1 - (1 - anytime) * (1 - assistDuo(c));
     };
     return t.players
       .filter((p) => p.s >= LIKELY_STARTER)
@@ -197,12 +210,15 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
             {markets.map((x) => (
               <button key={x.k} type="button" role="radio" aria-checked={market.k === x.k} className={`chip ${market.k === x.k ? "on" : ""}`}
                 onClick={() => setMk((cur) => ({ ...cur, [group]: x.k }))}>
-                {x.l}
+                {x.l}{x.duo ? " · DUO" : ""}
               </button>
             ))}
           </div>
         )}
-        <span className="note">{markets.length > 1 ? market.hint : `${market.l}: ${market.hint}`}</span>
+        <span className="note">
+          {markets.length > 1 ? market.hint : `${market.l}: ${market.hint}`}
+          {market.duo ? ". DUO: vale anche se lo fa chi entra al suo posto" : ""}
+        </span>
       </div>
       {anyData ? (
         <div className="split fade-in" key={`${group}|${market.k}`}>
@@ -219,7 +235,9 @@ export function Scorers({ home, away, xgHome, xgAway, data, pm = {}, sisal = {} 
         {group === "goal"
           ? "I goal attesi di ogni squadra sono divisi tra i giocatori secondo la loro quota dei goal della squadra (ultimo anno pesato di più, rigoristi a parte), ristretta verso la media del ruolo quando i dati sono pochi."
           : "Dalle ultime 60 presenze FotMob del giocatore, ristrette verso la media del suo ruolo, scalate ai minuti che gioca da titolare e corrette per avversario e campo (verificate sulle partite passate con player-eval)."}{" "}
-        La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Sono
+        La probabilità è quella di una partita da titolare: Sisal rimborsa la giocata se il giocatore non scende in campo. Nei
+        mercati DUO (goal, assist, goal o assist, tiri in porta) conta anche chi entra al suo posto: la probabilità copre i suoi
+        minuti più quelli del sostituto, che segna e tira come lui. Sono
         elencati solo i titolari (formazione ufficiale) o, prima, i titolari probabili (almeno 50%).{" "}
         {nSisal > 0
           ? "La quota Sisal compare da sola quando la fotografia delle quote la contiene (marcatori, assist, tiri e falli: cartellini non offerti nel feed); altrimenti scrivila tu per leggere l'EV."

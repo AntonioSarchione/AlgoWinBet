@@ -3,7 +3,7 @@
 // what Sisal's DUO rule pays on: his slot over the whole match, the player or whoever replaces him.
 import type { ComboPlayer } from "./combo";
 import { nbMean } from "./combo";
-import type { PmData } from "./playermarkets";
+import { duoSlot, type PmData } from "./playermarkets";
 
 type ScorerRow = { n: string; s: number; a: number; as?: number };
 type Scorers = Record<string, { players: ScorerRow[] }>;
@@ -25,8 +25,7 @@ export function comboPlayers(home: string, away: string, xgHome: number, xgAway:
       .slice(0, MAX_COMBO_PLAYERS);
     for (const p of players) {
       const c = p.c;
-      const mins = Math.min(90, Math.max(30, c.min ?? 80));
-      const whole = 90 / mins; // DUO: his slot over the whole match
+      const whole = duoSlot(c.min); // DUO: his slot over the whole match
       const row = sc.get(key(p.n));
       // goals in a start: the scorers table's anytime-if-he-starts (as), else his card's expected goals
       const g = row ? goalsPerStart(row.as ?? (row.s >= 1 ? row.a : row.a / Math.max(row.s, 0.01))) : (c.xg ?? 0);
@@ -35,7 +34,7 @@ export function comboPlayers(home: string, away: string, xgHome: number, xgAway:
         pid: p.id, name: p.n, team: t, start: p.s,
         share: xg > 0 ? Math.min(0.9, (g * whole) / xg) : 0,
         assist: xg > 0 ? Math.min(0.9, (assistsPerStart * whole) / xg) : 0,
-        sot: (c.sot ?? 0) * whole, sh: (c.sh ?? 0) * whole, card: nbMean(c.cg ?? 0) * whole,
+        sot: (c.sot ?? 0) * whole, sh: c.sh ?? 0, card: nbMean(c.cg ?? 0), // total shots and bookings: not DUO, his own minutes
         fc: c.fc ?? 0, fd: c.fd ?? 0,
       });
     }

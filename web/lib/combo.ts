@@ -13,12 +13,12 @@
 // with total shots: each shot on target with probability (expected on target / expected shots), so both stay coherent.
 // Between goals, corners, cards and shots the model has no link: they multiply (independent).
 //
-// Players (Sisal's DUO rule: goals, assists, goal or assist, first goalscorer, shots, shots on target and the booking count
-// for the player or for whoever replaces him, so the player's slot covers the whole match). His share of his team's goals
+// Players (Sisal's DUO rule: goals, two or more, first goalscorer, assists, goal or assist and shots on target count for the
+// player or for whoever replaces him, so the player's slot covers the whole match; total shots, bookings and fouls do not). His share of his team's goals
 // is his goals per start (published anytime probability of a start, scorers.py) over the team's expected goals, scaled to
 // the whole match (x 90 / his minutes in a start); assists the same from his assist probability (playercard.py). Given the
 // team's goals each goal is his with that share, so "1 + he scores", two players of one team scoring and his first goal
-// follow the goals exactly. Shots, shots on target, booking (DUO, x 90 / minutes) and fouls (his own minutes only):
+// follow the goals exactly. Shots on target (DUO, x 90 / minutes), total shots, booking and fouls (his own minutes only):
 // negative binomial counts of his card, independent of the rest. All conditional on his starting.
 //
 // The model alone is not the final word on each selection: where the published analysis has the final probability of a
@@ -261,7 +261,7 @@ export type ComboPlayer = {
   start: number; // probability that he starts (1 with the official XI)
   share: number; // his slot's share of his team's goals (DUO: whole match)
   assist: number; // his slot's share of his team's goals that he assists (DUO)
-  sot: number; sh: number; card: number; // DUO expected counts over the whole match (card: bookings)
+  sot: number; sh: number; card: number; // expected counts: shots on target DUO (whole match), shots and bookings his own
   fc: number; fd: number; // his own minutes only
 };
 
@@ -271,10 +271,10 @@ export const PLAYER_MARKETS: { kind: PlayerKind; label: string; ks: number[]; du
   { kind: "first", label: "Primo marcatore", ks: [1], duo: true },
   { kind: "assist", label: "Assist", ks: [1], duo: true },
   { kind: "goal_or_assist", label: "Segna o fa assist", ks: [1], duo: true },
-  { kind: "card", label: "Cartellino", ks: [1], duo: true },
-  { kind: "goal_or_card", label: "Segna o cartellino", ks: [1], duo: true },
+  { kind: "card", label: "Cartellino", ks: [1], duo: false },
+  { kind: "goal_or_card", label: "Segna o cartellino", ks: [1], duo: false },
   { kind: "sot", label: "Tiri in porta", ks: [1, 2, 3], duo: true },
-  { kind: "shots", label: "Tiri totali", ks: [1, 2, 3, 4], duo: true },
+  { kind: "shots", label: "Tiri totali", ks: [1, 2, 3, 4], duo: false },
   { kind: "fc", label: "Falli commessi", ks: [1, 2, 3], duo: false },
   { kind: "fd", label: "Falli subiti", ks: [1, 2, 3], duo: false },
   { kind: "fouls", label: "Falli commessi + subiti", ks: [2, 3, 4], duo: false },
