@@ -27,10 +27,6 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  group: offline-db  # every run that writes the local database, one at a time (was: collect)
-  cancel-in-progress: false
-
 permissions:
   contents: read
   actions: write  # the morning run counts the month's Actions minutes from the run list and starts the quality replay of a new model version
@@ -38,7 +34,7 @@ permissions:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       # job start: the tick fills the minute already paid with free price reads and records the minutes it costs
       - run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"

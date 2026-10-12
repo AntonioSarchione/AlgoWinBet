@@ -29,6 +29,8 @@ jobs:
       - run: pip install -e ".[turso]"
       # Turso blocked until 2026-11-01: a plain SQLite copy kept in the Actions cache (.github/actions/offline-db) (read only, never saved)
       - uses: ./.github/actions/offline-db
+        with:
+          wait: "false"
       - name: run
         env:
           PYTHONUNBUFFERED: "1"

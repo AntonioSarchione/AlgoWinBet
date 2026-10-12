@@ -1,12 +1,42 @@
 name: offline database
 description: >
-  Restores data/offline.db, the plain SQLite copy of the database the runs use while Turso is blocked (2026-10-10 until the
-  quota reset on 2026-11-01). The newest copy in the Actions cache is the latest state: the runs that write it share one
-  concurrency group (offline-db), so they never overlap. A missing copy fails the run on purpose: starting again from an
-  older copy would silently drop what the runs stored since. The first copy comes from the secure-copy workflow.
+  Restores data/offline.db, the archive: the plain SQLite database every workflow works on (docs/SITE_DB.md). The newest
+  copy in the Actions cache is the latest state. A run that writes it first waits for its turn: every older run of a
+  writing workflow still queued or running goes first (first come, first served), so two writers never overlap and no run
+  is cancelled (GitHub's concurrency groups keep one pending run and cancel the others: on 2026-10-12 that cancelled the
+  weekly quality replay). A missing copy fails the run on purpose: starting again from an older copy would silently drop
+  what the runs stored since.
+inputs:
+  wait:
+    description: "true for a run that writes the archive (it waits for the older writers); false for a read-only run"
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
+    - name: wait for the turn
+      if: inputs.wait == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ME: ${{ github.run_id }}
+      run: |
+        # the workflows that write the archive; a run waits for every older one (lower run id) still queued or running
+        writers='^.github/workflows/(collect|fotmob|quality|probe|fotmob-backfill)[.]yml$'
+        start=$(date +%s)
+        while :; do
+          older=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" --jq \
+            "[.workflow_runs[] | select(.status != \"completed\" and .id < $ME and (.path | test(\"$writers\")))] | map(\"\(.name) \(.id)\") | join(\", \")") || older="?"
+          if [ -z "$older" ]; then break; fi
+          waited=$(( $(date +%s) - start ))
+          if [ "$waited" -gt 5400 ]; then
+            echo "::error::in attesa da 90 minuti di: $older (un run bloccato?)"
+            exit 1
+          fi
+          echo "in attesa del turno (${waited}s): $older"
+          sleep 30
+        done
+        echo "turno libero dopo $(( $(date +%s) - start ))s"
     - uses: actions/cache/restore@v6
       id: copy
       with:

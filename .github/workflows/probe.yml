@@ -26,15 +26,12 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: offline-db  # probes write the archive too (raw payloads, budget counters, fixes): one writer at a time
-  cancel-in-progress: false
+  actions: read  # the turn of the archive writers (.github/actions/offline-db) is read from the run list
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

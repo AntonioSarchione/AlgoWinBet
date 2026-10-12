@@ -18,10 +18,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: offline-db
-  cancel-in-progress: false
-
 jobs:
   copy:
     runs-on: ubuntu-latest

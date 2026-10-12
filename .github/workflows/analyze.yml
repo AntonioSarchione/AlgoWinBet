@@ -29,6 +29,8 @@ jobs:
       - run: pip install -e ".[turso]"
       # read only (the archive, .github/actions/offline-db): nothing is saved back
       - uses: ./.github/actions/offline-db
+        with:
+          wait: "false"
       - name: analyze
         env:
           PYTHONUNBUFFERED: "1"

@@ -13,15 +13,12 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: offline-db  # every run that writes the local database, one at a time (was: quality)
-  cancel-in-progress: false
+  actions: read  # the turn of the archive writers (.github/actions/offline-db) is read from the run list
 
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

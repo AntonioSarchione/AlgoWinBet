@@ -11,10 +11,6 @@ on:
     - cron: "17 7-22/3 * * *"  # fallback
   workflow_dispatch:
 
-concurrency:
-  group: offline-db  # every run that writes the local database, one at a time (was: fotmob)
-  cancel-in-progress: false
-
 permissions:
   contents: read
   actions: write  # to start the collect run that publishes the new analysis
@@ -22,7 +18,7 @@ permissions:
 jobs:
   fotmob:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
