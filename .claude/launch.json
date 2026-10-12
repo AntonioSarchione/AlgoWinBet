@@ -29,7 +29,7 @@
       ],
       "port": 3101,
       "env": {
-        "TURSO_DATABASE_URL": "file:../data/algowinbet.db"
+        "TURSO_DATABASE_URL": "file:../data/site-local.db"
       }
     }
   ]
