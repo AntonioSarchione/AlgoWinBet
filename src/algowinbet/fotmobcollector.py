@@ -35,6 +35,8 @@ from typing import Callable
 
 from .apifcollector import _sim
 from .collector import CollectStats
+from .domain import MatchResult, MatchStat
+from .markets import needs_goal_order, needs_half_time
 from .names import TeamNames
 from .providers.goalapi import Transport, urllib_transport
 from .snapshots import SnapshotProvider, SnapshotStore
@@ -57,6 +59,8 @@ LINK_WINDOW = timedelta(hours=36)  # dates differ by time zone between sources
 FINISHED_AFTER = timedelta(hours=2, minutes=30)  # from kickoff
 HISTORY_MIN_S = 60  # less than this is not worth the day's history slot
 GIVE_UP_AFTER = timedelta(days=3)  # a finished match still without player stats then has none (lower leagues, abandoned)
+GOAL_READS_PER_TICK = 20  # match pages read a run for the goal details of recorded selections (GoalDetails)
+GOAL_DETAIL_DAYS = 7  # selections waiting for a half-time score or the goal order are looked at this long (paper.GIVE_UP)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS fixture_links(source TEXT, ext_id TEXT, fixture_id TEXT, linked_at TEXT, PRIMARY KEY(source, ext_id));
@@ -127,6 +131,82 @@ def referee_of(pp: dict) -> str | None:
 
 def pid(fotmob_id) -> str:
     return f"fotmob:{fotmob_id}"
+
+
+def goal_details(pp: dict, home_goals: int, away_goals: int) -> tuple[tuple[int, int], tuple, tuple] | None:
+    """(half-time score, (first goal minute home, away), (last goal minute home, away)) from a finished match page's events
+    (matchFacts.events.events, verified 2026-10-12), when they add up to our result; None otherwise. A minute is minute +
+    stoppage/100, so 45+2 comes before 46; a team without goals has None. Each goal's side comes from the score after it
+    (newScore: an own goal counts for the team it is credited to), else from isHome (not for an own goal). Penalty shoot-out
+    events never count; extra-time goals (after the "FT" half event) only when our result includes them. The half-time score
+    is the goals up to minute 45+, checked against the "HT" half event's score when the page has one."""
+    events = (((pp.get("content") or {}).get("matchFacts") or {}).get("events") or {}).get("events") or []
+    goals: list[tuple[float, bool]] = []
+    score, half, regular = [0, 0], None, None
+    for e in events:
+        if e.get("isPenaltyShootoutEvent"):
+            continue
+        if e.get("type") == "Half":
+            if e.get("halfStrShort") == "HT":
+                half = (e.get("homeScore"), e.get("awayScore"))
+            elif e.get("halfStrShort") == "FT" and regular is None:
+                regular = len(goals)
+            continue
+        if e.get("type") != "Goal":
+            continue
+        new = e.get("newScore")
+        ok = isinstance(new, list) and len(new) == 2 and all(isinstance(x, int) for x in new)
+        step = (new[0] - score[0], new[1] - score[1]) if ok else None
+        if step in ((1, 0), (0, 1)):
+            home = step == (1, 0)
+        elif isinstance(e.get("isHome"), bool) and not e.get("ownGoal"):
+            home = e["isHome"]
+        else:
+            return None
+        score[0 if home else 1] += 1
+        try:
+            minute = float(e["time"]) + float(e.get("overloadTime") or 0) / 100
+        except (KeyError, TypeError, ValueError):
+            return None
+        goals.append((minute, home))
+    for chosen in ([goals[:regular]] if regular is not None else []) + [goals]:
+        home = [m for m, h in chosen if h]
+        away = [m for m, h in chosen if not h]
+        if len(home) != home_goals or len(away) != away_goals:
+            continue
+        ht = (sum(1 for m in home if m < 46), sum(1 for m in away if m < 46))
+        if half is not None and all(isinstance(x, int) for x in half) and tuple(half) != ht:
+            return None
+        return ht, (min(home, default=None), min(away, default=None)), (max(home, default=None), max(away, default=None))
+    return None
+
+
+def goal_stats(pp: dict, fixture_id: str, home_goals: int, away_goals: int, at: datetime) -> list[MatchStat]:
+    """match_stats rows from goal_details: 1H goals, FT first_goal_minute and last_goal_minute (as API-Football's rows)."""
+    got = goal_details(pp, home_goals, away_goals)
+    if got is None:
+        return []
+    ht, first, last = got
+    return [MatchStat(fixture_id=fixture_id, period="1H", stat="goals", home=float(ht[0]), away=float(ht[1]), observed_at=at),
+            MatchStat(fixture_id=fixture_id, period="FT", stat="first_goal_minute", home=first[0], away=first[1], observed_at=at),
+            MatchStat(fixture_id=fixture_id, period="FT", stat="last_goal_minute", home=last[0], away=last[1], observed_at=at)]
+
+
+def save_missing_stats(store, stats: list[MatchStat]) -> int:
+    """Saves the rows a match does not have yet: football-data's half-time score and API-Football's rows stay as they are."""
+    have: dict[tuple[str, str], set] = {}
+    keep = []
+    for x in stats:
+        if (x.fixture_id, x.period) not in have:
+            have[(x.fixture_id, x.period)] = set(store.stats_of(x.fixture_id, x.period))
+        if x.stat not in have[(x.fixture_id, x.period)]:
+            keep.append(x)
+    return store.save_stats(SOURCE, keep) if keep else 0
+
+
+def _finished(pp: dict) -> bool:
+    st = (pp.get("header") or {}).get("status") or {}
+    return bool(st.get("finished") or (pp.get("general") or {}).get("finished")) and not st.get("cancelled") and not st.get("awarded")
 
 
 class FotMobError(RuntimeError):
@@ -434,11 +514,14 @@ class FotMobCollector:
             st.requests += 1
             r = self.provider.result_of(fid)
             stats, absences, kept = self.parse_match(pp, fid, r.home if r else None, r.away if r else None)
+            goals = goal_stats(pp, fid, r.home_goals, r.away_goals, self.now()) if r is not None and _finished(pp) else []
             self.client.keep(f"/match/{ext}", None, kept)
             ref = referee_of(pp)
-            with self.store.one_commit():  # referee, player stats and absences of the match: one commit
+            with self.store.one_commit():  # referee, goal details, player stats and absences of the match: one commit
                 if ref:
                     st.add("arbitri FotMob", self.store.save_referees(SOURCE, [(fid, ref)], self.now()))
+                if goals:
+                    st.add("dettagli gol FotMob", save_missing_stats(self.store, goals))
                 if stats:
                     st.add("statistiche giocatori FotMob", self.store._bulk(
                         "INSERT OR REPLACE INTO fotmob_player_stats(fixture_id,team,player_id,name,position,starter,minutes,rating,goals,assists,"
@@ -580,3 +663,101 @@ class FotMobCollector:
             st.errors.append(f"FotMob: errore imprevisto ({type(e).__name__}: {e})")
         return st
 
+
+class GoalDetails:
+    """Half-time score and goal order for the recorded selections waiting for them (paper_legs: 1st-half markets, half-time/
+    full-time, first and last goal), from the FotMob match page. football-data has the half-time score of the domestic
+    leagues only, and API-Football (every competition, and the goal order) is suspended: without them those selections closed
+    as not settleable (the Nations League of 3-6 October 2026). Only matches with such a selection are read, at most
+    GOAL_READS_PER_TICK pages a run, linked from the season pages of `leagues` (every competition's FotMob ids: the Nations
+    League has four, one per league A-D, read for this alone). Shares the collector's client, pauses and page failures."""
+
+    def __init__(self, col: FotMobCollector, leagues: list[FotMobLeague]):
+        self.col, self.store, self.leagues = col, col.store, leagues
+
+    def pending(self, since: datetime) -> list[tuple[str, MatchResult]]:
+        """(our fixture id, result) of the finished matches since `since` with a selection still open or not settleable
+        that needs a half-time score or the goal order the match does not have yet, oldest first."""
+        t = self.col.now()
+        try:
+            rows = self.store.db.execute(
+                "SELECT DISTINCT fixture_id, sel_key FROM paper_legs WHERE (result IS NULL OR result = 'non valutabile') "
+                "AND kickoff >= ? AND kickoff <= ?", (since.isoformat(), (t - FINISHED_AFTER).isoformat())).fetchall()
+        except Exception:  # noqa: BLE001 - registry not created yet (first publication pending)
+            return []
+        gone = {name[len("fotmob-goals-none:"):] for name, _, _ in self.col._jobs("fotmob-goals-none:")}
+        out: dict[str, MatchResult] = {}
+        for fid, key in rows:
+            code = key.split("|", 1)[0]
+            if fid in out or fid in gone:
+                continue
+            missing = (needs_half_time(code) and "goals" not in self.store.stats_of(fid, "1H")) or (
+                needs_goal_order(code) and "first_goal_minute" not in self.store.stats_of(fid, "FT"))
+            r = self.col.provider.result_of(fid) if missing else None
+            if r is not None:
+                out[fid] = r
+        return sorted(out.items(), key=lambda x: x[1].kickoff)
+
+    def _link(self, st: CollectStats, todo: list[tuple[str, MatchResult]]) -> None:
+        """Links the pending matches from the stored season pages first (no request), then from the current season page,
+        read again only when older than an unlinked match's kickoff."""
+        for lg in self.leagues:
+            links = self.col._links()
+            open_ = [r for fid, r in todo if fid not in links and r.competition == lg.competition]
+            if not open_ or self.col._halted:
+                continue
+            pages = self.col._stored_pages(lg)
+            for _, payload in pages.values():
+                self.col._link(st, lg, payload.get("matches") or [], open_, report=False)
+            links = self.col._links()
+            open_ = [r for r in open_ if r.fixture_id not in links]
+            last = pages.get("current", (None, {}))[0]
+            page = f"season:{lg.fotmob_id}:current"
+            if open_ and (last is None or any(r.kickoff > last for r in open_)) and not self.col._skip(page):
+                try:
+                    matches, _ = self.col._season_page(lg, None)
+                except FotMobError as e:
+                    self.col._fail(st, lg.competition, e, page)
+                    continue
+                self.col._ok(page)
+                st.requests += 1
+                self.col._link(st, lg, matches, open_, report=False)
+        self.store.db.commit()
+
+    def run(self, st: CollectStats, since: datetime | None = None, max_n: int | None = GOAL_READS_PER_TICK) -> None:
+        """Reads the pending matches' pages (oldest first) and saves the goal details they lack. A page whose goals do not
+        add up to our result is read again on later runs, and given up GIVE_UP_AFTER from kickoff."""
+        t = self.col.now()
+        todo = self.pending(since or t - timedelta(days=GOAL_DETAIL_DAYS))
+        if not todo:
+            return
+        self._link(st, todo)
+        links = self.col._links()
+        read = 0
+        for fid, r in todo:
+            ext = links.get(fid)
+            if ext is None or self.col._halted or (max_n is not None and read >= max_n):
+                continue
+            page = f"match:{ext}"
+            if self.col._skip(page):
+                continue
+            try:
+                pp = self.col.client.page(f"/match/{ext}")
+            except FotMobError as e:
+                self.col._fail(st, f"partita {ext}", e, page)
+                if e.status == 404:
+                    self.store.mark_job(f"fotmob-goals-none:{fid}", t, "pagina FotMob assente")
+                continue
+            self.col._ok(page)
+            st.requests += 1
+            read += 1
+            goals = goal_stats(pp, fid, r.home_goals, r.away_goals, t) if _finished(pp) else []
+            if goals:
+                st.add("dettagli gol FotMob", save_missing_stats(self.store, goals))
+            elif t - r.kickoff > GIVE_UP_AFTER:
+                self.store.mark_job(f"fotmob-goals-none:{fid}", t, "gol FotMob assenti o diversi dal risultato")
+                st.skipped.append(f"{r.home}-{r.away}: gol FotMob assenti o diversi dal risultato {r.home_goals}-{r.away_goals}")
+        unlinked = [f"{r.home}-{r.away}" for fid, r in todo if fid not in links]
+        if unlinked:
+            st.skipped.append(f"{len(unlinked)} partite senza pagina FotMob per i dettagli dei gol (es. {', '.join(unlinked[:3])})")
+        self.store.db.commit()

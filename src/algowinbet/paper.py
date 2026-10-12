@@ -113,21 +113,23 @@ def sisal_close_fair(store, fixture_id: str, ref: SelectionRef) -> float | None:
     return devig({s: prices[s] for s in group}).get(ref.selection)
 
 
-def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
-    """Settles the recorded selections whose match is over, then the slips whose selections are all settled."""
+def settle(store, provider, now: datetime | None = None, recheck_since: datetime | None = None) -> dict[str, int]:
+    """Settles the recorded selections whose match is over, then the slips whose selections are all settled.
+    recheck_since: also look again at the not settleable ones from this kickoff on (a one-off, after details arrived late)."""
     _migrate(store)
     t = now or datetime.now(timezone.utc)
     # selections closed as not settleable stay open to a second look for a week: the half-time score or the goal order
-    # can arrive later (API-Football)
+    # can arrive later (FotMob, API-Football)
+    since = min(t - GIVE_UP, recheck_since) if recheck_since else t - GIVE_UP
     rows = store.db.execute("SELECT id, fixture_id, sel_key, kickoff, result FROM paper_legs WHERE kickoff <= ? AND (result IS NULL OR "
                             "(result = 'non valutabile' AND kickoff >= ?))",
-                            ((t - SETTLE_AFTER).isoformat(), (t - GIVE_UP).isoformat())).fetchall()
+                            ((t - SETTLE_AFTER).isoformat(), since.isoformat())).fetchall()
     done = {"won": 0, "lost": 0, "void": 0, "non valutabile": 0}
     updates = []
     for lid, fid, key, ko, before in rows:
         r = provider.result_of(fid)
         if r is None:
-            if t - datetime.fromisoformat(ko) > GIVE_UP:
+            if before is None and t - datetime.fromisoformat(ko) > GIVE_UP:
                 updates.append(("non valutabile", t.isoformat(), None, None, None, None, lid))
                 done["non valutabile"] += 1
             continue
@@ -161,7 +163,7 @@ def settle(store, provider, now: datetime | None = None) -> dict[str, int]:
     for u in updates:
         store.db.execute("UPDATE paper_legs SET result=?, settled_at=?, score=?, close_odds=?, close_fair=?, close_sisal_fair=? WHERE id=?", u)
     store.db.commit()
-    done["slips"] = _settle_slips(store, t)
+    done["slips"] = _settle_slips(store, t, since=since)
     return done
 
 
@@ -190,7 +192,8 @@ def _stat_count(store, fixture_id: str, stat: str, kickoff: datetime | None = No
 
 
 def _half_time(store, fixture_id: str, r) -> tuple[int, int] | None:
-    """Half-time score (football-data for the leagues, API-Football for every competition), when consistent with the result."""
+    """Half-time score (football-data for the leagues, FotMob and API-Football for every competition), when consistent with
+    the result."""
     g = store.stats_of(fixture_id, "1H").get("goals")
     if not g or g[0] is None or g[1] is None:
         return None
@@ -198,13 +201,14 @@ def _half_time(store, fixture_id: str, r) -> tuple[int, int] | None:
     return (h, a) if 0 <= h <= r.home_goals and 0 <= a <= r.away_goals else None
 
 
-def _settle_slips(store, t: datetime, bonus_table: list[float] | None = None, bonus_min_odds: float = 1.25) -> int:
+def _settle_slips(store, t: datetime, bonus_table: list[float] | None = None, bonus_min_odds: float = 1.25,
+                  since: datetime | None = None) -> int:
     from .config import OptimizerCfg
     o = OptimizerCfg()
     table = bonus_table if bonus_table is not None else o.multi_bonus
     open_slips = store.db.execute("SELECT id, legs FROM paper_slips WHERE last_kickoff <= ? AND (result IS NULL OR "
                                   "(result = 'non valutabile' AND last_kickoff >= ?))",
-                                  ((t - SETTLE_AFTER).isoformat(), (t - GIVE_UP).isoformat())).fetchall()
+                                  ((t - SETTLE_AFTER).isoformat(), (since or t - GIVE_UP).isoformat())).fetchall()
     n = 0
     for sid, legs_json in open_slips:
         legs = json.loads(legs_json)

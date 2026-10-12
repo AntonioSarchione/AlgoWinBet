@@ -47,6 +47,8 @@ class League:
     fd: str | None = None         # football-data.co.uk division (I1, E0...): season CSVs
     apif: int | None = None       # API-Football league id (lineups, injuries, squads)
     fotmob: int | None = None     # FotMob league id (player xG, shots, fouls, cards, absences of finished matches)
+    fotmob_goals: list[int] = field(default_factory=list)  # FotMob league ids read only for the goal details of recorded
+    # selections (half-time score, goal order: fotmobcollector.GoalDetails), e.g. the Nations League's leagues A-D
 
 
 @dataclass

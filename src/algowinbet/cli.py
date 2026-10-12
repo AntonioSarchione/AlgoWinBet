@@ -934,7 +934,7 @@ def cmd_fotmob_tick(a) -> None:
     stats) and the day's history slice, and once a day the player links. Never fails the run: whatever goes wrong is printed.
     GITHUB_OUTPUT reanalyse=N: the changes worth a new analysis (a regular's status, an official XI), for the workflow."""
     from .autorun import AutoConfig
-    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague, GoalDetails
     from .fotmobplayers import link_players
     from .collector import CollectStats
     from .fotmobprematch import FotMobPrematch
@@ -961,6 +961,12 @@ def cmd_fotmob_tick(a) -> None:
             _print_stats(st)
             for e in st.errors[:10]:
                 print(f"  ! {e}")
+            if not col._halted:
+                st = CollectStats("FotMob dettagli gol")
+                GoalDetails(col, _goal_leagues(cfg)).run(st)
+                _print_stats(st)
+                for e in st.errors[:10]:
+                    print(f"  ! {e}")
         day = f"fotmob-links:{now.date().isoformat()}"
         if not store.job_done(day):
             lines = link_players(store, now).lines()
@@ -979,6 +985,45 @@ def cmd_fotmob_tick(a) -> None:
     if out:
         with open(out, "a", encoding="utf-8") as f:
             f.write(f"reanalyse={len(relevant)}\n")
+
+
+def _goal_leagues(cfg):
+    """The FotMob leagues GoalDetails links from: every competition's player-stats league and its goal-only ones."""
+    from .fotmobcollector import FotMobLeague
+    return [FotMobLeague(i, l.name) for l in cfg.leagues for i in ([l.fotmob] if l.fotmob else []) + list(l.fotmob_goals or [])]
+
+
+def cmd_goal_details(a) -> None:
+    """One-off: the goal details (half-time score, goal order) of the selections waiting for them or closed as not
+    settleable since --since, from FotMob (1 page per match, plus the season pages to link them), then those selections and
+    their slips are settled again. Prints counts and matches only."""
+    from .autorun import AutoConfig
+    from .collector import CollectStats
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague, GoalDetails
+    from .paper import settle
+    cfg = AutoConfig.load(a.config)
+    store = SnapshotStore(a.db)
+    col = FotMobCollector(FotMobClient(store=store), store, [FotMobLeague(l.fotmob, l.name) for l in cfg.leagues if l.fotmob],
+                          TeamNames.load(a.aliases))
+    since = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
+    before = dict(store.db.execute("SELECT COALESCE(result, 'in attesa'), COUNT(*) FROM paper_legs WHERE kickoff >= ? GROUP BY 1",
+                                   (since.isoformat(),)).fetchall())
+    col._load_fails()
+    gd = GoalDetails(col, _goal_leagues(cfg))
+    print(f"partite da leggere: {len(gd.pending(since))}")
+    st = CollectStats("FotMob dettagli gol")
+    gd.run(st, since=since, max_n=None)
+    _print_stats(st)
+    for e in st.errors[:10]:
+        print(f"  ! {e}")
+    print(f"ancora senza dettagli: {len(gd.pending(since))}")
+    print(f"chiusura: {settle(store, SnapshotProvider(store), recheck_since=since)}")
+    after = dict(store.db.execute("SELECT COALESCE(result, 'in attesa'), COUNT(*) FROM paper_legs WHERE kickoff >= ? GROUP BY 1",
+                                  (since.isoformat(),)).fetchall())
+    print(f"selezioni dal {a.since}: prima {before}, dopo {after}")
+    for row in store.db.execute("SELECT result, COUNT(*) FROM paper_slips WHERE last_kickoff >= ? GROUP BY 1", (since.isoformat(),)):
+        print(f"  schedine {row[0] or 'in attesa'}: {row[1]}")
+    store.close()
 
 
 def cmd_fotmob_check(a) -> None:
@@ -3177,6 +3222,12 @@ def build_parser() -> argparse.ArgumentParser:
     fk.add_argument("--comp", default="Serie A")
     fk.add_argument("--db", default="algowinbet.db")
     fk.set_defaults(fn=cmd_fotmob_keys)
+    gdp = sub.add_parser("goal-details", help="una tantum: dettagli dei gol da FotMob per le selezioni non valutabili, poi le richiude")
+    gdp.add_argument("--since", default="2026-10-01", help="calcio d'inizio dal (AAAA-MM-GG)")
+    gdp.add_argument("--config", default="configs/collect.json")
+    gdp.add_argument("--aliases", default="configs/team_aliases.json")
+    gdp.add_argument("--db", default="algowinbet.db")
+    gdp.set_defaults(fn=cmd_goal_details)
     fg = sub.add_parser("fotmob-goals-check", help="dove FotMob mette i gol: pagine delle leghe e una partita (1 pagina per lega + 1)")
     fg.add_argument("leagues", nargs="+", help="id FotMob delle leghe")
     fg.add_argument("--comp", default="UEFA Nations League")

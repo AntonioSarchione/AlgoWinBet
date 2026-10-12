@@ -10,7 +10,7 @@
     {"name": "Eredivisie", "goal": "cmr77dvrh007vrx0664phtxs5", "oddspapi": 37, "fd": "N1", "apif": 88, "fotmob": 57},
     {"name": "UEFA Champions League", "goal": "cmr77dw3900f5rx06j05wgzv4", "oddspapi": 7, "apif": 2, "fotmob": 42},
     {"name": "UEFA Europa League", "goal": "cmr77dw3900f6rx06tuqwft2d", "oddspapi": 679, "apif": 3, "fotmob": 73},
-    {"name": "UEFA Nations League", "goal": "cmr77dw4800fgrx06rwmig2h8", "oddspapi": 23755, "apif": 5}
+    {"name": "UEFA Nations League", "goal": "cmr77dw4800fgrx06rwmig2h8", "oddspapi": 23755, "apif": 5, "fotmob_goals": [9806, 9807, 9808, 9809]}
   ],
   "_plan": "Fotografie solo Sisal (2 richieste conteggiate ciascuna): giornaliera, prima degli slot affollati, refresh nei giorni pieni; obiettivo 200 al mese + 5 aggiornamenti manuali. Storico Sisal+Pinnacle con richieste libere.",
   "bookmakers": ["sisal"],
