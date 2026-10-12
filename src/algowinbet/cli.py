@@ -780,6 +780,47 @@ def cmd_fotmob_keys(a) -> None:
     print("mappate e presenti: " + ", ".join(k for k in ("saves", "goals_conceded", "expected_goals_on_target_faced") if k in keys))
 
 
+def cmd_fotmob_goals_check(a) -> None:
+    """Where FotMob puts the goals (1 page per league id, then 1 match page): the league page's name and its matches of the
+    week around --day linked to our results, then the goal and half-time events of our fixture --fixture (times, sides,
+    scores, own goal and shoot-out flags; no player names)."""
+    from .collector import CollectStats
+    from .fotmobcollector import FotMobClient, FotMobCollector, FotMobLeague, _utc
+    store = SnapshotStore(a.db)
+    names = TeamNames.load(a.aliases)
+    day = datetime.fromisoformat(a.day).replace(tzinfo=timezone.utc)
+    leagues = [FotMobLeague(int(x), a.comp) for x in a.leagues]
+    col = FotMobCollector(FotMobClient(store=store), store, leagues, names)
+    st = CollectStats("fotmob-goals-check")
+    for lg in leagues:
+        try:
+            matches, _ = col._season_page(lg, None)
+        except Exception as e:  # noqa: BLE001 - a probe: print and go on
+            print(f"lega {lg.fotmob_id}: {e}")
+            continue
+        shown = store.db.execute("SELECT detail FROM jobs WHERE name = ?", (f"fotmob-page:{lg.fotmob_id}:current",)).fetchone()
+        body = json.loads(store.raw_body(int(shown[0]))) if shown and shown[0] else {}
+        near = [m for m in matches if _utc(m) and abs(_utc(m) - day) <= timedelta(days=4)]
+        print(f"lega {lg.fotmob_id}: stagione {body.get('shown')}, {len(matches)} partite, {len(near)} attorno al {a.day}: "
+              + ", ".join(f"{m['home']['name']}-{m['away']['name']} {m['score']}" for m in near[:12]))
+        col._link(st, lg, matches, col._results(lg))
+    print(f"collegate: {st.saved}; non trovate: {st.skipped}")
+    store.db.commit()
+    ext = store.db.execute("SELECT ext_id FROM fixture_links WHERE source = 'fotmob' AND fixture_id = ?", (a.fixture,)).fetchone()
+    if not ext:
+        print(f"{a.fixture}: nessuna partita FotMob collegata")
+        return
+    pp = col.client.page(f"/match/{ext[0]}")
+    ev = ((pp.get("content") or {}).get("matchFacts") or {}).get("events") or {}
+    print(f"partita FotMob {ext[0]}: chiavi events {sorted(ev)}; status {json.dumps(((pp.get('header') or {}).get('status') or {}), ensure_ascii=False)[:600]}")
+    keep = ("type", "time", "overloadTime", "timeStr", "isHome", "ownGoal", "newScore", "homeScore", "awayScore", "halfStrShort",
+            "halfStrKey", "isPenaltyShootoutEvent", "goalDescription", "goalDescriptionKey", "minutesAddedStr")
+    for e in ev.get("events") or []:
+        if e.get("type") in ("Goal", "Half", "AddedTime"):
+            print("  " + json.dumps({k: e.get(k) for k in keep if k in e}, ensure_ascii=False))
+    print(f"  altre chiavi di un gol: {sorted(next((e for e in ev.get('events') or [] if e.get('type') == 'Goal'), {}))}")
+
+
 def cmd_fotmob_referee(a) -> None:
     """Where FotMob puts the referee (2 FotMob pages: the last finished match and the next one of a competition). Prints the
     infoBox keys and the referee field only."""
@@ -3136,6 +3177,14 @@ def build_parser() -> argparse.ArgumentParser:
     fk.add_argument("--comp", default="Serie A")
     fk.add_argument("--db", default="algowinbet.db")
     fk.set_defaults(fn=cmd_fotmob_keys)
+    fg = sub.add_parser("fotmob-goals-check", help="dove FotMob mette i gol: pagine delle leghe e una partita (1 pagina per lega + 1)")
+    fg.add_argument("leagues", nargs="+", help="id FotMob delle leghe")
+    fg.add_argument("--comp", default="UEFA Nations League")
+    fg.add_argument("--day", default="2026-10-04")
+    fg.add_argument("--fixture", default="goal:cmtksvwz3rdfgo607c0p0anos")
+    fg.add_argument("--aliases", default="configs/team_aliases.json")
+    fg.add_argument("--db", default="algowinbet.db")
+    fg.set_defaults(fn=cmd_fotmob_goals_check)
     ft = sub.add_parser("fotmob-tick", help="un giro FotMob: assenti e formazioni delle prossime partite, poi le partite finite")
     ft.add_argument("--history-seconds", type=float, default=240, help="secondi per lo storico (una volta al giorno)")
     ft.add_argument("--config", default="configs/collect.json")
