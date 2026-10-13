@@ -6,13 +6,20 @@ export type Series = { key: string; label: string; short: string; color: string;
 
 const W = 640;
 const H = 220;
-const PAD = { l: 40, r: 64, t: 12, b: 26 };
+const PADS = { odds: { l: 40, r: 64, t: 12, b: 26 }, eur: { l: 62, r: 96, t: 12, b: 26 } };
 const TZ = "Europe/Rome";
-const fmt = (t: number) => new Date(t).toLocaleString("it-IT", { timeZone: TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const fmtTime = (t: number) => new Date(t).toLocaleString("it-IT", { timeZone: TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const fmtDay = (t: number) => new Date(t).toLocaleDateString("it-IT", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit" });
+const eur = (v: number, cents = false) =>
+  v.toLocaleString("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 });
 
 // Odds over time, one line per selection. Line style differs per series and each line is labelled at its end,
 // so identity never relies on colour alone. Hover or keyboard focus shows every value at that moment.
-export function OddsChart({ series, title }: { series: Series[]; title: string }) {
+// unit "eur": a balance (euro values, days on the axis) instead of odds over time
+export function OddsChart({ series, title, unit = "odds" }: { series: Series[]; title: string; unit?: "odds" | "eur" }) {
+  const PAD = PADS[unit];
+  const fmt = unit === "eur" ? fmtDay : fmtTime;
+  const val = (v: number, exact = false) => (unit === "eur" ? eur(v, exact) : v.toFixed(2));
   const [hover, setHover] = useState<number | null>(null);
   const { times, x, y, ticks } = useMemo(() => {
     const ts = [...new Set(series.flatMap((s) => s.points.map((p) => p.t)))].sort((a, b) => a - b);
@@ -25,7 +32,7 @@ export function OddsChart({ series, title }: { series: Series[]; title: string }
     const y = (v: number) => PAD.t + (1 - (v - lo) / (hi - lo)) * (H - PAD.t - PAD.b);
     const step = (hi - lo) / 4;
     return { times: ts, x, y, ticks: [0, 1, 2, 3, 4].map((k) => lo + k * step) };
-  }, [series]);
+  }, [series, PAD]);
 
   const at = (s: Series, t: number) => {
     let best: { t: number; v: number } | undefined;
@@ -67,7 +74,7 @@ export function OddsChart({ series, title }: { series: Series[]; title: string }
           <g key={v}>
             <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="var(--line)" strokeWidth="1" />
             <text x={PAD.l - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="var(--muted)" style={{ fontFamily: "var(--font-mono)" }}>
-              {v.toFixed(2)}
+              {val(v)}
             </text>
           </g>
         ))}
@@ -84,7 +91,7 @@ export function OddsChart({ series, title }: { series: Series[]; title: string }
               <path d={d} fill="none" stroke={s.color} strokeWidth="2" strokeDasharray={s.dash} strokeLinejoin="round" strokeLinecap="round" />
               <circle cx={x(last.t)} cy={y(last.v)} r="4" fill={s.color} stroke="var(--card)" strokeWidth="2" />
               <text x={x(last.t) + 8} y={(labelY.get(s.key) ?? y(last.v)) + 4} fontSize="12" fill="var(--text-2)" style={{ fontFamily: "var(--font-mono)" }}>
-                {s.short} {last.v.toFixed(2)}
+                {s.short} {val(last.v)}
               </text>
             </g>
           );
@@ -107,7 +114,7 @@ export function OddsChart({ series, title }: { series: Series[]; title: string }
             return (
               <div key={s.key} className="kv" style={{ padding: "1px 0" }}>
                 <span>{s.label}</span>
-                <span className="num">{p ? p.v.toFixed(2) : "–"}</span>
+                <span className="num">{p ? val(p.v, true) : "–"}</span>
               </div>
             );
           })}

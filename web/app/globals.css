@@ -1036,3 +1036,14 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .stack-lg > span:first-child { border-radius: 7px 0 0 7px; }
 .stack-lg > span:last-child { border-radius: 0 7px 7px 0; }
 .stack-lg b { font-family: var(--font-mono); font-weight: 700; }
+
+/* a table that becomes one card per row on narrow screens: every cell labelled by its data-l (bankroll projection) */
+@media (max-width: 640px) {
+  .stack-table, .stack-table tbody { display: block; width: 100%; }
+  .stack-table thead { display: none; }
+  .stack-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .stack-table td { white-space: normal; }
+  .stack-table td { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border: 0; padding: 3px 12px; text-align: right; }
+  .stack-table td:first-child { display: block; text-align: left; padding-bottom: 6px; }
+  .stack-table td[data-l]::before { content: attr(data-l); color: var(--muted); font-family: var(--font-sans, inherit); font-weight: 400; text-align: left; }
+}

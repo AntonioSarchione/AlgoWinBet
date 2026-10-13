@@ -59,7 +59,7 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
   const growth = r.equity / plan.start - 1;
   // projection: the same plan and the same slips (profile, overlaps), from the plan's capital, see lib/bankproj.ts
   const horizon = HORIZONS.includes(Number(sp.h)) ? Number(sp.h) : 60;
-  const proj = projectionInput(slips);
+  const proj = projectionInput(slips); // the slips a bettor would hold together: their mix, their pace
   const projections = proj ? SCENARIOS.map((sc) => project(proj, plan, horizon, sc)) : [];
   const shown = projections.find((x) => x.scenario === sp.sc) ?? projections.find((x) => x.scenario === "storico");
   // every recorded slip, newest first: the staked ones and those this plan leaves out (with the reason)
@@ -188,6 +188,7 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
             <div className="card-pad">
               {r.points.length > 1 ? (
                 <OddsChart
+                  unit="eur"
                   title="Saldo dopo ogni schedina chiusa"
                   series={[{ key: "saldo", label: "Saldo (€)", short: "€", color: "var(--accent)", points: r.points }]}
                 />
@@ -232,7 +233,7 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
                     </div>
                   </form>
                   <div className="table-wrap">
-                    <table className="compact">
+                    <table className="compact stack-table">
                       <caption className="sr-only">Saldo dopo {horizon} giorni partendo da {eur(plan.start)}, per scenario</caption>
                       <thead>
                         <tr>
@@ -248,27 +249,28 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
                               <span className="sc-name">{SCENARIO[x.scenario].label}</span>
                               <span className="sc-sub">{SCENARIO[x.scenario].hint}</span>
                             </td>
-                            <td className="num">{pct(x.avgWinProb, 1)}</td>
-                            <td className={`num ${tone(x.final[2] - plan.start)}`}>{eur(x.final[2])}</td>
-                            <td className="num">{eur(x.final[0])} – {eur(x.final[4])}</td>
-                            <td className="num">{pct(x.pLoss, 0)}</td>
-                            <td className="num">{pct(x.pHalf, 1)}</td>
-                            <td className="num">{pct(x.ddMedian, 0)}</td>
+                            <td className="num" data-l="Vince in media">{pct(x.avgWinProb, 1)}</td>
+                            <td className={`num ${tone(x.final[2] - plan.start)}`} data-l="Saldo mediano">{eur(x.final[2])}</td>
+                            <td className="num" data-l="9 casi su 10 tra">{eur(x.final[0])} – {eur(x.final[4])}</td>
+                            <td className="num" data-l="In perdita">{pct(x.pLoss, 0)}</td>
+                            <td className="num" data-l="Metà capitale persa">{pct(x.pHalf, 1)}</td>
+                            <td className="num" data-l="Calo massimo tipico">{pct(x.ddMedian, 0)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                   <OddsChart
+                  unit="eur"
                     title={`Saldo nei prossimi ${horizon} giorni, scenario ${SCENARIO[shown.scenario].label}: mediana e fasce`}
                     series={projBands(shown.bands)}
                   />
                   <p className="note">
-                    Si parte oggi da {eur(plan.start)} con questo piano. Ogni giorno arrivano in media {proj.perDay.toFixed(1)} schedine, pescate tra
-                    le {proj.pool.length} del registro di questo profilo, con la loro quota e la probabilità del modello; ognuna si chiude entro il
-                    giorno, i rimborsi non contano. &ldquo;Come finora&rdquo; corregge il modello con le schedine chiuse: {proj.wins} vinte su{" "}
-                    {proj.expected.toFixed(1)} attese ({proj.settled} chiuse), con un peso verso il modello finché sono poche (correzione ×
-                    {proj.calib.toFixed(2)}). &ldquo;Nessun vantaggio&rdquo; mostra cosa fa la sola fortuna con queste puntate. È una proiezione,
+                    Si parte oggi da {eur(plan.start)} con questo piano. Ogni giorno arrivano in media {proj.perDay.toFixed(1)} schedine, pescate
+                    tra le {proj.pool.length} del registro che si terrebbero insieme (profilo e sovrapposte come sopra) con la loro quota,
+                    la probabilità del modello e i giorni in cui i soldi restano in gioco; {pct(proj.refundRate, 0)} rimborsate, come finora.
+                    &ldquo;Come finora&rdquo; corregge il modello con le schedine chiuse: {proj.wins} vinte su {proj.expected.toFixed(1)} attese
+                    ({proj.settled} chiuse), con un peso forte verso il modello finché sono poche (correzione ×{proj.calib.toFixed(2)}). &ldquo;Nessun vantaggio&rdquo; mostra cosa fa la sola fortuna con queste puntate. È una proiezione,
                     non una promessa: le fasce dicono quanto può andare diversamente.
                   </p>
                 </>
