@@ -202,8 +202,10 @@ export function MyCombo({ home, away, xgHome, xgAway, rho, params, players, fina
             </div>
           ) : null}
           <p className="note">
-            Gli esiti dello stesso tipo (goal e tempi, corner, cartellini, tiri) sono legati tra loro come nel modello; goal, corner, cartellini e tiri
-            tra loro sono presi come indipendenti. Marcatore e assist seguono i goal della squadra. Tiri di squadra solo per i 7 campionati.
+            Gli esiti dello stesso tipo (goal e tempi, corner, cartellini, tiri) sono legati tra loro come nel modello. Tiri e corner seguono
+            i goal: i tiri in porta includono i goal, e chi è in vantaggio tira e batte corner un po&apos; meno (misurato su 2.345 partite).
+            Il legame diretto tra corner e tiri non è contato (le combo corner + tiri hanno probabilità un po&apos; bassa); i cartellini sono
+            indipendenti. Marcatore e assist seguono i goal della squadra. Tiri di squadra solo per i 7 campionati.
             Genera: esiti con probabilità almeno {pct(GEN.minProb, 0)} e quota almeno {GEN.minOdds.toFixed(2)}, solo giocatori con
             probabilità di essere titolari di almeno {pct(GEN.minStart, 0)}. Uso personale, solo paper trading.
           </p>

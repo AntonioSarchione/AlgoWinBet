@@ -1845,6 +1845,17 @@ def cmd_player_eval(a) -> None:
         store.close()
 
 
+def cmd_combo_eval(a) -> None:
+    """My Combo: goals, corners, cards and team shots taken as independent, replayed week by week (no API request)."""
+    from .comboeval import evaluate_combo, print_combo_eval
+    store = SnapshotStore(a.db)
+    try:
+        start = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
+        print_combo_eval(evaluate_combo(SnapshotProvider(store), _cfg(a), start, datetime.now(timezone.utc)))
+    finally:
+        store.close()
+
+
 def cmd_duo_eval(a) -> None:
     """Sisal's DUO player markets: the substitute's minutes at the starter's rate, replayed on past matches (no API request)."""
     from .duoeval import evaluate_duo, print_duo_eval
@@ -3383,6 +3394,11 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--keepers", action="store_true", help="i portieri: tiri in porta subiti, goal subiti, parate")
     pe.add_argument("--db", default="turso")
     pe.set_defaults(fn=cmd_player_eval)
+    ce = sub.add_parser("combo-eval", help="My Combo: goal, corner, cartellini e tiri presi come indipendenti, rigiocati (nessuna richiesta API)")
+    ce.add_argument("--since", default="2025-08-01")
+    ce.add_argument("--config", default=None)
+    ce.add_argument("--db", default="turso")
+    ce.set_defaults(fn=cmd_combo_eval)
     de = sub.add_parser("duo-eval", help="mercati DUO Sisal: i minuti del sostituto al ritmo del titolare, rigiocati (nessuna richiesta API)")
     de.add_argument("--since", default="2025-07-01")
     de.add_argument("--all", action="store_true", help="tutte le competizioni, non solo i 7 campionati")

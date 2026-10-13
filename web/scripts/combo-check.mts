@@ -1,5 +1,6 @@
 // Parity of the My Combo engine (lib/combo.ts) with the Python model on one match: node --experimental-strip-types
-// scripts/combo-check.mts <reference json> (written by the Python side: count-model params and reference probabilities).
+// scripts/combo-check.mts <reference json> [<structural reference json>] (written by the Python side: count-model params and
+// reference probabilities; the structural one: shots and corners given the goals, brute force).
 import { readFileSync } from "node:fs";
 import { buildModel, comboSelections, evaluateCombo, generateCombo, jointModel, type ComboPlayer } from "../lib/combo.ts";
 
@@ -13,7 +14,9 @@ const model = buildModel(ref.xg[0], ref.xg[1], ref.rho, { h1: 0.45, stats: ref.s
 const sels = comboSelections(model, (t) => (t === 1 ? "casa" : "ospite"));
 const by = new Map(sels.map((s) => [s.key, s]));
 let bad = 0;
+const struct: Record<string, number> = process.argv[3] ? JSON.parse(readFileSync(process.argv[3], "utf8")) : {};
 for (const [k, p] of Object.entries(ref.ref) as [string, number][]) {
+  if (k in struct) continue; // given the goals: checked against the structural reference below
   const s = by.get(k);
   if (!s) { console.log(`manca ${k}`); bad++; continue; }
   const q = jointModel(model, [s]);
@@ -21,6 +24,12 @@ for (const [k, p] of Object.entries(ref.ref) as [string, number][]) {
   const ok = Math.abs(q - p) <= tol;
   if (!ok) bad++;
   console.log(`${ok ? "ok " : "NO "} ${k.padEnd(28)} python ${p.toFixed(4)}  ts ${q.toFixed(4)}`);
+}
+for (const [k, p] of Object.entries(struct)) {
+  const q = jointModel(model, k.split(" + ").map((x) => by.get(x)!));
+  const ok = Math.abs(q - p) <= 0.003;
+  if (!ok) bad++;
+  console.log(`${ok ? "ok " : "NO "} ${k.padEnd(60)} python ${p.toFixed(4)}  ts ${q.toFixed(4)}`);
 }
 const tot = model.cells.reduce((x, c) => x + c.w, 0);
 console.log(`celle ${model.cells.length}, somma pesi ${tot.toFixed(6)}`);

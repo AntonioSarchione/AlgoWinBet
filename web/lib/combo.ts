@@ -9,9 +9,15 @@
 // goal selection is a set of these cells, so the joint probability of goal selections comes out exactly.
 //
 // Corners, cards, team shots: each statistic its own count grid (models/counts.py CountModel.params: negative binomial per
-// team, the shared factor of cards as Gauss-Laguerre nodes), selections on one statistic exact together; shots on target
-// with total shots: each shot on target with probability (expected on target / expected shots), so both stay coherent.
-// Between goals, corners, cards and shots the model has no link: they multiply (independent).
+// team, the shared factor of cards as Gauss-Laguerre nodes), selections on one statistic exact together.
+// Given the goals (comboeval.py, replayed on 2,300 matches of the 7 leagues, where taking them as independent was 27% off
+// on "Over 2.5 + shots on target Over 8.5" and 12% on "home win + more home corners"): a team's shots on target are its
+// goals plus a negative binomial rest (mean: expected shots on target - expected goals), its total shots those plus a
+// negative binomial of shots off target, its corners a negative binomial; the side ahead by d goals (up to LEAD) has its
+// shots beyond the goals and its corners x exp(-gamma d), scaled so that the averages stay the count models' (a side ahead
+// shoots and wins corners less). So shots and corners are per-cell factors of the goal cells, like the players. Cards stay
+// independent of the rest (the replay found no link worth a model), and corners with shots only through the goals (their
+// own link, about +15% on the same team's "more corners + more shots", is left out).
 //
 // Players (Sisal's DUO rule: goals, two or more, first goalscorer, assists, goal or assist and shots on target count for the
 // player or for whoever replaces him, so the player's slot covers the whole match; total shots, bookings and fouls do not). His share of his team's goals
@@ -406,17 +412,133 @@ function teamFactor(ps: ComboPlayer[], conds: Map<string, { kind: PlayerKind; k:
   }));
 }
 
+// ---- statistics given the goals (see the top): per lead of the side, -LEAD..LEAD, the count beyond the goals
+export const LEAD = 2;
+export const GAMMA_SHOTS = 0.03; // replay: "home win + more home shots" and "away win + more home shots" right at 0.03
+export const GAMMA_CORNERS = 0.06; // replay: "home win + more home corners" 0.88 -> 0.98 of the truth
+type ByLead = number[][]; // [lead + LEAD] -> pmf
+export type Given = {
+  sotH: ByLead; sotA: ByLead; nSot: number; // shots on target beyond the goals
+  offH?: ByLead; offA?: ByLead; nShots?: number; // shots off target
+  cornH?: ByLead; cornA?: ByLead; nCorn?: number;
+};
+export const leadOf = (h: number, a: number) => Math.max(-LEAD, Math.min(LEAD, h - a));
+
+function byLead(goal: Matrix, mean: number, size: number | null, n: number, gamma: number, home: boolean): ByLead {
+  const f = (d: number) => Math.exp(-gamma * d);
+  let avg = 0;
+  for (let i = 0; i < goal.length; i++) for (let j = 0; j < goal.length; j++) avg += goal[i][j] * f(home ? leadOf(i, j) : -leadOf(i, j));
+  return Array.from({ length: 2 * LEAD + 1 }, (_, k) => countPmf(Math.max(mean, 0.05) * f(k - LEAD) / avg, size, n));
+}
+
+function buildGiven(goal: Matrix, p: Partial<Record<StatName, CountParams>>): Given | null {
+  const sot = p.shots_on;
+  const xg = (side: 0 | 1) => sumRow(goal, side);
+  const out: Partial<Given> = {};
+  if (sot) {
+    out.sotH = byLead(goal, Math.max(0.3, sot.lh - xg(0)), sot.size, sot.n, GAMMA_SHOTS, true);
+    out.sotA = byLead(goal, Math.max(0.3, sot.la - xg(1)), sot.size, sot.n, GAMMA_SHOTS, false);
+    out.nSot = sot.n;
+    const sh = p.shots;
+    if (sh) {
+      out.offH = byLead(goal, Math.max(0.5, sh.lh - sot.lh), sh.size, sh.n, GAMMA_SHOTS, true);
+      out.offA = byLead(goal, Math.max(0.5, sh.la - sot.la), sh.size, sh.n, GAMMA_SHOTS, false);
+      out.nShots = sh.n;
+    }
+  }
+  const c = p.corners;
+  if (c && !c.g) {
+    out.cornH = byLead(goal, c.lh, c.size, c.n, GAMMA_CORNERS, true);
+    out.cornA = byLead(goal, c.la, c.size, c.n, GAMMA_CORNERS, false);
+    out.nCorn = c.n;
+  }
+  return out.sotH || out.cornH ? (out as Given) : null;
+}
+
+/** Q[h][a] = sum_u sum_v dh(lead)[u] da(-lead)[v] W(lead)[h + u][a + v] (indices capped at the grid's tail): what passes given
+ * the goals, the counts being the goals plus u and v. Separable: one pass over the away side, one over the home side. */
+function givenGoals(dh: ByLead, da: ByLead, w: (k: number) => Matrix): Matrix {
+  const Q: Matrix = Array.from({ length: GRID }, () => new Array(GRID).fill(0));
+  for (let k = 0; k < 2 * LEAD + 1; k++) {
+    const W = w(k);
+    const n = W.length;
+    const ph = dh[k], pa = da[2 * LEAD - k];
+    const V: Matrix = Array.from({ length: n }, (_, s) => Array.from({ length: GRID }, (_, a) => {
+      let t = 0;
+      for (let v = 0; v < pa.length; v++) if (pa[v] > 1e-12) t += pa[v] * W[s][Math.min(a + v, n - 1)];
+      return t;
+    }));
+    for (let h = 0; h < GRID; h++) for (let a = 0; a < GRID; a++) {
+      if (leadOf(h, a) + LEAD !== k) continue;
+      let t = 0;
+      for (let u = 0; u < ph.length; u++) if (ph[u] > 1e-12) t += ph[u] * V[Math.min(h + u, n - 1)][a];
+      Q[h][a] = t;
+    }
+  }
+  return Q;
+}
+
+function indicator(n: number, sels: ComboSel[]): Matrix {
+  return Array.from({ length: n }, (_, x) => Array.from({ length: n }, (_, y) => (sels.every((s) => s.count!(x, y)) ? 1 : 0)));
+}
+
+/** Shots on target and total shots given the goals, per (home goals, away goals); null without the structure or selections. */
+export function shotsGiven(model: ComboModel, shots: ComboSel[], sot: ComboSel[]): Matrix | null {
+  const G = model.given;
+  if ((!shots.length && !sot.length) || !G?.sotH || (shots.length && !G.offH)) return null;
+  const ns = G.nSot;
+  if (!shots.length) {
+    const A = indicator(ns, sot);
+    return givenGoals(G.sotH, G.sotA, () => A);
+  }
+  const nt = G.nShots!;
+  const S = indicator(nt, shots);
+  // W(lead)[x][y]: the shots on target pass at x, y and the total shots (x + off-target) pass
+  const W = (k: number): Matrix => {
+    const oh = G.offH![k], oa = G.offA![2 * LEAD - k];
+    const V: Matrix = Array.from({ length: nt }, (_, s) => Array.from({ length: ns }, (_, y) => {
+      let t = 0;
+      for (let z = 0; z < oa.length; z++) if (oa[z] > 1e-12) t += oa[z] * S[s][Math.min(y + z, nt - 1)];
+      return t;
+    }));
+    const okSot = sot.length ? indicator(ns, sot) : null;
+    return Array.from({ length: ns }, (_, x) => Array.from({ length: ns }, (_, y) => {
+      if (okSot && !okSot[x][y]) return 0;
+      let t = 0;
+      for (let w = 0; w < oh.length; w++) if (oh[w] > 1e-12) t += oh[w] * V[Math.min(x + w, nt - 1)][y];
+      return t;
+    }));
+  };
+  return givenGoals(G.sotH, G.sotA, W);
+}
+
+/** Corners given the goals: they depend on the lead only, one probability per lead. */
+export function cornersGiven(model: ComboModel, sels: ComboSel[]): number[] | null {
+  const G = model.given;
+  if (!sels.length || !G?.cornH) return null;
+  const I = indicator(G.nCorn!, sels);
+  return Array.from({ length: 2 * LEAD + 1 }, (_, k) => {
+    const ph = G.cornH![k], pa = G.cornA![2 * LEAD - k];
+    let t = 0;
+    for (let x = 0; x < ph.length; x++) for (let y = 0; y < pa.length; y++) if (I[x][y]) t += ph[x] * pa[y];
+    return t;
+  });
+}
+
 // ---- evaluation
 export type ComboModel = {
   cells: Cell[];
   stats: Partial<Record<StatName, Matrix>>;
   players: Map<string, ComboPlayer>;
+  given: Given | null; // shots and corners given the goals
 };
 
 export function buildModel(xgHome: number, xgAway: number, rho: number, params: ComboParams | null, players: ComboPlayer[]): ComboModel {
   const stats: Partial<Record<StatName, Matrix>> = {};
   for (const [k, v] of Object.entries(params?.stats ?? {}) as [StatName, CountParams][]) stats[k] = countMatrix(v);
-  return { cells: goalCells(scoreMatrix(xgHome, xgAway, rho), params?.h1 ?? 0.45), stats, players: new Map(players.map((p) => [p.pid, p])) };
+  const goal = scoreMatrix(xgHome, xgAway, rho);
+  return { cells: goalCells(goal, params?.h1 ?? 0.45), stats, players: new Map(players.map((p) => [p.pid, p])),
+    given: params ? buildGiven(goal, params.stats) : null };
 }
 
 /** Every selection the match offers: goals always, a statistic when its model has the match, the players given. */
@@ -477,8 +599,11 @@ export function jointModel(model: ComboModel, sels: ComboSel[]): number {
   if (!sels.length) return 0;
   const goals = sels.filter((s) => s.goal);
   const pl = sels.filter((s) => s.player);
+  const by = (st: StatName) => sels.filter((s) => s.stat === st);
+  const qs = shotsGiven(model, by("shots"), by("shots_on")); // per goal cell, or null: the old independent blocks
+  const qc = cornersGiven(model, by("corners"));
   let gp = 0;
-  if (goals.length || pl.length) {
+  if (goals.length || pl.length || qs || qc) {
     let fac: ((c: Cell) => number) | null = null;
     if (pl.length) {
       const conds = new Map<string, { kind: PlayerKind; k: number }[]>();
@@ -489,11 +614,11 @@ export function jointModel(model: ComboModel, sels: ComboSel[]): number {
     }
     for (const c of model.cells) {
       if (!goals.every((s) => s.goal!(c))) continue;
-      gp += c.w * (fac ? fac(c) : 1);
+      gp += c.w * (fac ? fac(c) : 1) * (qs ? qs[c.h][c.a] : 1) * (qc ? qc[leadOf(c.h, c.a) + LEAD] : 1);
     }
   } else gp = 1;
-  const by = (st: StatName) => sels.filter((s) => s.stat === st);
-  return gp * statBlock(model, "corners", by("corners")) * statBlock(model, "cards", by("cards")) * shotsBlock(model, by("shots"), by("shots_on"));
+  return gp * (qc ? 1 : statBlock(model, "corners", by("corners"))) * statBlock(model, "cards", by("cards")) *
+    (qs ? 1 : shotsBlock(model, by("shots"), by("shots_on")));
 }
 
 export type ComboResult = {
@@ -588,17 +713,33 @@ export function generateCombo(model: ComboModel, all: ComboSel[], finals: Record
     return v;
   };
   const statCache = new Map<string, number>();
+  // shots and corners given the goals (model.given): factors of the goal cells; without it, independent blocks as before
+  const G = model.given;
+  const givenShots = (sh: number[]) => !!G?.sotH && (!sh.length || !!G.offH);
+  const isGiven = (st: StatName) => (st === "corners" ? !!G?.cornH : st === "shots" ? !!G?.sotH && !!G.offH : st === "shots_on" ? !!G?.sotH : false);
+  const statVec = new Map<string, Float64Array | null>();
+  const sv = (idx: number[]): Float64Array | null => {
+    const sh = idx.filter((i) => cands[i].stat === "shots"), so = idx.filter((i) => cands[i].stat === "shots_on");
+    const co = idx.filter((i) => cands[i].stat === "corners");
+    const key = `${sh.join(",")}|${so.join(",")}|${co.join(",")}`;
+    if (!statVec.has(key)) {
+      const qs = givenShots(sh) ? shotsGiven(model, sh.map((i) => cands[i]), so.map((i) => cands[i])) : null;
+      const qc = cornersGiven(model, co.map((i) => cands[i]));
+      statVec.set(key, qs || qc ? Float64Array.from(cells, (c) => (qs ? qs[c.h][c.a] : 1) * (qc ? qc[leadOf(c.h, c.a) + LEAD] : 1)) : null);
+    }
+    return statVec.get(key)!;
+  };
   const statsP = (idx: number[]): number => {
     let p = 1;
     for (const st of ["corners", "cards"] as StatName[]) {
       const ss = idx.filter((i) => cands[i].stat === st);
-      if (!ss.length) continue;
+      if (!ss.length || (st === "corners" && G?.cornH)) continue;
       const k = `${st}:${ss.join(",")}`;
       if (!statCache.has(k)) statCache.set(k, statBlock(model, st, ss.map((i) => cands[i])));
       p *= statCache.get(k)!;
     }
     const sh = idx.filter((i) => cands[i].stat === "shots"), so = idx.filter((i) => cands[i].stat === "shots_on");
-    if (sh.length || so.length) {
+    if ((sh.length || so.length) && !givenShots(sh)) {
       const k = `sh:${sh.join(",")}|${so.join(",")}`;
       if (!statCache.has(k)) statCache.set(k, shotsBlock(model, sh.map((i) => cands[i]), so.map((i) => cands[i])));
       p *= statCache.get(k)!;
@@ -606,16 +747,18 @@ export function generateCombo(model: ComboModel, all: ComboSel[], finals: Record
     return p;
   };
   type Node = { idx: number[]; groups: Set<string>; goal: Float64Array | null; parent: Node | null; gp: number; p: number; est: number };
-  // goals and players of a node plus candidate i: a statistic leaves them as they were, a goal selection sums its cells
+  // goals, players, shots and corners of a node plus candidate i: cards leave them as they were, anything else sums the cells
+  // (a goal selection only its own)
   const goalPart = (node: Node, i: number, idx: number[]): number => {
     const s = cands[i];
-    if (s.stat) return node.gp;
+    if (s.stat && !isGiven(s.stat)) return node.gp;
     const v = pv(idx);
+    const w = sv(idx);
     const goal = node.goal!;
     let gp = 0;
     const h = hits[i];
-    if (h) for (let k = 0; k < h.length; k++) gp += v ? goal[h[k]] * v[h[k]] : goal[h[k]];
-    else for (let c = 0; c < nc; c++) gp += v ? goal[c] * v[c] : goal[c];
+    if (h) for (let k = 0; k < h.length; k++) gp += goal[h[k]] * (v ? v[h[k]] : 1) * (w ? w[h[k]] : 1);
+    else for (let c = 0; c < nc; c++) gp += goal[c] * (v ? v[c] : 1) * (w ? w[c] : 1);
     return gp;
   };
   const result = (idx: number[], gp: number): { p: number; est: number } => {
