@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { Coins, Gauge, Layers, Percent, PiggyBank, Scale, TrendingDown, Wallet } from "lucide-react";
+import { CalendarRange, Coins, Gauge, Layers, LineChart, Percent, PiggyBank, Scale, TrendingDown, Wallet } from "lucide-react";
 import { bankrollSlips, paperRegistry, parseJSON } from "@/lib/db";
 import { DEFAULT_PLAN, effectiveOdds, simulate, type Method, type Plan } from "@/lib/bankroll";
+import { HORIZONS, PATHS, project, projectionInput, SCENARIO, SCENARIOS } from "@/lib/bankproj";
 import { PROFILE_LABEL } from "@/lib/profiles";
 import { independentSlips } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
@@ -20,7 +21,7 @@ const METHOD: Record<Method, { label: string; hint: string }> = {
 const RESULT_LABEL: Record<string, string> = { won: "Vinta", lost: "Persa", void: "Rimborsata", "non valutabile": "Rimborsata" };
 const RESULT_CLASS: Record<string, string> = { won: "status-STRONG", lost: "status-AVOID", void: "status-WATCH", "non valutabile": "status-WATCH" };
 
-type SP = { start?: string; m?: string; flat?: string; pct?: string; kelly?: string; cap?: string; p?: string; o?: string };
+type SP = { start?: string; m?: string; flat?: string; pct?: string; kelly?: string; cap?: string; p?: string; o?: string; h?: string; sc?: string };
 
 const eur = (x: number) => x.toLocaleString("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const eurSigned = (x: number) => `${x >= 0 ? "+" : "−"}${eur(Math.abs(x))}`;
@@ -56,6 +57,11 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
   r.skippedWon = r.skipped.filter((x) => x.slip.result === "won").length;
   r.skippedLost = r.skipped.filter((x) => x.slip.result === "lost").length;
   const growth = r.equity / plan.start - 1;
+  // projection: the same plan and the same slips (profile, overlaps), from the plan's capital, see lib/bankproj.ts
+  const horizon = HORIZONS.includes(Number(sp.h)) ? Number(sp.h) : 60;
+  const proj = projectionInput(slips);
+  const projections = proj ? SCENARIOS.map((sc) => project(proj, plan, horizon, sc)) : [];
+  const shown = projections.find((x) => x.scenario === sp.sc) ?? projections.find((x) => x.scenario === "storico");
   // every recorded slip, newest first: the staked ones and those this plan leaves out (with the reason)
   const rows = [
     ...r.bets.map((b) => ({ ...b, skip: null as string | null })),
@@ -191,6 +197,85 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
             </div>
           </section>
 
+          <section className="card" aria-labelledby="bank-proj">
+            <div className="card-head">
+              <h2 id="bank-proj">Proiezione</h2>
+              {proj && <span className="muted">{PATHS} percorsi simulati · {proj.perDay.toFixed(1)} schedine al giorno</span>}
+            </div>
+            <div className="card-pad col">
+              {!proj || !shown ? (
+                <p className="note">La proiezione compare con almeno 10 schedine nel registro per questo profilo.</p>
+              ) : (
+                <>
+                  <form className="filters bank-proj-form" method="get" aria-label="Proiezione">
+                    {Object.entries(sp).filter(([k, v]) => k !== "h" && k !== "sc" && v).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
+                    <div className="field">
+                      <label htmlFor="h">Orizzonte</label>
+                      <div className="control">
+                        <CalendarRange size={17} aria-hidden="true" />
+                        <select id="h" name="h" defaultValue={horizon}>
+                          {HORIZONS.map((d) => <option key={d} value={d}>{d === 30 ? "1 mese" : `${d / 30} mesi`} ({d} giorni)</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="sc">Scenario del grafico</label>
+                      <div className="control">
+                        <LineChart size={17} aria-hidden="true" />
+                        <select id="sc" name="sc" defaultValue={shown.scenario}>
+                          {SCENARIOS.map((k) => <option key={k} value={k}>{SCENARIO[k].label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field" style={{ alignSelf: "end" }}>
+                      <button type="submit" className="btn btn-primary">Proietta</button>
+                    </div>
+                  </form>
+                  <div className="table-wrap">
+                    <table className="compact">
+                      <caption className="sr-only">Saldo dopo {horizon} giorni partendo da {eur(plan.start)}, per scenario</caption>
+                      <thead>
+                        <tr>
+                          <th>Scenario</th><th className="num">Vince in media</th><th className="num">Saldo mediano</th>
+                          <th className="num">9 casi su 10 tra</th><th className="num">In perdita</th><th className="num">Metà capitale persa</th>
+                          <th className="num">Calo massimo tipico</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {projections.map((x) => (
+                          <tr key={x.scenario}>
+                            <td>
+                              <span className="sc-name">{SCENARIO[x.scenario].label}</span>
+                              <span className="sc-sub">{SCENARIO[x.scenario].hint}</span>
+                            </td>
+                            <td className="num">{pct(x.avgWinProb, 1)}</td>
+                            <td className={`num ${tone(x.final[2] - plan.start)}`}>{eur(x.final[2])}</td>
+                            <td className="num">{eur(x.final[0])} – {eur(x.final[4])}</td>
+                            <td className="num">{pct(x.pLoss, 0)}</td>
+                            <td className="num">{pct(x.pHalf, 1)}</td>
+                            <td className="num">{pct(x.ddMedian, 0)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <OddsChart
+                    title={`Saldo nei prossimi ${horizon} giorni, scenario ${SCENARIO[shown.scenario].label}: mediana e fasce`}
+                    series={projBands(shown.bands)}
+                  />
+                  <p className="note">
+                    Si parte oggi da {eur(plan.start)} con questo piano. Ogni giorno arrivano in media {proj.perDay.toFixed(1)} schedine, pescate tra
+                    le {proj.pool.length} del registro di questo profilo, con la loro quota e la probabilità del modello; ognuna si chiude entro il
+                    giorno, i rimborsi non contano. &ldquo;Come finora&rdquo; corregge il modello con le schedine chiuse: {proj.wins} vinte su{" "}
+                    {proj.expected.toFixed(1)} attese ({proj.settled} chiuse), con un peso verso il modello finché sono poche (correzione ×
+                    {proj.calib.toFixed(2)}). &ldquo;Nessun vantaggio&rdquo; mostra cosa fa la sola fortuna con queste puntate. È una proiezione,
+                    non una promessa: le fasce dicono quanto può andare diversamente.
+                  </p>
+                </>
+              )}
+            </div>
+          </section>
+
           <section className="card" aria-labelledby="bank-bets">
             <div className="card-head">
               <h2 id="bank-bets">Schedine del registro</h2>
@@ -245,6 +330,21 @@ export default async function Bankroll({ searchParams }: { searchParams: Promise
       )}
     </>
   );
+}
+
+const DAY = 86_400_000;
+const BAND = [
+  { q: 4, key: "p95", label: "95%", short: "95%", color: "var(--s3)", dash: "4 4" },
+  { q: 3, key: "p75", label: "75%", short: "75%", color: "var(--s2)" },
+  { q: 2, key: "p50", label: "Mediana", short: "med", color: "var(--accent)" },
+  { q: 1, key: "p25", label: "25%", short: "25%", color: "var(--s2)" },
+  { q: 0, key: "p5", label: "5%", short: "5%", color: "var(--s3)", dash: "4 4" },
+];
+
+// one line per quantile of the simulated balance, day by day from today
+function projBands(bands: number[][]) {
+  const t0 = Math.floor(Date.now() / DAY) * DAY;
+  return BAND.map(({ q, ...b }) => ({ ...b, points: bands.map((qs, d) => ({ t: t0 + d * DAY, v: Math.round(qs[q] * 100) / 100 })) }));
 }
 
 function Kpi({ icon: Icon, label, value, cls = "", children }: { icon: typeof Wallet; label: string; value: string; cls?: string; children: ReactNode }) {
