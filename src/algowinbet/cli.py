@@ -2629,6 +2629,13 @@ def _collect_auto(a) -> None:
             print(f"registro: chiusura rimandata al prossimo giro (connessione a Turso caduta: {e})", flush=True)
         if any(paper.values()):
             print("registro: chiuse " + ", ".join(f"{v} {k}" for k, v in paper.items() if v), flush=True)
+        try:  # player markets (Giocatori tab): never a reason to fail the tick
+            from .paperplayers import settle_players
+            pp = settle_players(store)
+            if any(pp.values()):
+                print("registro giocatori: chiuse " + ", ".join(f"{v} {k}" for k, v in pp.items() if v), flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"registro giocatori: chiusura non riuscita ({type(e).__name__}: {e})", flush=True)
         from .autorun import DATASETS_SECONDS, run_datasets
         left = min(DATASETS_SECONDS, a.max_seconds + 300 - (time.monotonic() - t0))  # the job has 20 minutes
         if left >= 60:

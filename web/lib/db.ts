@@ -604,6 +604,34 @@ const registryAt = persist(async (_version: string): Promise<Registry | null> =>
   }
 }, "paperRegistry", 6 * 3600); // the version in the key changes with every recording / settlement
 
+// ---- Registro, player markets: Sisal player prices recorded with the official XI and settled from FotMob (paperplayers.py) ----
+export type PlayerPaperLeg = {
+  id: number; fixture_id: string; competition: string; match: string; kickoff: string; team: string; player: string; market: string;
+  line: number; duo: number; odds: number; p: number; ev: number; created_at: string; result: string | null; own: number | null; sub: number | null;
+};
+
+export const paperPlayers = cache(async (): Promise<PlayerPaperLeg[] | null> => {
+  let version: string;
+  try {
+    const v = await all<{ a: string | null; b: number | null }>("SELECT MAX(settled_at) AS a, MAX(id) AS b FROM paper_player_legs");
+    version = `${v[0]?.a}|${v[0]?.b}`;
+  } catch (e) {
+    if (/no such table/i.test(String(e))) return null; // created by the first site push after 2026-10-13
+    throw e;
+  }
+  return playersAt(version);
+});
+
+const playersAt = persist(
+  async (_version: string): Promise<PlayerPaperLeg[]> =>
+    all<PlayerPaperLeg>(
+      "SELECT id, fixture_id, competition, match, kickoff, team, player, market, line, duo, odds, p, ev, created_at, result, own, sub " +
+        "FROM paper_player_legs ORDER BY kickoff DESC, id DESC",
+    ),
+  "paperPlayers",
+  6 * 3600, // the version in the key changes with every recorded / settled selection
+);
+
 // ---- Bankroll (Fase 9-bis): every recorded slip, oldest first, for the stake simulation (lib/bankroll.ts) ----
 export type BankSlip = {
   id: number; created_at: string; settled_at: string | null; first_kickoff: string; total_odds: number; bonus: number | null; joint: number;

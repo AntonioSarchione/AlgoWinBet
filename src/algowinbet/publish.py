@@ -261,6 +261,13 @@ def analyze_and_publish(store: SnapshotStore, cfg: Config | None = None, horizon
                          optimize(res.opportunities, res.analyses, cfg.with_slip_profile(name)).slips)
                   for name in cfg.optimizer.profiles}
     register(store, run_id, res, versions, by_profile)  # paper trading: first appearance of every proposal, never rewritten
+    try:  # player markets: Sisal's player prices for the starters of an official XI (paperplayers.py)
+        from .paperplayers import register_players
+        n = register_players(store, run_id, t, res.fixtures, {fid: scorers_json(v) for fid, v in sc.items()}, pc)
+        if n:
+            print(f"registro giocatori: {n} quote registrate", flush=True)
+    except Exception as e:  # noqa: BLE001 - never a reason to lose the publication
+        print(f"registro giocatori: non registrato ({type(e).__name__}: {e})", flush=True)
     prune(store, keep_days)
     return run_id, res
 

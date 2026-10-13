@@ -122,6 +122,7 @@ TABLES: list[Table] = [
     Table("quality_runs", ["id"], _select("SELECT * FROM quality_runs ORDER BY id DESC LIMIT 2")),
     Table("paper_legs", ["id"], _select("SELECT * FROM paper_legs")),
     Table("paper_slips", ["id"], _select("SELECT * FROM paper_slips")),
+    Table("paper_player_legs", ["id"], _select("SELECT * FROM paper_player_legs")),
     Table("pub_quote_paths", ["fixture_id"], quote_paths),
     Table("site_meta", ["key"], site_meta),
 ]
@@ -174,6 +175,8 @@ class Pusher:
         self.src, self.site, self.log = src, site, log
         self.written = 0  # rows inserted, updated or deleted on the site (what Turso bills as rows written)
         self.src.executescript(STATE)
+        from .paperplayers import SCHEMA as PLAYER_PAPER
+        self.src.executescript(PLAYER_PAPER)  # pushed before the first publish that records player prices
 
     # ---- state kept in the archive ----
     def _state(self, tbl: str) -> dict[str, str]:

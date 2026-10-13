@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Layers, PieChart, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
-import { paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
+import { paperPlayers, paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
+import { PlayerRegistry } from "@/app/_components/PlayerRegistry";
 import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
 import { Empty, Fold } from "@/app/_components/ui";
@@ -101,7 +102,7 @@ function StatRow({ label, s }: { label: string; s: Stats }) {
 export default async function Registro({ searchParams }: { searchParams: Promise<{ esito?: string }> }) {
   const { esito = "" } = await searchParams;
   const outcome = OUTCOMES.find((o) => o.v === esito) ?? OUTCOMES[0];
-  const reg = await paperRegistry();
+  const [reg, playerLegs] = await Promise.all([paperRegistry(), paperPlayers()]);
   if (!reg || (!reg.legs.length && !reg.slips.length)) {
     return (
       <>
@@ -340,6 +341,8 @@ export default async function Registro({ searchParams }: { searchParams: Promise
           <p className="note card-pad">Le {SHOWN_SLIPS} più recenti su {shownSlips.length}.</p>
         ) : null}
       </section>
+
+      <PlayerRegistry legs={playerLegs} />
     </>
   );
 }
