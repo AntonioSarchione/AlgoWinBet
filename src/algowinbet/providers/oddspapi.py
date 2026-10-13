@@ -12,6 +12,7 @@ live responses: mappers are tolerant and count what they cannot map, and raw pay
 from __future__ import annotations
 
 import difflib
+import http.client
 import json
 import os
 import re
@@ -77,7 +78,7 @@ class OddsPapiClient:
         query = urllib.parse.urlencode(sorted({**params, "apiKey": self._key}.items()))
         try:
             status, _, body = self.transport(f"{self.base}{endpoint}?{query}", {"Accept": "application/json", "User-Agent": "AlgoWinBet/0.3"})
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        except (OSError, http.client.HTTPException) as e:  # timeout, refused or reset connection, DNS, TLS, truncated body
             status, body = 0, str(e).replace(self._key, "***").encode()
         self._last_call[endpoint] = self.clock()
         self.requests_sent += 1

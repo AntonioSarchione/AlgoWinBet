@@ -114,6 +114,19 @@ def test_errors_are_billed_except_auth_and_429_and_budget_blocks_first():
     assert len(t.calls) == 3
 
 
+def test_a_truncated_response_is_an_odds_error_not_a_crash():
+    import http.client
+    store = SnapshotStore(":memory:")
+    c, _ = mk_client({}, store)
+
+    def cut(url, headers):
+        raise http.client.IncompleteRead(b"")
+    c.transport = cut
+    with pytest.raises(OddsPapiError):
+        c.get("/historical-odds", {"fixtureId": "x"})
+    assert c.budget.used()[1] == 0  # nothing came back: not counted
+
+
 def test_metadata_is_served_from_the_store_for_a_week():
     store = SnapshotStore(":memory:")
     c, t = mk_client({"/markets": (200, MARKETS)}, store)

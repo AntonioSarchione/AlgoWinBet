@@ -11,6 +11,7 @@ Run `algowinbet goal probe <path>` once per endpoint to capture and inspect real
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -88,7 +89,7 @@ class GoalApiClient:
                 self.budget.charge(1)  # raises BudgetExceeded before we send anything over the limit
             try:
                 status, hdr, body = self.transport(url, headers)
-            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            except (OSError, http.client.HTTPException) as e:  # timeout, refused or reset connection, DNS, TLS, truncated body
                 status, hdr, body = 0, {}, str(e).encode()
             self.requests_sent += 1
             fetched = self.now()
