@@ -446,16 +446,19 @@ function shotsBlock(model: ComboModel, shots: ComboSel[], sot: ComboSel[]): numb
   const rh = Math.min(1, sumRow(O, 0) / Math.max(1e-9, sumRow(S, 0)));
   const ra = Math.min(1, sumRow(O, 1) / Math.max(1e-9, sumRow(S, 1)));
   const bh = binomRows(n, cap, rh), ba = binomRows(n, cap, ra);
+  // P(the shots on target pass | i, j shots) = (bh A ba')[i][j], A[x][y] = the shots on target pass with x, y on target:
+  // two matrix products instead of every split of every cell
+  const A = Array.from({ length: cap }, (_, x) => Array.from({ length: cap }, (_, y) => (sot.every((s) => s.count!(x, y)) ? 1 : 0)));
+  const T = bh.map((row) => Array.from({ length: cap }, (_, y) => {
+    let t = 0;
+    for (let x = 0; x < cap; x++) if (row[x] && A[x][y]) t += row[x];
+    return t;
+  }));
   let p = 0;
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
     if (S[i][j] < 1e-9 || !shots.every((s) => s.count!(i, j))) continue;
     let q = 0;
-    for (let x = 0; x <= Math.min(i, cap - 1); x++) {
-      if (bh[i][x] < 1e-10) continue;
-      for (let y = 0; y <= Math.min(j, cap - 1); y++) {
-        if (ba[j][y] >= 1e-10 && sot.every((s) => s.count!(x, y))) q += bh[i][x] * ba[j][y];
-      }
-    }
+    for (let y = 0; y < cap; y++) q += T[i][y] * ba[j][y];
     p += S[i][j] * q;
   }
   return p;
@@ -629,8 +632,6 @@ export function generateCombo(model: ComboModel, all: ComboSel[], finals: Record
       for (let i = from; i < cands.length; i++) {
         const s = cands[i];
         if (node.groups.has(s.group)) continue;
-        // total shots and shots on target together are exact but slow (every split of the shots): not in a generated combo
-        if ((s.stat === "shots" || s.stat === "shots_on") && node.idx.some((k) => cands[k].stat === (s.stat === "shots" ? "shots_on" : "shots"))) continue;
         const idx = [...node.idx, i];
         const gp = goalPart(node, i, idx);
         const r = result(idx, gp);
