@@ -197,6 +197,9 @@ h2.section { font-size: 15px; margin: 6px 0 0; }
 .reg-kpi-sub { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
 .reg-kpi-sub b { color: var(--text); font-weight: 600; }
 .reg-kpi-sub b.pos { color: var(--good); }
+.reg-range { display: inline-block; margin-top: 6px; }
+.reg-range .pos { color: var(--good); }
+.reg-range .neg { color: var(--bad); }
 .reg-kpi-sub b.neg { color: var(--bad); }
 @media (max-width: 1100px) { .reg-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 860px) { .reg-kpis.three { grid-template-columns: minmax(0, 1fr); } }

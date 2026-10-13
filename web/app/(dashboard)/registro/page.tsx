@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Layers, PieChart, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperPlayers, paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
 import { PlayerRegistry } from "@/app/_components/PlayerRegistry";
-import { byVersion, CRITERION, evaluate, type State } from "@/lib/criterion";
+import { byVersion, CRITERION, evaluate, type Interval, type State } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
 import { Empty, Fold } from "@/app/_components/ui";
 import { legResults, SlipLegs, type SlipLeg } from "@/app/_components/SlipLegs";
@@ -70,6 +70,19 @@ function stats(legs: PaperLeg[]): Stats {
 }
 
 const tone = (x: number | null) => (x == null ? "" : x >= 0 ? "pos" : "neg");
+
+// the 95% range of a mean (grouped by match, as the criterion): is the number already a signal or still noise?
+function Range({ i }: { i: Interval }) {
+  if (i.lo == null || i.hi == null) return <span className="reg-range muted">forbice non ancora calcolabile</span>;
+  const half = (i.hi - i.lo) / 2;
+  const [cls, say] = i.lo > 0 ? ["pos", "sopra zero oltre il caso"] : i.hi < 0 ? ["neg", "sotto zero oltre il caso"] : ["", "ancora rumore: lo zero è dentro"];
+  return (
+    <span className="reg-range">
+      <b className="num">±{(half * 100).toFixed(1)}%</b> · da <span className="num">{signed(i.lo)}</span> a <span className="num">{signed(i.hi)}</span>
+      {" · "}<span className={cls}>{say}</span>
+    </span>
+  );
+}
 
 function Kpi({ icon: Icon, label, value, cls = "", children }: { icon: typeof Wallet; label: string; value: string; cls?: string; children: ReactNode }) {
   return (
@@ -180,11 +193,14 @@ export default async function Registro({ searchParams }: { searchParams: Promise
           <span className="muted">con poche giocate conta più del rendimento, che dipende quasi solo dalla fortuna</span>
         </div>
         <div className="reg-kpis three">
-          <Kpi icon={Target} label="Quota battuta (CLV Sisal)" value={signed(sv.clv)} cls={tone(sv.clv)}>
-            quota presa contro quota finale Sisal, su <b>{sv.nClv}</b> giocate. Sopra zero: presa prima che scendesse
+          <Kpi icon={Target} label="Quota battuta (CLV Sisal)" value={signed(crit.value.clv.mean)} cls={tone(crit.value.clv.mean)}>
+            quota presa contro quota finale Sisal, su <b>{crit.value.clv.n}</b> giocate. Sopra zero: presa prima che scendesse
+            <br /><Range i={crit.value.clv} />
           </Kpi>
-          <Kpi icon={Scale} label="Valore sul prezzo Pinnacle" value={signed(sv.evClose)} cls={tone(sv.evClose)}>
-            la quota presa misurata sul prezzo finale Pinnacle (il più preciso), su <b>{sv.nClose}</b> giocate
+          <Kpi icon={Scale} label="Valore sul prezzo Pinnacle" value={signed(crit.value.ev.mean)} cls={tone(crit.value.ev.mean)}>
+            la quota presa misurata sul prezzo finale Pinnacle (il più preciso), su <b>{crit.value.ev.n}</b> giocate
+            {crit.value.ev.n > crit.value.covered && <> ({crit.value.ev.n - crit.value.covered} senza chiusura contano 0, come nel criterio)</>}
+            <br /><Range i={crit.value.ev} />
           </Kpi>
           <Kpi icon={Layers} label="Schedine" value={settledSlips.length ? units(slipPnl) : "–"} cls={settledSlips.length ? tone(slipPnl) : ""}>
             {settledSlips.length ? <><b>{slipsWon}</b> vinte su {settledSlips.length} chiuse (il modello ne attendeva {slipsExpected.toFixed(1)})</> : "nessuna chiusa"} · {slipsOpen} in attesa
