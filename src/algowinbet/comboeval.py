@@ -10,7 +10,15 @@ For each pair of events from two different blocks:
                  together; about +-2/sqrt(n) is chance
 and, for goals with shots on target or total shots, the same against a structural joint ("strutt."): a team's shots on
 target are its goals plus a negative binomial rest (mean: expected shots on target - expected goals, the count model's
-size), its total shots those plus a negative binomial of shots off target.
+size), its total shots those plus a negative binomial of shots off target; the side ahead shoots and wins corners a little
+less (gamma). sigma > 0: a side's shots off target and corners share an attacking factor (correlated rho between the sides),
+so corners and shots are linked beyond the goals.
+
+Result (2,345 matches since 2025-08-01, gamma 0.03 / 0.06, sigma 0.3, rho -1/3; netto, 1 = right):
+  Over 2.5 + tiri in porta Over 8.5 ...... independent 1.275, structural 0.968
+  Under 1.5 + tiri in porta Over 8.5 ..... 0.388 -> 0.834
+  Corner Over 9.5 + tiri Over 24.5 ....... 1.145 -> 0.974
+  Corner casa di più + tiri casa di più .. 1.191 -> 1.075
 """
 from __future__ import annotations
 
@@ -164,8 +172,35 @@ def _rest(gm: np.ndarray, mean: float, size: float, n: int, gamma: float, home: 
     return {d: _nb(mean * f[d] / avg, size, n) for d in f}
 
 
+ATTACK_X = [-math.sqrt(3), 0.0, math.sqrt(3)]  # 3 Gauss-Hermite nodes of a standard normal
+
+
+def _frailty(sigma: float) -> tuple[list[tuple[float, float]], float]:
+    """A side's attacking intensity beyond its goals, shared by its shots off target and its corners: z = exp(sigma x), x a
+    standard normal on 3 Gauss-Hermite nodes, scaled to mean 1. Returns [(weight, z)] and Var(z)."""
+    x, w = ATTACK_X, [1 / 6, 2 / 3, 1 / 6]
+    e = [math.exp(sigma * v) for v in x]
+    m = sum(a * b for a, b in zip(w, e))
+    z = [v / m for v in e]
+    return list(zip(w, z)), sum(a * b * b for a, b in zip(w, z)) - 1
+
+
+def _pair_weight(wi: float, wj: float, i: int, j: int, rho: float) -> float:
+    """Joint weight of the home node i and the away node j: correlation rho between the two sides' factors (|rho| <= 1/3 on
+    these nodes), each side's own weights unchanged. Negative: one side's attacking day is the other's quiet one."""
+    return wi * wj * (1 + rho * ATTACK_X[i] * ATTACK_X[j])
+
+
+def _mixed_size(size: float, s2: float) -> float:
+    """Negative binomial size that, mixed over a mean-1 factor of variance s2, keeps the count's variance (as far as it can:
+    near Poisson when the factor alone already gives more)."""
+    if math.isinf(size) or s2 <= 0:
+        return size
+    return (1 + s2) / max(1 / size - s2, 1e-3)
+
+
 def evaluate_combo(provider, cfg, start: datetime, end: datetime, competitions: list[str] | None = None,
-                   gamma: float = 0.0, gamma_corners: float | None = None) -> ComboReport:
+                   gamma: float = 0.03, gamma_corners: float | None = 0.06, sigma: float = 0.3, rho: float = -1 / 3) -> ComboReport:
     from .engine import Engine
     from .modeleval import _Frozen
     comps = set(competitions or DOMESTIC)
@@ -213,6 +248,11 @@ def evaluate_combo(provider, cfg, start: datetime, end: datetime, competitions: 
             gm = grids["goal"][0] / grids["goal"][0].sum()
             ng = gm.shape[0]
             dists: dict[str, tuple[dict, dict, bool]] = {}  # block -> (home given lead, away given lead, goals included)
+            # shots off target and corners of a side share its frailty z (sigma > 0): per node, then mixed over the nodes
+            frail = sigma > 0 and "shots" in means and "shots_on" in means and "corners" in means and gamma_corners is not None
+            nodes, s2 = _frailty(sigma) if frail else ([(1.0, 1.0)], 0.0)
+            mix = lambda per: {d: sum(w * pz[d] for (w, _), pz in zip(nodes, per)) for d in per[0]}  # noqa: E731
+            per_z: dict[str, tuple[list, list, bool]] = {}  # block -> (home per node, away per node, goals included)
             if "shots_on" in means:
                 xg_h, xg_a = float((gm.sum(axis=1) * np.arange(ng)).sum()), float((gm.sum(axis=0) * np.arange(ng)).sum())
                 sh, sa, ssz = means["shots_on"]
@@ -221,25 +261,40 @@ def evaluate_combo(provider, cfg, start: datetime, end: datetime, competitions: 
                 dists["shots_on"] = (rest_h, rest_a, True)
                 if "shots" in means:
                     th, ta, tsz = means["shots"]
-                    off_h = _rest(gm, max(0.5, th - sh), tsz, 50, gamma, True)
-                    off_a = _rest(gm, max(0.5, ta - sa), tsz, 50, gamma, False)
-                    dists["shots"] = ({d: np.convolve(rest_h[d], off_h[d]) for d in rest_h},
-                                      {d: np.convolve(rest_a[d], off_a[d]) for d in rest_a}, True)
+                    tsz = _mixed_size(tsz, s2)
+                    off_h = [_rest(gm, max(0.5, th - sh) * z, tsz, 50, gamma, True) for _, z in nodes]
+                    off_a = [_rest(gm, max(0.5, ta - sa) * z, tsz, 50, gamma, False) for _, z in nodes]
+                    tot_h = [{d: np.convolve(rest_h[d], o[d]) for d in rest_h} for o in off_h]
+                    tot_a = [{d: np.convolve(rest_a[d], o[d]) for d in rest_a} for o in off_a]
+                    per_z["shots"] = (tot_h, tot_a, True)
+                    dists["shots"] = (mix(tot_h), mix(tot_a), True)
             if "corners" in means and gamma_corners is not None:
                 ch, ca, csz = means["corners"]
-                dists["corners"] = (_rest(gm, ch, csz, 30, gamma_corners, True), _rest(gm, ca, csz, 30, gamma_corners, False), False)
+                csz = _mixed_size(csz, s2)
+                cor_h = [_rest(gm, ch * z, csz, 30, gamma_corners, True) for _, z in nodes]
+                cor_a = [_rest(gm, ca * z, csz, 30, gamma_corners, False) for _, z in nodes]
+                per_z["corners"] = (cor_h, cor_a, False)
+                dists["corners"] = (mix(cor_h), mix(cor_a), False)
             gi, gj = _grid(ng)
             qs = {sl: (sb, _conditional(ng, dists[sb][0], dists[sb][1], sf, dists[sb][2]))
                   for sl, sb, sf in EVENTS if sb in dists and sl in ev}
+            # per (home node, away node): only where two statistics share the frailty
+            qz = {sl: [[_conditional(ng, per_z[sb][0][i], per_z[sb][1][j], sf, per_z[sb][2]) for j in range(len(nodes))]
+                       for i in range(len(nodes))] for sl, sb, sf in EVENTS if frail and sb in per_z and sl in ev}
             for slabel, (sblock, q) in qs.items():
                 pb = float((gm * q).sum())
                 rep.marginal[slabel].append((ev[slabel][1], pb, ev[slabel][2]))
                 for glabel, gblock, gfn in EVENTS:
                     if gblock == "goal" and glabel in ev:
                         struct[(glabel, slabel)] = (float((gm * gfn(gi, gj) * q).sum()), ev[glabel][1], pb)
-                for olabel, (oblock, q2) in qs.items():  # two statistics: independent given the goals
+                for olabel, (oblock, q2) in qs.items():  # two statistics: independent given the goals (and the frailty)
                     if oblock != sblock and frozenset((oblock, sblock)) not in JOINT_ALREADY:
-                        struct[(olabel, slabel)] = (float((gm * q * q2).sum()), float((gm * q2).sum()), pb)
+                        if slabel in qz and olabel in qz:
+                            pab = sum(_pair_weight(wi, wj, i, j, rho) * float((gm * qz[slabel][i][j] * qz[olabel][i][j]).sum())
+                                      for i, (wi, _) in enumerate(nodes) for j, (wj, _) in enumerate(nodes))
+                        else:
+                            pab = float((gm * q * q2).sum())
+                        struct[(olabel, slabel)] = (pab, float((gm * q2).sum()), pb)
             labels = list(ev)
             for x in range(len(labels)):
                 for z in range(x + 1, len(labels)):

@@ -16,8 +16,12 @@
 // negative binomial of shots off target, its corners a negative binomial; the side ahead by d goals (up to LEAD) has its
 // shots beyond the goals and its corners x exp(-gamma d), scaled so that the averages stay the count models' (a side ahead
 // shoots and wins corners less). So shots and corners are per-cell factors of the goal cells, like the players. Cards stay
-// independent of the rest (the replay found no link worth a model), and corners with shots only through the goals (their
-// own link, about +15% on the same team's "more corners + more shots", is left out).
+// independent of the rest (the replay found no link worth a model). Corners and shots are also linked beyond the goals (the
+// replay: +15-19% on "more home corners + more home shots" and on the two Overs): a side's shots off target and its corners
+// share an attacking factor z = exp(SIGMA_ATTACK x), x standard normal on 3 Gauss-Hermite nodes, mean 1, the two sides'
+// x correlated RHO_ATTACK; their negative binomial sizes are raised so that, mixed over z, each count keeps the count model's
+// variance where it can (corners and shots off target: the factor alone already gives a little more, so near Poisson). Replay (sigma 0.3, rho -1/3): the two Overs 1.14 -> 0.97 of the truth, "more home corners + more home shots"
+// 1.19 -> 1.08; the single markets' log loss about the same.
 //
 // Players (Sisal's DUO rule: goals, two or more, first goalscorer, assists, goal or assist and shots on target count for the
 // player or for whoever replaces him, so the player's slot covers the whole match; total shots, bookings and fouls do not). His share of his team's goals
@@ -416,13 +420,31 @@ function teamFactor(ps: ComboPlayer[], conds: Map<string, { kind: PlayerKind; k:
 export const LEAD = 2;
 export const GAMMA_SHOTS = 0.03; // replay: "home win + more home shots" and "away win + more home shots" right at 0.03
 export const GAMMA_CORNERS = 0.06; // replay: "home win + more home corners" 0.88 -> 0.98 of the truth
+export const SIGMA_ATTACK = 0.3;
+export const RHO_ATTACK = -1 / 3; // the two sides' factors: one side's attacking day is the other's quiet one (|rho| <= 1/3 here)
+const ATTACK_X = [-Math.sqrt(3), 0, Math.sqrt(3)]; // 3 Gauss-Hermite nodes of a standard normal
 type ByLead = number[][]; // [lead + LEAD] -> pmf
 export type Given = {
   sotH: ByLead; sotA: ByLead; nSot: number; // shots on target beyond the goals
-  offH?: ByLead; offA?: ByLead; nShots?: number; // shots off target
-  cornH?: ByLead; cornA?: ByLead; nCorn?: number;
+  offH?: ByLead; offA?: ByLead; nShots?: number; // shots off target (mixed over the attacking factor)
+  cornH?: ByLead; cornA?: ByLead; nCorn?: number; // corners (mixed over the attacking factor)
+  // with both: per node of the attacking factor, its weight and the two sides' pmfs
+  attack?: { w: number[]; offH: ByLead[]; offA: ByLead[]; cornH: ByLead[]; cornA: ByLead[] };
 };
 export const leadOf = (h: number, a: number) => Math.max(-LEAD, Math.min(LEAD, h - a));
+
+/** The attacking factor's nodes: weights, values (mean 1) and variance. */
+function attackNodes(sigma: number): { w: number[]; z: number[]; s2: number } {
+  const x = ATTACK_X, w = [1 / 6, 2 / 3, 1 / 6];
+  const e = x.map((v) => Math.exp(sigma * v));
+  const m = e.reduce((t, v, i) => t + w[i] * v, 0);
+  const z = e.map((v) => v / m);
+  return { w, z, s2: z.reduce((t, v, i) => t + w[i] * v * v, 0) - 1 };
+}
+/** Negative binomial size that, mixed over a mean-1 factor of variance s2, keeps the variance (near Poisson when it can't). */
+const mixedSize = (size: number | null, s2: number) => (size == null || s2 <= 0 ? size : (1 + s2) / Math.max(1 / size - s2, 1e-3));
+const mixLeads = (w: number[], per: ByLead[]): ByLead =>
+  per[0].map((_, k) => per[0][k].map((_, x) => per.reduce((t, pz, i) => t + w[i] * pz[k][x], 0)));
 
 function byLead(goal: Matrix, mean: number, size: number | null, n: number, gamma: number, home: boolean): ByLead {
   const f = (d: number) => Math.exp(-gamma * d);
@@ -439,18 +461,30 @@ function buildGiven(goal: Matrix, p: Partial<Record<StatName, CountParams>>): Gi
     out.sotH = byLead(goal, Math.max(0.3, sot.lh - xg(0)), sot.size, sot.n, GAMMA_SHOTS, true);
     out.sotA = byLead(goal, Math.max(0.3, sot.la - xg(1)), sot.size, sot.n, GAMMA_SHOTS, false);
     out.nSot = sot.n;
-    const sh = p.shots;
-    if (sh) {
-      out.offH = byLead(goal, Math.max(0.5, sh.lh - sot.lh), sh.size, sh.n, GAMMA_SHOTS, true);
-      out.offA = byLead(goal, Math.max(0.5, sh.la - sot.la), sh.size, sh.n, GAMMA_SHOTS, false);
-      out.nShots = sh.n;
-    }
   }
-  const c = p.corners;
-  if (c && !c.g) {
-    out.cornH = byLead(goal, c.lh, c.size, c.n, GAMMA_CORNERS, true);
-    out.cornA = byLead(goal, c.la, c.size, c.n, GAMMA_CORNERS, false);
+  const sh = sot ? p.shots : undefined;
+  const c = p.corners && !p.corners.g ? p.corners : undefined;
+  // the attacking factor only where it links something: shots off target and corners both there
+  const A = attackNodes(sh && c ? SIGMA_ATTACK : 0);
+  const nodes = sh && c ? A.z : [1];
+  const w = sh && c ? A.w : [1];
+  if (sot && sh) {
+    const size = mixedSize(sh.size, A.s2);
+    const offH = nodes.map((z) => byLead(goal, Math.max(0.5, sh.lh - sot.lh) * z, size, sh.n, GAMMA_SHOTS, true));
+    const offA = nodes.map((z) => byLead(goal, Math.max(0.5, sh.la - sot.la) * z, size, sh.n, GAMMA_SHOTS, false));
+    out.offH = mixLeads(w, offH);
+    out.offA = mixLeads(w, offA);
+    out.nShots = sh.n;
+    if (c) out.attack = { w, offH, offA, cornH: [], cornA: [] };
+  }
+  if (c) {
+    const size = mixedSize(c.size, A.s2);
+    const cornH = nodes.map((z) => byLead(goal, c.lh * z, size, c.n, GAMMA_CORNERS, true));
+    const cornA = nodes.map((z) => byLead(goal, c.la * z, size, c.n, GAMMA_CORNERS, false));
+    out.cornH = mixLeads(w, cornH);
+    out.cornA = mixLeads(w, cornA);
     out.nCorn = c.n;
+    if (out.attack) Object.assign(out.attack, { cornH, cornA });
   }
   return out.sotH || out.cornH ? (out as Given) : null;
 }
@@ -486,6 +520,10 @@ function indicator(n: number, sels: ComboSel[]): Matrix {
 export function shotsGiven(model: ComboModel, shots: ComboSel[], sot: ComboSel[]): Matrix | null {
   const G = model.given;
   if ((!shots.length && !sot.length) || !G?.sotH || (shots.length && !G.offH)) return null;
+  return shotsQ(G, G.offH!, G.offA!, shots, sot);
+}
+
+function shotsQ(G: Given, offH: ByLead, offA: ByLead, shots: ComboSel[], sot: ComboSel[]): Matrix {
   const ns = G.nSot;
   if (!shots.length) {
     const A = indicator(ns, sot);
@@ -495,7 +533,7 @@ export function shotsGiven(model: ComboModel, shots: ComboSel[], sot: ComboSel[]
   const S = indicator(nt, shots);
   // W(lead)[x][y]: the shots on target pass at x, y and the total shots (x + off-target) pass
   const W = (k: number): Matrix => {
-    const oh = G.offH![k], oa = G.offA![2 * LEAD - k];
+    const oh = offH[k], oa = offA[2 * LEAD - k];
     const V: Matrix = Array.from({ length: nt }, (_, s) => Array.from({ length: ns }, (_, y) => {
       let t = 0;
       for (let z = 0; z < oa.length; z++) if (oa[z] > 1e-12) t += oa[z] * S[s][Math.min(y + z, nt - 1)];
@@ -516,13 +554,38 @@ export function shotsGiven(model: ComboModel, shots: ComboSel[], sot: ComboSel[]
 export function cornersGiven(model: ComboModel, sels: ComboSel[]): number[] | null {
   const G = model.given;
   if (!sels.length || !G?.cornH) return null;
-  const I = indicator(G.nCorn!, sels);
+  return cornersQ(indicator(G.nCorn!, sels), G.cornH, G.cornA!);
+}
+
+function cornersQ(I: Matrix, cornH: ByLead, cornA: ByLead): number[] {
   return Array.from({ length: 2 * LEAD + 1 }, (_, k) => {
-    const ph = G.cornH![k], pa = G.cornA![2 * LEAD - k];
+    const ph = cornH[k], pa = cornA[2 * LEAD - k];
     let t = 0;
     for (let x = 0; x < ph.length; x++) for (let y = 0; y < pa.length; y++) if (I[x][y]) t += ph[x] * pa[y];
     return t;
   });
+}
+
+/** Shots and corners given the goals, one factor per (home goals, away goals); null when neither is given. With total shots and
+ * corners together, mixed over the attacking factor of each side (3 x 3 nodes); otherwise the two are independent here. */
+export function statsGiven(model: ComboModel, shots: ComboSel[], sot: ComboSel[], corners: ComboSel[]): Matrix | null {
+  const G = model.given;
+  const at = G?.attack;
+  if (G && at && shots.length && corners.length) {
+    const I = indicator(G.nCorn!, corners);
+    const Q: Matrix = Array.from({ length: GRID }, () => new Array(GRID).fill(0));
+    for (let i = 0; i < at.w.length; i++) for (let j = 0; j < at.w.length; j++) {
+      const qs = shotsQ(G, at.offH[i], at.offA[j], shots, sot);
+      const qc = cornersQ(I, at.cornH[i], at.cornA[j]);
+      const w = at.w[i] * at.w[j] * (1 + RHO_ATTACK * ATTACK_X[i] * ATTACK_X[j]); // each side's own weights unchanged
+      for (let h = 0; h < GRID; h++) for (let a = 0; a < GRID; a++) Q[h][a] += w * qs[h][a] * qc[leadOf(h, a) + LEAD];
+    }
+    return Q;
+  }
+  const qs = shotsGiven(model, shots, sot), qc = cornersGiven(model, corners);
+  if (!qs && !qc) return null;
+  return Array.from({ length: GRID }, (_, h) => Array.from({ length: GRID }, (_, a) =>
+    (qs ? qs[h][a] : 1) * (qc ? qc[leadOf(h, a) + LEAD] : 1)));
 }
 
 // ---- evaluation
@@ -600,10 +663,10 @@ export function jointModel(model: ComboModel, sels: ComboSel[]): number {
   const goals = sels.filter((s) => s.goal);
   const pl = sels.filter((s) => s.player);
   const by = (st: StatName) => sels.filter((s) => s.stat === st);
-  const qs = shotsGiven(model, by("shots"), by("shots_on")); // per goal cell, or null: the old independent blocks
-  const qc = cornersGiven(model, by("corners"));
+  const shotsIn = !!shotsGiven(model, by("shots"), by("shots_on")), cornIn = !!cornersGiven(model, by("corners"));
+  const q = statsGiven(model, shotsIn ? by("shots") : [], shotsIn ? by("shots_on") : [], cornIn ? by("corners") : []); // per goal cell
   let gp = 0;
-  if (goals.length || pl.length || qs || qc) {
+  if (goals.length || pl.length || q) {
     let fac: ((c: Cell) => number) | null = null;
     if (pl.length) {
       const conds = new Map<string, { kind: PlayerKind; k: number }[]>();
@@ -614,11 +677,11 @@ export function jointModel(model: ComboModel, sels: ComboSel[]): number {
     }
     for (const c of model.cells) {
       if (!goals.every((s) => s.goal!(c))) continue;
-      gp += c.w * (fac ? fac(c) : 1) * (qs ? qs[c.h][c.a] : 1) * (qc ? qc[leadOf(c.h, c.a) + LEAD] : 1);
+      gp += c.w * (fac ? fac(c) : 1) * (q ? q[c.h][c.a] : 1);
     }
   } else gp = 1;
-  return gp * (qc ? 1 : statBlock(model, "corners", by("corners"))) * statBlock(model, "cards", by("cards")) *
-    (qs ? 1 : shotsBlock(model, by("shots"), by("shots_on")));
+  return gp * (cornIn ? 1 : statBlock(model, "corners", by("corners"))) * statBlock(model, "cards", by("cards")) *
+    (shotsIn ? 1 : shotsBlock(model, by("shots"), by("shots_on")));
 }
 
 export type ComboResult = {
@@ -723,9 +786,9 @@ export function generateCombo(model: ComboModel, all: ComboSel[], finals: Record
     const co = idx.filter((i) => cands[i].stat === "corners");
     const key = `${sh.join(",")}|${so.join(",")}|${co.join(",")}`;
     if (!statVec.has(key)) {
-      const qs = givenShots(sh) ? shotsGiven(model, sh.map((i) => cands[i]), so.map((i) => cands[i])) : null;
-      const qc = cornersGiven(model, co.map((i) => cands[i]));
-      statVec.set(key, qs || qc ? Float64Array.from(cells, (c) => (qs ? qs[c.h][c.a] : 1) * (qc ? qc[leadOf(c.h, c.a) + LEAD] : 1)) : null);
+      const gs = givenShots(sh);
+      const q = statsGiven(model, gs ? sh.map((i) => cands[i]) : [], gs ? so.map((i) => cands[i]) : [], G?.cornH ? co.map((i) => cands[i]) : []);
+      statVec.set(key, q ? Float64Array.from(cells, (c) => q[c.h][c.a]) : null);
     }
     return statVec.get(key)!;
   };
