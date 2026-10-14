@@ -85,7 +85,8 @@ SANE = 0.12  # a reference price this far (in probability) from the other books 
 
 def reference_price(per_book: dict[str, float]) -> float | None:
     """Fair probability of a selection: the first reference book that prices it (and agrees with the other books within
-    SANE), else the average over the books."""
+    SANE), else the average over the other books. A reference book that strays is a feed error and stays out of the average
+    too (2026-10-05, Braga-Sporting: an in-play Pinnacle draw at 1.09 from a week before made half of a 58% draw)."""
     if not per_book:
         return None
     avg = float(np.mean(list(per_book.values())))
@@ -93,7 +94,8 @@ def reference_price(per_book: dict[str, float]) -> float | None:
         for book, p in per_book.items():
             if ref in book.lower() and abs(p - avg) <= SANE:
                 return p
-    return avg
+    others = [p for book, p in per_book.items() if not any(r in book.lower() for r in REFERENCE_BOOKS)]
+    return float(np.mean(others)) if others else avg
 
 
 def _bettable(book: str, bettable: list[str] | None) -> bool:

@@ -1,3 +1,4 @@
+import math
 from datetime import timedelta
 
 import numpy as np
@@ -62,6 +63,9 @@ def test_reference_price_prefers_pinnacle_unless_it_strays():
     assert reference_price({"sisal": 0.50, "pinnacle": 0.46}) == 0.46
     assert reference_price({"sisal": 0.50, "snai": 0.52}) == 0.51
     assert reference_price({"sisal": 0.20, "snai": 0.22, "pinnacle": 0.60}) != 0.60  # feed error: far from the rest
+    # the stray reference stays out of the average too: only the other books are left
+    assert math.isclose(reference_price({"sisal": 0.20, "snai": 0.22, "pinnacle": 0.60}), 0.21)
+    assert reference_price({"sisal": 0.28, "pinnacle": 0.88}) == 0.28
 
 
 def test_meta_is_saved_loaded_and_used_by_the_live_analysis():
