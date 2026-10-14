@@ -117,3 +117,20 @@ def test_beta_and_isotonic_calibration_correct_an_overconfident_model():
     assert len(out) == 3 and abs(sum(out) - 1) < 1e-9
     restored = Pool(**__import__("dataclasses").asdict(cal))
     assert restored.apply([0.9, 0.1]) == cal.apply([0.9, 0.1])  # stored on Turso as JSON and read back the same
+
+
+def test_a_reference_quote_days_old_is_not_the_market():
+    from datetime import datetime, timezone
+
+    from algowinbet.pricing import build_market_views
+    now = datetime(2026, 10, 5, 6, tzinfo=timezone.utc)
+
+    def q(book, sel, odds, at):
+        return OddsQuote(fixture_id="x", market_code="MATCH_1X2", selection=sel, bookmaker=book, odds=odds, observed_at=at)
+    sisal = [q("sisal.it", s, o, now) for s, o in (("HOME", 3.25), ("DRAW", 3.4), ("AWAY", 2.05))]
+    fresh = [q("pinnacle", s, o, now - timedelta(hours=10)) for s, o in (("HOME", 3.6), ("DRAW", 3.5), ("AWAY", 2.15))]
+    old = [q("pinnacle", s, o, now - timedelta(days=8)) for s, o in (("HOME", 3.6), ("DRAW", 3.5), ("AWAY", 2.15))]
+    draw = lambda qs: next(v for v in build_market_views(qs, bettable=["sisal"]) if v.ref.selection == "DRAW")  # noqa: E731
+    assert draw(sisal + fresh).p_market == draw(sisal + fresh).per_book["pinnacle"]
+    # eight days old: only Sisal's own price is left, so Sisal shows no value against itself
+    assert set(draw(sisal + old).per_book) == {"sisal.it"}

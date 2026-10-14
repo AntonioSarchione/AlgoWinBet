@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -81,6 +81,9 @@ def latest_quotes(quotes: list[OddsQuote]) -> list[OddsQuote]:
 
 REFERENCE_BOOKS = ("pinnacle", "betfair-ex")  # sharp prices, in order of preference: the benchmark Sisal is measured against
 SANE = 0.12  # a reference price this far (in probability) from the other books is a feed error, not information
+# a reference price older than this at the newest quote of the match is history, not the market (registry to 2026-10-12: 22 of
+# 1,004 selections priced on a Pinnacle quote 3 to 20 days old, the market at the close up to 20 points away)
+REF_MAX_AGE = timedelta(hours=72)
 
 
 def reference_price(per_book: dict[str, float]) -> float | None:
@@ -118,6 +121,10 @@ def build_market_views(quotes: list[OddsQuote], devig_method: str = "power", bet
     prices the match at all (Sisal on the feed skips it), each selection a reference book (Pinnacle) prices gets an estimated
     Sisal price, fair reference price x usual payout, under ESTIMATED_BOOK. The user checks the real price on Sisal."""
     quotes = latest_quotes(quotes)
+    if quotes:
+        newest = max(q.observed_at for q in quotes)
+        quotes = [q for q in quotes if newest - q.observed_at <= REF_MAX_AGE
+                  or not any(r in q.bookmaker.lower() for r in REFERENCE_BOOKS)]
     if estimate and bettable and any(_bettable(q.bookmaker, bettable) for q in quotes):
         estimate = None  # Sisal prices the match: a selection it does not offer is not on offer
     by_ref: dict[str, list[OddsQuote]] = {}
