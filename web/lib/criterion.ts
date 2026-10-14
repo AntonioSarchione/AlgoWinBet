@@ -17,6 +17,7 @@
 //                   at the close (results far worse than the measured value: something is wrong)
 // Every interval is grouped by match: selections of the same match move together, so they are not counted as independent.
 import { parseJSON, type PaperLeg, type PaperSlip } from "./db";
+import { NATIONAL_COMPETITIONS } from "./optimizer";
 
 export const CRITERION = {
   n: 300, fixtures: 100, weeks: 8, coverage: 0.85, minEv: 0.015, perMarket: 50, slips: 50, nCal: 1000, maxBias: 0.02, minBand: 20,
@@ -313,4 +314,23 @@ export function byVersion(all: PaperLeg[]) {
     groups.set(k, [...(groups.get(k) ?? []), l]);
   }
   return [...groups.entries()].map(([version, legs]) => ({ version, ...valueSummary(legs) })).sort((a, b) => b.n - a.n);
+}
+
+// the 7 domestic leagues (comboeval.py DOMESTIC): the value bets by kind of competition, since the national teams' windows
+// can carry most of them (to 2026-10-12: 39 of 70 in the Nations League) and stop for months
+export const DOMESTIC_LEAGUES = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1", "Primeira Liga", "Eredivisie"];
+export const areaOf = (competition: string) =>
+  NATIONAL_COMPETITIONS.some((k) => competition.toLowerCase().includes(k.toLowerCase())) ? "Nazionali"
+  : DOMESTIC_LEAGUES.includes(competition) ? "Campionati" : "Coppe europee e altro";
+
+export function byArea(all: PaperLeg[]) {
+  const groups = new Map<string, PaperLeg[]>();
+  for (const l of all.filter(isValue)) {
+    const k = areaOf(l.competition);
+    groups.set(k, [...(groups.get(k) ?? []), l]);
+  }
+  return ["Campionati", "Nazionali", "Coppe europee e altro"].filter((k) => groups.has(k)).map((area) => {
+    const v = valueSummary(groups.get(area)!);
+    return { area, ...v, fixtures: new Set(v.legs.map((l) => l.fixture_id)).size };
+  });
 }

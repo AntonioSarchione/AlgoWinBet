@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, Layers, PieChart, Scale, Target, TrendingDown, Wallet, XCircle } from "lucide-react";
 import { paperPlayers, paperRegistry, parseJSON, type PaperLeg, type PaperSlip } from "@/lib/db";
 import { PlayerRegistry } from "@/app/_components/PlayerRegistry";
-import { byVersion, CRITERION, evaluate, type Interval, type State } from "@/lib/criterion";
+import { byArea, byVersion, CRITERION, evaluate, type Interval, type State } from "@/lib/criterion";
 import { dayTime, pct, signed } from "@/app/_components/format";
 import { Empty, Fold } from "@/app/_components/ui";
 import { legResults, SlipLegs, type SlipLeg } from "@/app/_components/SlipLegs";
@@ -72,10 +72,17 @@ function stats(legs: PaperLeg[]): Stats {
 const tone = (x: number | null) => (x == null ? "" : x >= 0 ? "pos" : "neg");
 
 // the 95% range of a mean (grouped by match, as the criterion): is the number already a signal or still noise?
-function Range({ i }: { i: Interval }) {
-  if (i.lo == null || i.hi == null) return <span className="reg-range muted">forbice non ancora calcolabile</span>;
+function Range({ i, short = false }: { i: Interval; short?: boolean }) {
+  if (i.lo == null || i.hi == null) return <span className="reg-range muted">{short ? "forbice –" : "forbice non ancora calcolabile"}</span>;
   const half = (i.hi - i.lo) / 2;
   const [cls, say] = i.lo > 0 ? ["pos", "sopra zero oltre il caso"] : i.hi < 0 ? ["neg", "sotto zero oltre il caso"] : ["", "ancora rumore: lo zero è dentro"];
+  if (short) { // in a table: the half-width and the verdict, the bounds on hover
+    return (
+      <span className="reg-range" title={`da ${signed(i.lo)} a ${signed(i.hi)}: ${say}`}>
+        <span className="num">±{(half * 100).toFixed(1)}%</span> · <span className={cls}>{i.lo > 0 ? "sopra zero" : i.hi < 0 ? "sotto zero" : "rumore"}</span>
+      </span>
+    );
+  }
   return (
     <span className="reg-range">
       <b className="num">±{(half * 100).toFixed(1)}%</b> · da <span className="num">{signed(i.lo)}</span> a <span className="num">{signed(i.hi)}</span>
@@ -134,6 +141,7 @@ export default async function Registro({ searchParams }: { searchParams: Promise
   const crit = evaluate(reg.legs, reg.slips);
   const cal = crit.bands;
   const versions = byVersion(reg.legs);
+  const areas = byArea(reg.legs);
   const V = STATE[crit.verdict];
   const legResult = legResults(reg.legs);
   const settledSlips = reg.slips.filter((s) => s.result && s.result !== "non valutabile");
@@ -284,6 +292,36 @@ export default async function Registro({ searchParams }: { searchParams: Promise
           </p>
         </Fold>
       </div>
+
+      <Fold title="Nazionali e campionati" side={<span className="count">giocate di valore</span>}>
+        <div className="table-wrap">
+          <table className="compact stack-table">
+            <thead>
+              <tr>
+                <th>Competizioni</th><th className="num">Chiuse</th><th className="num">Partite</th><th className="num">Valore sul prezzo Pinnacle</th>
+                <th className="num">CLV Sisal</th><th className="num">Rendimento</th>
+              </tr>
+            </thead>
+            <tbody>
+              {areas.map((r) => (
+                <tr key={r.area}>
+                  <td><b>{r.area}</b></td>
+                  <td className="num" data-l="Chiuse">{r.n}</td>
+                  <td className="num" data-l="Partite">{r.fixtures}</td>
+                  <td className="num" data-l="Valore sul prezzo Pinnacle"><span className="reg-cell"><span className={tone(r.ev.mean)}>{signed(r.ev.mean)}</span><Range i={r.ev} short /></span></td>
+                  <td className="num" data-l="CLV Sisal"><span className="reg-cell"><span className={tone(r.clv.mean)}>{signed(r.clv.mean)}</span><Range i={r.clv} short /></span></td>
+                  <td className="num" data-l="Rendimento">{signed(r.roi.mean)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="note card-pad">
+          Le nazionali giocano solo in alcune finestre dell&apos;anno: se il vantaggio vale anche per i campionati, regge quando le nazionali si fermano.
+          Forbice al 95% raggruppata per partita, come nel criterio (gli estremi passando sopra): «sopra zero» vuol dire oltre il caso, «rumore» che lo
+          zero è ancora dentro. Le giocate senza chiusura Pinnacle contano 0.
+        </p>
+      </Fold>
 
       <Fold title="Per tipo di selezione" side={<span className="count">1 unità a giocata</span>}>
         <div className="table-wrap">
