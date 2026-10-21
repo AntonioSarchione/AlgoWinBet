@@ -52,7 +52,7 @@ def data_quality(state: MatchState, model: DixonColes, view: MarketView, stale: 
 
 
 def classify(ev: float, ev_lower: float, edge: float | None, unc: float, dq: float, has_market: bool, cfg: Config,
-             p: float | None = None) -> OpportunityStatus:
+             p: float | None = None, sharp: bool = True) -> OpportunityStatus:
     t = cfg.thresholds
     if dq < t.min_dq_valid:
         return S.INVALID
@@ -61,8 +61,10 @@ def classify(ev: float, ev_lower: float, edge: float | None, unc: float, dq: flo
     if p is not None and p < t.min_probability:
         return S.NEUTRAL
     if ev < t.min_ev:
-        # no edge, but a likely outcome Sisal prices at (about) the fair odds of a sharp reference is still useful in a slip
-        if has_market and ev >= t.fair_ev and dq >= t.min_dq_candidate and unc <= t.max_uncertainty:
+        # no edge, but a likely outcome Sisal prices at (about) the fair odds of a sharp reference is still useful in a slip.
+        # Only against a sharp reference: to 2026-10-14, 159 of 1,197 "fair" selections had no Pinnacle price at all, so
+        # they were fair against Sisal's own price (EV -2.5% there) and could never have a close to be measured on
+        if has_market and sharp and ev >= t.fair_ev and dq >= t.min_dq_candidate and unc <= t.max_uncertainty:
             return S.FAIR
         return S.NEUTRAL
     # ev >= min_ev from here
@@ -234,7 +236,7 @@ def analyze_fixture(
         ev_lo = p_lo * v.best_odds - 1
         if has_mkt:  # prudent EV also trusts only part of the edge over the market (optimizer.edge_shrink, from the replay)
             ev_lo = min(ev_lo, min(p_fin, p_mkt + cfg.optimizer.edge_shrink * (p_fin - p_mkt)) * v.best_odds - 1)
-        status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg, p_fin)
+        status = classify(ev_v, ev_lo, edge_v, unc, dq["total"], has_mkt, cfg, p_fin, sharp=v.sharp)
         if stale and status in (S.STRONG, S.CANDIDATE):
             status = S.WATCH  # the edge may only be a not-yet-updated price: verify the current quote first
         out.append(Opportunity(

@@ -55,8 +55,10 @@ def build() -> dict:
     fxs = mock.list_fixtures(None, mock.as_of, mock.as_of + timedelta(days=3))
     s.save_fixtures("mock", fxs, mock.as_of - timedelta(days=1))
     for f in fxs:
-        s.save_quotes("mock", mock.get_quotes(f.id))
+        # BookC stands in for Pinnacle (a fair selection needs a sharp reference), BookA and BookB for Sisal
+        s.save_quotes("mock", [q.model_copy(update={"bookmaker": "pinnacle"}) if q.bookmaker == "BookC" else q for q in mock.get_quotes(f.id)])
     cfg = Config()
+    cfg.bet_bookmakers = ["BookA", "BookB"]
     cfg.ensemble.quote_window_hours = 72
     t = cfg.thresholds
     t.min_ev, t.max_uncertainty, t.min_dq_candidate, t.min_dq_strong, t.min_edge = 0.0, 0.5, 0.0, 0.0, -1.0

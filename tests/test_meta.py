@@ -134,3 +134,23 @@ def test_a_reference_quote_days_old_is_not_the_market():
     assert draw(sisal + fresh).p_market == draw(sisal + fresh).per_book["pinnacle"]
     # eight days old: only Sisal's own price is left, so Sisal shows no value against itself
     assert set(draw(sisal + old).per_book) == {"sisal.it"}
+
+
+def test_a_fair_selection_needs_a_sharp_reference():
+    from datetime import datetime, timezone
+
+    from algowinbet.opportunity import classify
+    from algowinbet.pricing import build_market_views
+    from algowinbet.domain import OpportunityStatus as S
+    at = datetime(2026, 10, 14, 6, tzinfo=timezone.utc)
+
+    def q(book, sel, odds):
+        return OddsQuote(fixture_id="x", market_code="TOTAL_GOALS", selection=sel, line=2.5, bookmaker=book, odds=odds, observed_at=at)
+    sisal = [q("sisal.it", "OVER", 1.9), q("sisal.it", "UNDER", 1.9)]
+    pin = [q("pinnacle", "OVER", 1.95), q("pinnacle", "UNDER", 1.95)]
+    over = lambda qs: next(v for v in build_market_views(qs, bettable=["sisal"]) if v.ref.selection == "OVER")  # noqa: E731
+    assert over(sisal + pin).sharp and not over(sisal).sharp
+    cfg = Config()
+    args = (-0.01, -0.05, -0.01, 0.02, 0.9, True, cfg, 0.52)
+    assert classify(*args, sharp=True) == S.FAIR
+    assert classify(*args, sharp=False) == S.NEUTRAL  # fair only against Sisal's own price: not a fair selection

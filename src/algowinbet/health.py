@@ -146,14 +146,20 @@ def run_health(store, now: datetime | None = None, model_version: str | None = N
     checks.append(Check("settle", "Chiusura del registro", "error" if stuck else "warn" if late > 50 else "ok",
                         f"{stuck} selezioni aperte da più di 8 giorni · {late} da più di 2 (corner e cartellini attendono fino a 6)"))
 
-    # 5. closing prices of the last week's settlements
-    row = db.execute("SELECT COUNT(*), SUM(close_fair IS NOT NULL), SUM(close_odds IS NOT NULL) FROM paper_legs "
-                     "WHERE result IN ('won','lost','void') AND settled_at >= ?", ((now - timedelta(days=7)).isoformat(),)).fetchone() \
-        if _one(db, "SELECT COUNT(*) FROM paper_legs") is not None else (0, 0, 0)
+    # 5. closing prices of the last week's settlements: the criterion's coverage counts the value bets only (a fair selection on
+    # a line Pinnacle does not price has no close by construction), so that is what the warning follows
+    has = _one(db, "SELECT COUNT(*) FROM paper_legs") is not None
+    q = ("SELECT COUNT(*), SUM(close_fair IS NOT NULL), SUM(close_odds IS NOT NULL) FROM paper_legs "
+         "WHERE result IN ('won','lost','void') AND settled_at >= ?")
+    since = ((now - timedelta(days=7)).isoformat(),)
+    row = db.execute(q, since).fetchone() if has else (0, 0, 0)
+    vrow = db.execute(q + " AND status IN ('STRONG','CANDIDATE')", since).fetchone() if has else (0, 0, 0)
     n, pin, sis = (row[0] or 0), (row[1] or 0), (row[2] or 0)
-    share = pin / n if n else 1.0
-    checks.append(Check("close", "Prezzi di chiusura", "warn" if n >= 20 and share < 0.85 else "ok",
-                        f"ultimi 7 giorni: Pinnacle {pin}/{n}, Sisal {sis}/{n} (il criterio chiede ≥ 85% Pinnacle)"))
+    vn, vpin = (vrow[0] or 0), (vrow[1] or 0)
+    share = vpin / vn if vn else 1.0
+    checks.append(Check("close", "Prezzi di chiusura", "warn" if vn >= 20 and share < 0.85 else "ok",
+                        f"ultimi 7 giorni, giocate di valore: Pinnacle {vpin}/{vn} (il criterio chiede ≥ 85%) · "
+                        f"tutte: Pinnacle {pin}/{n}, Sisal {sis}/{n}"))
 
     # 6. weekly quality and meta-model of the current version
     t = _ts(_one(db, "SELECT MAX(created_at) FROM quality_runs"))

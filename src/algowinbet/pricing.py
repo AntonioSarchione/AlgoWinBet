@@ -68,6 +68,12 @@ class MarketView:
     source_level: str
     per_book: dict[str, float] = field(default_factory=dict)
 
+    @property
+    def sharp(self) -> bool:
+        """p_market is a reference book's price (Pinnacle), not only the other books' (Sisal's own)."""
+        return self.p_market is not None and any(any(r in b.lower() for r in REFERENCE_BOOKS) and abs(p - self.p_market) < 1e-12
+                                                 for b, p in self.per_book.items())
+
 
 def latest_quotes(quotes: list[OddsQuote]) -> list[OddsQuote]:
     """Latest quote per (bookmaker, selection): the price observable at the cutoff."""
